@@ -19,11 +19,11 @@ const personSchema = new mongoose.Schema({
   
   // Child ID - Auto-generated for minors (format: PARENT_ID-01, PARENT_ID-02, etc.)
   childId: {
-    type: String,
-    required: false,
-    unique: true,
-    sparse: true,
-    match: [/^[0-9]{11}-[0-9]{2}$/, 'معرف الطفل يجب أن يكون بالصيغة: XXXXXXXXXXX-XX']
+  type: String,
+  required: false,
+  unique: true,
+  sparse: true,
+  
   },
   
   // Is Minor flag (age < 18)

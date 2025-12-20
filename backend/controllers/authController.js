@@ -122,24 +122,29 @@ exports.signup = async (req, res) => {
     }
 
     if (!isMinor) {
-      console.log('🔍 Checking for existing person (adult)...');
-      const existingPerson = await Person.findOne({ nationalId });
-      if (existingPerson) {
-        console.log('❌ National ID already exists');
-        return res.status(400).json({
-          success: false,
-          message: 'رقم الهوية الوطنية مستخدم بالفعل'
-        });
-      }
-    }
+  console.log('🔍 Checking for existing person (adult)...');
+  console.log('🔎 National ID being checked:', nationalId);  // ← أضف هالسطر
+  console.log('🔎 National ID type:', typeof nationalId);    // ← وهالسطر
+  
+  const existingPerson = await Person.findOne({ nationalId });
+  if (existingPerson) {
+    console.log('❌ National ID already exists');
+    console.log('🔎 Existing person:', existingPerson);  // ← أضف هالسطر
+    return res.status(400).json({
+      success: false,
+      message: 'رقم الهوية الوطنية مستخدم بالفعل'
+    });
+  }
+}
 
     console.log('✅ Step 3: No duplicate accounts found');
 
     // ========================================
     // 4. التحقق من صحة تاريخ الميلاد
     // ========================================
-    const birthDate = new Date(dateOfBirth);
+     const birthDate = new Date(dateOfBirth);
     const today = new Date();
+    
     if (birthDate >= today) {
       console.log('❌ Invalid birth date - future date');
       return res.status(400).json({
@@ -148,16 +153,23 @@ exports.signup = async (req, res) => {
       });
     }
 
-    const age = today.getFullYear() - birthDate.getFullYear();
-    if (age < 1 || age > 120) {
-      console.log('❌ Invalid age:', age);
+    // حساب العمر بالأيام للدقة (يسمح بحديثي الولادة)
+    const ageInDays = Math.floor((today - birthDate) / (1000 * 60 * 60 * 24));
+    const ageInYears = today.getFullYear() - birthDate.getFullYear();
+
+    // يسمح بالتسجيل من عمر يوم واحد (أو حتى 0 يوم) لغاية 120 سنة
+    if (ageInDays < 0 || ageInYears > 120) {
+      console.log('❌ Invalid age - days:', ageInDays, 'years:', ageInYears);
       return res.status(400).json({
         success: false,
         message: 'تاريخ الميلاد غير صحيح'
       });
     }
 
-    console.log('✅ Step 4: Birth date validated, age:', age);
+    console.log('✅ Step 4: Birth date validated');
+    console.log('   Age in days:', ageInDays);
+    console.log('   Age in years:', ageInYears);
+    console.log('   Is newborn:', ageInDays < 7 ? 'Yes' : 'No');
 
     // ========================================
     // 5. Generate Child ID for Minors (SIMPLE - NO UUID)
