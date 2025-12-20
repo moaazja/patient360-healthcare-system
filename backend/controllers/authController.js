@@ -45,7 +45,7 @@ exports.signup = async (req, res) => {
       chronicDiseases,
       familyHistory,
       
-      // Emergency Contact - UPDATED TO ACCEPT OBJECT
+      // Emergency Contact
       emergencyContact,
       emergencyContactName,
       emergencyContactRelationship,
@@ -55,18 +55,16 @@ exports.signup = async (req, res) => {
     console.log('✅ Step 1: Data extracted from body');
 
     // ========================================
-    // 1. Extract Emergency Contact (support both formats)
+    // 1. Extract Emergency Contact
     // ========================================
     let emergencyName, emergencyRelationship, emergencyPhone;
     
     if (emergencyContact && typeof emergencyContact === 'object') {
-      // NEW FORMAT: emergencyContact object
       emergencyName = emergencyContact.name;
       emergencyRelationship = emergencyContact.relationship;
       emergencyPhone = emergencyContact.phone;
       console.log('✅ Emergency contact format: OBJECT');
     } else {
-      // OLD FORMAT: separate fields
       emergencyName = emergencyContactName;
       emergencyRelationship = emergencyContactRelationship;
       emergencyPhone = emergencyContactPhone;
@@ -84,7 +82,6 @@ exports.signup = async (req, res) => {
       });
     }
 
-    // Validate ID based on isMinor flag
     if (isMinor && !parentNationalId) {
       console.log('❌ Missing parent national ID for minor');
       return res.status(400).json({
@@ -103,10 +100,9 @@ exports.signup = async (req, res) => {
 
     if (!emergencyName || !emergencyRelationship || !emergencyPhone) {
       console.log('❌ Missing emergency contact');
-      console.log('Emergency data:', { emergencyName, emergencyRelationship, emergencyPhone });
       return res.status(400).json({
         success: false,
-        message: 'معلومات جهة الاتصال للطوارئ مطلوبة (الاسم، صلة القرابة، رقم الهاتف)'
+        message: 'معلومات جهة الاتصال للطوارئ مطلوبة'
       });
     }
 
@@ -125,7 +121,6 @@ exports.signup = async (req, res) => {
       });
     }
 
-    // Check national ID for adults only
     if (!isMinor) {
       console.log('🔍 Checking for existing person (adult)...');
       const existingPerson = await Person.findOne({ nationalId });
@@ -165,24 +160,41 @@ exports.signup = async (req, res) => {
     console.log('✅ Step 4: Birth date validated, age:', age);
 
     // ========================================
-    // 5. Generate Child ID for Minors
+    // 5. Generate Child ID for Minors (SIMPLE - NO UUID)
     // ========================================
     let childId = null;
     if (isMinor) {
-      console.log('🔍 Generating child ID for minor...');
-      // Find existing children of this parent
-      const existingChildren = await Person.find({ 
-        parentNationalId 
-      }).sort({ childId: -1 });
+      console.log('🔍 Generating unique child ID for minor...');
       
-      let childNumber = 1;
-      if (existingChildren.length > 0 && existingChildren[0].childId) {
-        const lastNumber = parseInt(existingChildren[0].childId.split('-')[1]);
-        childNumber = lastNumber + 1;
+      // Try sequential numbers from 1 to 999
+      let foundUniqueId = false;
+      
+      for (let childNumber = 1; childNumber <= 999; childNumber++) {
+        // Format: parentId-001, parentId-002, etc.
+        const candidateId = `${parentNationalId}-${childNumber.toString().padStart(3, '0')}`;
+        
+        // Check if this childId already exists in database
+        const existingChild = await Person.findOne({ childId: candidateId });
+        
+        if (!existingChild) {
+          // This ID is available!
+          childId = candidateId;
+          foundUniqueId = true;
+          console.log('✅ Generated unique child ID:', childId);
+          break;
+        }
+        
+        console.log(`⚠️  Child ID ${candidateId} already exists, trying next...`);
       }
       
-      childId = `${parentNationalId}-${childNumber.toString().padStart(2, '0')}`;
-      console.log('✅ Generated child ID:', childId);
+      if (!foundUniqueId) {
+        // This should never happen (999 children limit!)
+        console.log('❌ Could not generate unique child ID - limit reached');
+        return res.status(500).json({
+          success: false,
+          message: 'تم الوصول للحد الأقصى من الأطفال المسجلين لهذا الوالد'
+        });
+      }
     }
 
     // ========================================
@@ -198,7 +210,6 @@ exports.signup = async (req, res) => {
       address: address?.trim()
     };
 
-    // Add ID fields based on minor status
     if (isMinor) {
       personData.nationalId = null;
       personData.parentNationalId = parentNationalId;
@@ -206,8 +217,8 @@ exports.signup = async (req, res) => {
       personData.isMinor = true;
     } else {
       personData.nationalId = nationalId;
-      personData.parentNationalId = null;
-      personData.childId = null;
+      personData.parentNationalId = undefined;  
+personData.childId = undefined;        
       personData.isMinor = false;
     }
 
@@ -245,7 +256,6 @@ exports.signup = async (req, res) => {
     if (weight) patientData.weight = parseFloat(weight);
     if (smokingStatus) patientData.smokingStatus = smokingStatus;
     
-    // Handle arrays
     if (allergies && Array.isArray(allergies)) {
       patientData.allergies = allergies.filter(item => item && item.trim());
     } else if (allergies && typeof allergies === 'string' && allergies.trim()) {
@@ -309,7 +319,6 @@ exports.signup = async (req, res) => {
     console.error('Error Message:', error.message);
     console.error('Error Stack:', error.stack);
 
-    // معالجة أخطاء Mongoose Validation
     if (error.name === 'ValidationError') {
       console.error('Validation Error Details:', error.errors);
       const messages = Object.values(error.errors).map(err => err.message);
@@ -319,14 +328,14 @@ exports.signup = async (req, res) => {
       });
     }
 
-    // معالجة أخطاء التكرار
     if (error.code === 11000) {
       console.error('Duplicate Key Error:', error.keyPattern);
       const field = Object.keys(error.keyPattern)[0];
       const arabicFields = {
         email: 'البريد الإلكتروني',
         nationalId: 'رقم الهوية الوطنية',
-        phoneNumber: 'رقم الهاتف'
+        phoneNumber: 'رقم الهاتف',
+        childId: 'معرف الطفل'
       };
       return res.status(400).json({
         success: false,
@@ -341,11 +350,10 @@ exports.signup = async (req, res) => {
   }
 };
 
-// Login remains the same...
+// Login and other functions remain the same...
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
-
     const account = await Account.findOne({ email: email.toLowerCase() });
 
     if (!account) {
