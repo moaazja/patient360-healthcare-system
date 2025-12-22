@@ -16,6 +16,7 @@ connectDB();
 const { apiLimiter } = require('./middleware/security');
 const authRoutes = require('./routes/auth');
 const patientRoutes = require('./routes/patient'); // ← NEW
+const doctorRoutes = require('./routes/doctor');
 
 // Initialize express app
 const app = express();
@@ -42,7 +43,8 @@ app.use('/api/', apiLimiter);
 
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/patient', patientRoutes); // ← NEW
+app.use('/api/patient', patientRoutes); 
+app.use('/api/doctor', doctorRoutes);
 
 // Welcome route
 app.get('/', (req, res) => {
@@ -90,7 +92,8 @@ app.listen(PORT, () => {
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`📊 API URL: http://localhost:${PORT}`);
   console.log(`🔐 Auth Routes: http://localhost:${PORT}/api/auth`);
-  console.log(`👤 Patient Routes: http://localhost:${PORT}/api/patient`); // ← NEW
+  console.log(`👤 Patient Routes: http://localhost:${PORT}/api/patient`); 
+  console.log(`👨‍⚕️ Doctor Routes: http://localhost:${PORT}/api/doctor`);
   console.log('✅ CORS enabled for http://localhost:3000');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 });

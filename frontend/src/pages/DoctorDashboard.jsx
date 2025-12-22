@@ -41,30 +41,47 @@ const DoctorDashboard = () => {
     duration: ''
   });
 
-  useEffect(() => {
-  const userData = localStorage.getItem('user');
+useEffect(() => {
+  const loadData = async () => {
+    const userData = localStorage.getItem('user');
+    
+    if (!userData) {
+      alert('يجب تسجيل الدخول أولاً');
+      navigate('/');
+      return;
+    }
+    
+    const parsedUser = JSON.parse(userData);
+    
+    if (!parsedUser.roles || !parsedUser.roles.includes('doctor')) {
+      alert('غير مصرح لك بالوصول إلى هذه الصفحة');
+      navigate('/');
+      return;
+    }
+    
+    setUser(parsedUser);
+    
+    // ✅ Load patients from Backend
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('http://localhost:5000/api/doctor/patients', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setPatients(data.patients);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading patients:', error);
+    }
+  };
   
-  if (!userData) {
-    alert('يجب تسجيل الدخول أولاً');
-    navigate('/');
-    return;
-  }
-  
-  const parsedUser = JSON.parse(userData);
-  
-  if (!parsedUser.roles || !parsedUser.roles.includes('doctor')) {
-    alert('غير مصرح لك بالوصول إلى هذه الصفحة');
-    navigate('/');
-    return;
-  }
-  
-  setUser(parsedUser);
-  
-  // Load patients from localStorage
-  const patientsData = localStorage.getItem('patients');
-  if (patientsData) {
-    setPatients(JSON.parse(patientsData));
-  }
+  loadData();
 }, [navigate]);
 
   // ✅ CHANGE #3: Use service for logout
@@ -77,7 +94,7 @@ const DoctorDashboard = () => {
     }
   };
 
-  const handleSearchPatient = async () => {
+const handleSearchPatient = async () => {
   if (!searchId.trim()) {
     alert('الرجاء إدخال الرقم الوطني للمريض');
     return;
@@ -85,18 +102,26 @@ const DoctorDashboard = () => {
   
   setLoading(true);
   
-  // ✅ Use localStorage instead of service
-  const patientsData = localStorage.getItem('patients');
-  let patient = null;
-  
-  if (patientsData) {
-    const allPatients = JSON.parse(patientsData);
-    patient = allPatients.find(p => p.nationalId === searchId);
-  }
-  
-  setLoading(false);
-  
-  if (patient) {
+  try {
+    // ✅ Search from Backend API
+    const token = localStorage.getItem('token');
+    const response = await fetch(`http://localhost:5000/api/doctor/search/${searchId}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    const data = await response.json();
+    
+    if (!response.ok || !data.success) {
+      alert(data.message || 'لم يتم العثور على المريض');
+      setLoading(false);
+      return;
+    }
+    
+    const patient = data.patient;
+    
+    // Set patient data
     setSelectedPatient(patient);
     setVitalSigns(patient.vitalSigns || {
       bloodPressureSystolic: '',
@@ -113,13 +138,25 @@ const DoctorDashboard = () => {
     setShowSearchModal(false);
     setSearchId('');
     
-    // Refresh patients list
-    const refreshedData = localStorage.getItem('patients');
-    if (refreshedData) {
-      setPatients(JSON.parse(refreshedData));
+    // Refresh patients list from backend
+    const patientsResponse = await fetch('http://localhost:5000/api/doctor/patients', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+    
+    if (patientsResponse.ok) {
+      const patientsData = await patientsResponse.json();
+      if (patientsData.success) {
+        setPatients(patientsData.patients);
+      }
     }
-  } else {
-    alert('لم يتم العثور على المريض');
+    
+  } catch (error) {
+    console.error('Error:', error);
+    alert('حدث خطأ في البحث عن المريض');
+  } finally {
+    setLoading(false);
   }
 };
 
@@ -158,60 +195,89 @@ const handleSavePatientData = async () => {
   
   setSaving(true);
   
-  const ecgResults = ecgFile ? {
-    fileName: ecgFile.name,
-    uploadDate: new Date().toISOString(),
-    heartRate: parseInt(vitalSigns.heartRate) || 0,
-    rhythm: "Sinus Rhythm",
-    prInterval: "160 ms",
-    qrsDuration: "90 ms",
-    qtInterval: "380 ms",
-    axis: "Normal Axis",
-    findings: aiDiagnosis || "تم رفع ملف ECG - في انتظار التحليل",
-    interpretation: aiDiagnosis ? "تم التحليل بواسطة الذكاء الاصطناعي" : "قيد المراجعة"
-  } : null;
+  try {
+    const ecgResults = ecgFile ? {
+      fileName: ecgFile.name,
+      uploadDate: new Date().toISOString(),
+      heartRate: parseInt(vitalSigns.heartRate) || 0,
+      rhythm: "Sinus Rhythm",
+      prInterval: "160 ms",
+      qrsDuration: "90 ms",
+      qtInterval: "380 ms",
+      axis: "Normal Axis",
+      findings: aiDiagnosis || "تم رفع ملف ECG - في انتظار التحليل",
+      interpretation: aiDiagnosis ? "تم التحليل بواسطة الذكاء الاصطناعي" : "قيد المراجعة"
+    } : null;
 
-  const aiPrediction = (vitalSigns.bloodPressureSystolic || aiDiagnosis) ? {
-    riskLevel: getRiskLevel(vitalSigns),
-    riskScore: calculateRiskScore(vitalSigns),
-    predictions: {
-      heartDisease: calculateHeartDiseaseRisk(vitalSigns),
-      diabetes: calculateDiabetesRisk(vitalSigns),
-      hypertension: calculateHypertensionRisk(vitalSigns),
-      stroke: calculateStrokeRisk(vitalSigns)
-    },
-    recommendations: generateRecommendations(vitalSigns, doctorOpinion),
-    modelConfidence: 85,
-    analysisDate: new Date().toISOString()
-  } : null;
-  
-  // ✅ Update patient in localStorage
-  const patientsData = localStorage.getItem('patients');
-  if (patientsData) {
-    const allPatients = JSON.parse(patientsData);
-    const patientIndex = allPatients.findIndex(p => p.nationalId === selectedPatient.nationalId);
+    const aiPrediction = (vitalSigns.bloodPressureSystolic || aiDiagnosis) ? {
+      riskLevel: getRiskLevel(vitalSigns),
+      riskScore: calculateRiskScore(vitalSigns),
+      predictions: {
+        heartDisease: calculateHeartDiseaseRisk(vitalSigns),
+        diabetes: calculateDiabetesRisk(vitalSigns),
+        hypertension: calculateHypertensionRisk(vitalSigns),
+        stroke: calculateStrokeRisk(vitalSigns)
+      },
+      recommendations: generateRecommendations(vitalSigns, doctorOpinion),
+      modelConfidence: 85,
+      analysisDate: new Date().toISOString()
+    } : null;
     
-    if (patientIndex !== -1) {
-      allPatients[patientIndex] = {
-        ...allPatients[patientIndex],
+    // ✅ Save to Backend API
+    const token = localStorage.getItem('token');
+    const response = await fetch(`http://localhost:5000/api/doctor/patient/${selectedPatient.nationalId}`, {
+      method: 'PUT',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
         vitalSigns,
         doctorOpinion,
         ecgResults,
         aiPrediction,
-        prescribedMedications: medications,
-        lastUpdatedBy: `د. ${user.firstName} ${user.lastName}`,
-        lastUpdated: new Date().toISOString()
-      };
-      
-      localStorage.setItem('patients', JSON.stringify(allPatients));
-      setSelectedPatient(allPatients[patientIndex]);
-      setPatients(allPatients);
-      
+        prescribedMedications: medications
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (response.ok && data.success) {
       alert('تم حفظ البيانات بنجاح ✅');
+      
+      // Update selected patient
+      setSelectedPatient({
+        ...selectedPatient,
+        vitalSigns,
+        doctorOpinion,
+        ecgResults,
+        aiPrediction,
+        prescribedMedications: medications
+      });
+      
+      // Refresh patients list
+      const patientsResponse = await fetch('http://localhost:5000/api/doctor/patients', {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (patientsResponse.ok) {
+        const patientsData = await patientsResponse.json();
+        if (patientsData.success) {
+          setPatients(patientsData.patients);
+        }
+      }
+    } else {
+      alert(data.message || 'حدث خطأ في حفظ البيانات');
     }
+    
+  } catch (error) {
+    console.error('Error saving patient data:', error);
+    alert('حدث خطأ في حفظ البيانات');
+  } finally {
+    setSaving(false);
   }
-  
-  setSaving(false);
 };
 
   // Helper functions for risk calculation
