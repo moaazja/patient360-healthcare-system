@@ -1,5 +1,5 @@
 // src/pages/PatientDashboard.jsx
-// ✅ FINAL VERSION - Uses Backend API with MongoDB
+// ✅ FINAL VERSION - Uses Backend API with MongoDB - CLEANED
 
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -14,6 +14,7 @@ import '../styles/PatientDashboard.css';
  * ✅ Supports minors (childId, parentNationalId)
  * ✅ Real patient data from database
  * ✅ JWT authentication
+ * ✅ No unused variables
  */
 const PatientDashboard = () => {
   const navigate = useNavigate();
@@ -33,21 +34,11 @@ const PatientDashboard = () => {
   const [selectedVisit, setSelectedVisit] = useState(null);
   const [showVisitDetails, setShowVisitDetails] = useState(false);
   
-  // Visits data and filters
+  // Visits data
   const [visits, setVisits] = useState([]);
-  const [filteredVisits, setFilteredVisits] = useState([]);
-  const [filters, setFilters] = useState({
-    startDate: '',
-    endDate: '',
-    doctorId: '',
-    searchTerm: ''
-  });
   
   // Active section state
   const [activeSection, setActiveSection] = useState('overview');
-  
-  // Doctors list for filter dropdown
-  const [doctors, setDoctors] = useState([]);
 
   /**
    * Opens modal dialog
@@ -102,126 +93,14 @@ const PatientDashboard = () => {
       setUser(currentUser);
       
       // Generate visits from patient data (currently empty, will be populated by doctor)
-      const realVisits = generateVisitsFromPatientData(currentUser);
+      const realVisits = [];
       setVisits(realVisits);
-      setFilteredVisits(realVisits);
-      
-      // Load doctors list (mock for now)
-      const mockDoctors = generateMockDoctors();
-      setDoctors(mockDoctors);
       
       setLoading(false);
     };
     
     loadPatientData();
   }, [navigate]);
-
-  /**
-   * Generates visits from patient data
-   * Will be populated by doctor visits in the future
-   */
-  const generateVisitsFromPatientData = (patient) => {
-    if (!patient) return [];
-
-    // Currently returns empty array
-    // Will be populated when doctor creates visits
-    return [];
-  };
-
-  /**
-   * Generates mock doctors data
-   */
-  const generateMockDoctors = () => {
-    return [
-      {
-        _id: 1001,
-        personId: 2001,
-        firstName: 'أحمد',
-        lastName: 'محمود',
-        specialization: 'Cardiologist',
-        medicalLicenseNumber: 'MD12345678'
-      },
-      {
-        _id: 1002,
-        personId: 2002,
-        firstName: 'سارة',
-        lastName: 'العلي',
-        specialization: 'Cardiac Surgeon',
-        medicalLicenseNumber: 'MD87654321'
-      }
-    ];
-  };
-
-  /**
-   * Applies filters to visits list
-   */
-  useEffect(() => {
-    let filtered = [...visits];
-    
-    // Filter by date range
-    if (filters.startDate) {
-      filtered = filtered.filter(visit => 
-        new Date(visit.visitDate) >= new Date(filters.startDate)
-      );
-    }
-    if (filters.endDate) {
-      filtered = filtered.filter(visit => 
-        new Date(visit.visitDate) <= new Date(filters.endDate)
-      );
-    }
-    
-    // Filter by doctor
-    if (filters.doctorId) {
-      filtered = filtered.filter(visit => 
-        visit.doctorId === parseInt(filters.doctorId)
-      );
-    }
-    
-    // Filter by search term
-    if (filters.searchTerm) {
-      const searchLower = filters.searchTerm.toLowerCase();
-      filtered = filtered.filter(visit => 
-        (visit.chiefComplaint && visit.chiefComplaint.toLowerCase().includes(searchLower)) ||
-        (visit.diagnosis && visit.diagnosis.toLowerCase().includes(searchLower)) ||
-        (visit.doctorName && visit.doctorName.toLowerCase().includes(searchLower))
-      );
-    }
-    
-    // Sort by date (newest first)
-    filtered.sort((a, b) => new Date(b.visitDate) - new Date(a.visitDate));
-    
-    setFilteredVisits(filtered);
-  }, [filters, visits]);
-
-  /**
-   * Handles filter changes
-   */
-  const handleFilterChange = (filterName, value) => {
-    setFilters(prev => ({
-      ...prev,
-      [filterName]: value
-    }));
-  };
-
-  /**
-   * Resets all filters
-   */
-  const resetFilters = () => {
-    setFilters({
-      startDate: '',
-      endDate: '',
-      doctorId: '',
-      searchTerm: ''
-    });
-  };
-
-  /**
-   * Opens detailed view for a specific visit
-   */
-  const openVisitDetails = (visit) => {
-    setSelectedVisit(visit);
-    setShowVisitDetails(true);
-  };
 
   /**
    * Closes detailed view
@@ -801,9 +680,7 @@ const PatientDashboard = () => {
           </div>
         )}
 
-        {/* Other sections remain the same... */}
-        {/* Visits, Risk, Medications sections */}
-        
+        {/* Visits Section */}
         {activeSection === 'visits' && (
           <div className="section-content">
             <div className="card">
@@ -820,6 +697,7 @@ const PatientDashboard = () => {
           </div>
         )}
 
+        {/* Risk Section */}
         {activeSection === 'risk' && (
           <div className="section-content">
             <div className="card risk-card">
@@ -836,6 +714,7 @@ const PatientDashboard = () => {
           </div>
         )}
 
+        {/* Medications Section */}
         {activeSection === 'medications' && (
           <div className="section-content">
             <div className="card">

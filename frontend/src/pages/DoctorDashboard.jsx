@@ -5,13 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/common/Navbar';
 
-// ✅ CHANGE #1: Import services instead of using localStorage directly
-import { getCurrentUser, logout as logoutService } from '../services/authService';
-import { 
-  getPatientById, 
-  updatePatientMedicalData,
-  getAllPatients 
-} from '../services/patientService';
+import { logout as logoutService } from '../services/authService';
 
 const DoctorDashboard = () => {
   const navigate = useNavigate();
@@ -47,34 +41,31 @@ const DoctorDashboard = () => {
     duration: ''
   });
 
-  // ✅ CHANGE #2: Use service to get current user
   useEffect(() => {
-    const loadUser = async () => {
-      const currentUser = await getCurrentUser();
-      
-      if (!currentUser) {
-        alert('يجب تسجيل الدخول أولاً');
-        navigate('/');
-        return;
-      }
-      
-      if (currentUser.role !== 'doctor') {
-        alert('غير مصرح لك بالوصول إلى هذه الصفحة');
-        navigate('/');
-        return;
-      }
-      
-      setUser(currentUser);
-      
-      // Load all patients using service
-      const result = await getAllPatients();
-      if (result.success) {
-        setPatients(result.patients);
-      }
-    };
-    
-    loadUser();
-  }, [navigate]);
+  const userData = localStorage.getItem('user');
+  
+  if (!userData) {
+    alert('يجب تسجيل الدخول أولاً');
+    navigate('/');
+    return;
+  }
+  
+  const parsedUser = JSON.parse(userData);
+  
+  if (!parsedUser.roles || !parsedUser.roles.includes('doctor')) {
+    alert('غير مصرح لك بالوصول إلى هذه الصفحة');
+    navigate('/');
+    return;
+  }
+  
+  setUser(parsedUser);
+  
+  // Load patients from localStorage
+  const patientsData = localStorage.getItem('patients');
+  if (patientsData) {
+    setPatients(JSON.parse(patientsData));
+  }
+}, [navigate]);
 
   // ✅ CHANGE #3: Use service for logout
   const handleLogout = async () => {
@@ -86,47 +77,51 @@ const DoctorDashboard = () => {
     }
   };
 
-  // ✅ CHANGE #4: Use service to search patient
   const handleSearchPatient = async () => {
-    if (!searchId.trim()) {
-      alert('الرجاء إدخال الرقم الوطني للمريض');
-      return;
+  if (!searchId.trim()) {
+    alert('الرجاء إدخال الرقم الوطني للمريض');
+    return;
+  }
+  
+  setLoading(true);
+  
+  // ✅ Use localStorage instead of service
+  const patientsData = localStorage.getItem('patients');
+  let patient = null;
+  
+  if (patientsData) {
+    const allPatients = JSON.parse(patientsData);
+    patient = allPatients.find(p => p.nationalId === searchId);
+  }
+  
+  setLoading(false);
+  
+  if (patient) {
+    setSelectedPatient(patient);
+    setVitalSigns(patient.vitalSigns || {
+      bloodPressureSystolic: '',
+      bloodPressureDiastolic: '',
+      heartRate: '',
+      spo2: '',
+      bloodGlucose: '',
+      temperature: '',
+      weight: ''
+    });
+    setDoctorOpinion(patient.doctorOpinion || '');
+    setMedications(patient.prescribedMedications || []);
+    setView('patientDetail');
+    setShowSearchModal(false);
+    setSearchId('');
+    
+    // Refresh patients list
+    const refreshedData = localStorage.getItem('patients');
+    if (refreshedData) {
+      setPatients(JSON.parse(refreshedData));
     }
-    
-    setLoading(true);
-    
-    // Use service function instead of localStorage
-    const result = await getPatientById(searchId, true); // true = search by nationalId
-    
-    setLoading(false);
-    
-    if (result.success) {
-      const patient = result.patient;
-      setSelectedPatient(patient);
-      setVitalSigns(patient.vitalSigns || {
-        bloodPressureSystolic: '',
-        bloodPressureDiastolic: '',
-        heartRate: '',
-        spo2: '',
-        bloodGlucose: '',
-        temperature: '',
-        weight: ''
-      });
-      setDoctorOpinion(patient.doctorOpinion || '');
-      setMedications(patient.prescribedMedications || []);
-      setView('patientDetail');
-      setShowSearchModal(false);
-      setSearchId('');
-      
-      // Refresh patients list
-      const patientsResult = await getAllPatients();
-      if (patientsResult.success) {
-        setPatients(patientsResult.patients);
-      }
-    } else {
-      alert(result.message);
-    }
-  };
+  } else {
+    alert('لم يتم العثور على المريض');
+  }
+};
 
   // Add medication to list
   const handleAddMedication = () => {
@@ -150,81 +145,74 @@ const DoctorDashboard = () => {
     setMedications(updatedMeds);
   };
 
-  // ✅ CHANGE #5: Use service to save patient data
-  const handleSavePatientData = async () => {
-    if (!selectedPatient) {
-      alert('يجب اختيار مريض أولاً');
-      return;
-    }
-    
-    // Validate vital signs
-    if (!vitalSigns.bloodPressureSystolic || !vitalSigns.heartRate) {
-      alert('يرجى إدخال العلامات الحيوية الأساسية (ضغط الدم ومعدل النبض)');
-      return;
-    }
-    
-    setSaving(true);
-    
-    // Prepare ECG results if file was uploaded
-    const ecgResults = ecgFile ? {
-      fileName: ecgFile.name,
-      uploadDate: new Date().toISOString(),
-      heartRate: parseInt(vitalSigns.heartRate) || 0,
-      rhythm: "Sinus Rhythm",
-      prInterval: "160 ms",
-      qrsDuration: "90 ms",
-      qtInterval: "380 ms",
-      axis: "Normal Axis",
-      findings: aiDiagnosis || "تم رفع ملف ECG - في انتظار التحليل",
-      interpretation: aiDiagnosis ? "تم التحليل بواسطة الذكاء الاصطناعي" : "قيد المراجعة"
-    } : null;
+const handleSavePatientData = async () => {
+  if (!selectedPatient) {
+    alert('يجب اختيار مريض أولاً');
+    return;
+  }
+  
+  if (!vitalSigns.bloodPressureSystolic || !vitalSigns.heartRate) {
+    alert('يرجى إدخال العلامات الحيوية الأساسية (ضغط الدم ومعدل النبض)');
+    return;
+  }
+  
+  setSaving(true);
+  
+  const ecgResults = ecgFile ? {
+    fileName: ecgFile.name,
+    uploadDate: new Date().toISOString(),
+    heartRate: parseInt(vitalSigns.heartRate) || 0,
+    rhythm: "Sinus Rhythm",
+    prInterval: "160 ms",
+    qrsDuration: "90 ms",
+    qtInterval: "380 ms",
+    axis: "Normal Axis",
+    findings: aiDiagnosis || "تم رفع ملف ECG - في انتظار التحليل",
+    interpretation: aiDiagnosis ? "تم التحليل بواسطة الذكاء الاصطناعي" : "قيد المراجعة"
+  } : null;
 
-    // Prepare AI prediction based on vital signs and diagnosis
-    const aiPrediction = (vitalSigns.bloodPressureSystolic || aiDiagnosis) ? {
-      riskLevel: getRiskLevel(vitalSigns),
-      riskScore: calculateRiskScore(vitalSigns),
-      predictions: {
-        heartDisease: calculateHeartDiseaseRisk(vitalSigns),
-        diabetes: calculateDiabetesRisk(vitalSigns),
-        hypertension: calculateHypertensionRisk(vitalSigns),
-        stroke: calculateStrokeRisk(vitalSigns)
-      },
-      recommendations: generateRecommendations(vitalSigns, doctorOpinion),
-      modelConfidence: 85,
-      analysisDate: new Date().toISOString()
-    } : null;
+  const aiPrediction = (vitalSigns.bloodPressureSystolic || aiDiagnosis) ? {
+    riskLevel: getRiskLevel(vitalSigns),
+    riskScore: calculateRiskScore(vitalSigns),
+    predictions: {
+      heartDisease: calculateHeartDiseaseRisk(vitalSigns),
+      diabetes: calculateDiabetesRisk(vitalSigns),
+      hypertension: calculateHypertensionRisk(vitalSigns),
+      stroke: calculateStrokeRisk(vitalSigns)
+    },
+    recommendations: generateRecommendations(vitalSigns, doctorOpinion),
+    modelConfidence: 85,
+    analysisDate: new Date().toISOString()
+  } : null;
+  
+  // ✅ Update patient in localStorage
+  const patientsData = localStorage.getItem('patients');
+  if (patientsData) {
+    const allPatients = JSON.parse(patientsData);
+    const patientIndex = allPatients.findIndex(p => p.nationalId === selectedPatient.nationalId);
     
-    // Prepare medical data
-    const medicalData = {
-      vitalSigns,
-      doctorOpinion,
-      ecgResults,
-      aiPrediction,
-      prescribedMedications: medications,
-      lastUpdatedBy: `د. ${user.firstName} ${user.lastName}`
-    };
-    
-    // ✅ Use service function instead of localStorage
-    const result = await updatePatientMedicalData(
-      selectedPatient.nationalId,
-      medicalData
-    );
-    
-    setSaving(false);
-    
-    if (result.success) {
-      alert('تم حفظ البيانات بنجاح ✅');
-      setSelectedPatient(result.patient);
+    if (patientIndex !== -1) {
+      allPatients[patientIndex] = {
+        ...allPatients[patientIndex],
+        vitalSigns,
+        doctorOpinion,
+        ecgResults,
+        aiPrediction,
+        prescribedMedications: medications,
+        lastUpdatedBy: `د. ${user.firstName} ${user.lastName}`,
+        lastUpdated: new Date().toISOString()
+      };
       
-      // Refresh patients list
-      const patientsResult = await getAllPatients();
-      if (patientsResult.success) {
-        setPatients(patientsResult.patients);
-      }
-    } else {
-      alert('خطأ: ' + result.message);
+      localStorage.setItem('patients', JSON.stringify(allPatients));
+      setSelectedPatient(allPatients[patientIndex]);
+      setPatients(allPatients);
+      
+      alert('تم حفظ البيانات بنجاح ✅');
     }
-  };
+  }
+  
+  setSaving(false);
+};
 
   // Helper functions for risk calculation
   const getRiskLevel = (vitals) => {
