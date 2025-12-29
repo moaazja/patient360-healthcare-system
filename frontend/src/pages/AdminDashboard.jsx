@@ -1,904 +1,1349 @@
-import React, { useState, useEffect } from 'react';
+// src/pages/AdminDashboard.jsx
+// 🏛️ Health Ministry Admin Dashboard - Government Healthcare Platform
+// Patient 360° - وزارة الصحة - الجمهورية العربية السورية
+// Database Schema Compliant Version
+
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import Navbar from '../components/common/Navbar';
+import { authAPI } from '../services/api';
 import '../styles/AdminDashboard.css';
+
+/**
+ * ============================================
+ * DATABASE SCHEMA REFERENCE (from metadata)
+ * ============================================
+ * 
+ * DOCTORS COLLECTION:
+ * - personId: objectId (required)
+ * - medicalLicenseNumber: string, pattern ^[A-Z0-9]{8,20}$ (required)
+ * - specialization: string, 3-100 chars, pattern ^[a-zA-Z\s-]+$ (required)
+ * - subSpecialization: string|null, 3-100 chars
+ * - yearsOfExperience: int, 0-60
+ * - hospitalAffiliation: string, 3-150 chars
+ * - availableDays: array[1-7], enum ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
+ * - consultationFee: int|double, 0-1000000
+ * - createdAt: date (required)
+ * - updatedAt: date
+ * 
+ * ACCOUNTS COLLECTION:
+ * - email: unique
+ * - password: hashed
+ * - personId: objectId, unique
+ * - roles: array
+ * - isActive: boolean
+ * 
+ * PERSONS COLLECTION:
+ * - nationalId: unique
+ * - firstName, lastName
+ * - Other personal info
+ */
+
+// ============================================
+// CONSTANTS - MATCHING DATABASE ENUMS
+// ============================================
+
+/**
+ * Syrian Governorates
+ */
+const SYRIAN_GOVERNORATES = [
+  { id: 'damascus', nameAr: 'دمشق', nameEn: 'Damascus' },
+  { id: 'rif_dimashq', nameAr: 'ريف دمشق', nameEn: 'Rif Dimashq' },
+  { id: 'aleppo', nameAr: 'حلب', nameEn: 'Aleppo' },
+  { id: 'homs', nameAr: 'حمص', nameEn: 'Homs' },
+  { id: 'hama', nameAr: 'حماة', nameEn: 'Hama' },
+  { id: 'latakia', nameAr: 'اللاذقية', nameEn: 'Latakia' },
+  { id: 'tartus', nameAr: 'طرطوس', nameEn: 'Tartus' },
+  { id: 'idlib', nameAr: 'إدلب', nameEn: 'Idlib' },
+  { id: 'deir_ez_zor', nameAr: 'دير الزور', nameEn: 'Deir ez-Zor' },
+  { id: 'hasakah', nameAr: 'الحسكة', nameEn: 'Al-Hasakah' },
+  { id: 'raqqa', nameAr: 'الرقة', nameEn: 'Raqqa' },
+  { id: 'daraa', nameAr: 'درعا', nameEn: 'Daraa' },
+  { id: 'suwayda', nameAr: 'السويداء', nameEn: 'As-Suwayda' },
+  { id: 'quneitra', nameAr: 'القنيطرة', nameEn: 'Quneitra' }
+];
+
+/**
+ * Medical Specializations
+ * IMPORTANT: id must match pattern ^[a-zA-Z\s-]+$ (English only, letters/spaces/hyphens)
+ */
+const MEDICAL_SPECIALIZATIONS = [
+  { id: 'Cardiologist', nameAr: 'طبيب قلب', icon: '❤️' },
+  { id: 'Pulmonologist', nameAr: 'طبيب أمراض الرئة', icon: '🫁' },
+  { id: 'General Practitioner', nameAr: 'طبيب عام', icon: '🩺' },
+  { id: 'Infectious Disease Specialist', nameAr: 'طبيب أمراض معدية', icon: '🦠' },
+  { id: 'Intensive Care Specialist', nameAr: 'طبيب عناية مركزة', icon: '🏥' },
+  { id: 'Rheumatologist', nameAr: 'طبيب روماتيزم', icon: '🦴' },
+  { id: 'Orthopedic Surgeon', nameAr: 'جراح عظام', icon: '🦿' },
+  { id: 'Neurologist', nameAr: 'طبيب أعصاب', icon: '🧠' },
+  { id: 'Endocrinologist', nameAr: 'طبيب غدد صماء', icon: '⚗️' },
+  { id: 'Dermatologist', nameAr: 'طبيب جلدية', icon: '🧴' },
+  { id: 'Gastroenterologist', nameAr: 'طبيب جهاز هضمي', icon: '🫃' },
+  { id: 'General Surgeon', nameAr: 'جراح عام', icon: '🔪' },
+  { id: 'Hepatologist', nameAr: 'طبيب كبد', icon: '🫀' },
+  { id: 'Urologist', nameAr: 'طبيب مسالك بولية', icon: '💧' },
+  { id: 'Gynecologist', nameAr: 'طبيب نساء وتوليد', icon: '🤰' },
+  { id: 'Psychiatrist', nameAr: 'طبيب نفسي', icon: '🧘' },
+  { id: 'Hematologist', nameAr: 'طبيب دم', icon: '🩸' },
+  { id: 'Oncologist', nameAr: 'طبيب أورام', icon: '🎗️' },
+  { id: 'ENT Specialist', nameAr: 'طبيب أنف أذن حنجرة', icon: '👂' },
+  { id: 'Ophthalmologist', nameAr: 'طبيب عيون', icon: '👁️' },
+  { id: 'Pediatrician', nameAr: 'طبيب أطفال', icon: '👶' },
+  { id: 'Nephrologist', nameAr: 'طبيب كلى', icon: '🫘' },
+  { id: 'Internal Medicine', nameAr: 'طبيب باطنية', icon: '🏨' },
+  { id: 'Emergency Medicine', nameAr: 'طبيب طوارئ', icon: '🚑' }
+];
+
+/**
+ * Available Days - MUST match database enum exactly
+ * Database: ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"]
+ */
+const WEEKDAYS = [
+  { id: 'Sunday', nameAr: 'الأحد' },
+  { id: 'Monday', nameAr: 'الإثنين' },
+  { id: 'Tuesday', nameAr: 'الثلاثاء' },
+  { id: 'Wednesday', nameAr: 'الأربعاء' },
+  { id: 'Thursday', nameAr: 'الخميس' },
+  { id: 'Friday', nameAr: 'الجمعة' },
+  { id: 'Saturday', nameAr: 'السبت' }
+];
+
+/**
+ * Deactivation Reasons
+ */
+const DEACTIVATION_REASONS = [
+  { id: 'death', nameAr: 'وفاة', icon: '🕊️' },
+  { id: 'license_revoked', nameAr: 'إلغاء الترخيص', icon: '🚫' },
+  { id: 'user_request', nameAr: 'طلب المستخدم', icon: '📝' },
+  { id: 'fraud', nameAr: 'احتيال', icon: '⚠️' },
+  { id: 'retirement', nameAr: 'تقاعد', icon: '🏖️' },
+  { id: 'transfer', nameAr: 'نقل', icon: '🔄' },
+  { id: 'other', nameAr: 'سبب آخر', icon: '📋' }
+];
+
+// ============================================
+// UTILITY FUNCTIONS
+// ============================================
+
+/**
+ * Arabic to English transliteration for email generation
+ */
+const transliterateArabic = (text) => {
+  const map = {
+    'ا': 'a', 'أ': 'a', 'إ': 'e', 'آ': 'a', 'ب': 'b', 'ت': 't', 'ث': 'th',
+    'ج': 'j', 'ح': 'h', 'خ': 'kh', 'د': 'd', 'ذ': 'th', 'ر': 'r', 'ز': 'z',
+    'س': 's', 'ش': 'sh', 'ص': 's', 'ض': 'd', 'ط': 't', 'ظ': 'z', 'ع': 'a',
+    'غ': 'gh', 'ف': 'f', 'ق': 'q', 'ك': 'k', 'ل': 'l', 'م': 'm', 'ن': 'n',
+    'ه': 'h', 'و': 'w', 'ي': 'y', 'ى': 'a', 'ة': 'a', 'ء': '', 'ئ': 'y', 'ؤ': 'w'
+  };
+  return text.split('').map(char => map[char] || char).join('').replace(/[^a-z]/g, '').toLowerCase() || 'user';
+};
+
+/**
+ * Generate doctor email: firstname.lastname.LICENSE@patient360.gov.sy
+ */
+const generateDoctorEmail = (firstName, lastName, licenseNumber) => {
+  let firstEn = firstName.toLowerCase().replace(/[^a-z]/g, '');
+  let lastEn = lastName.toLowerCase().replace(/[^a-z]/g, '');
+  if (!firstEn) firstEn = transliterateArabic(firstName);
+  if (!lastEn) lastEn = transliterateArabic(lastName);
+  return `${firstEn}.${lastEn}.${licenseNumber.toUpperCase()}@patient360.gov.sy`;
+};
+
+/**
+ * Generate secure 12-character password
+ */
+const generatePassword = () => {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%';
+  return Array.from({ length: 12 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+};
+
+/**
+ * Format date for display
+ */
+const formatDate = (date) => {
+  if (!date) return '-';
+  return new Date(date).toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' });
+};
+
+const formatDateTime = (date) => {
+  if (!date) return '-';
+  return new Date(date).toLocaleDateString('ar-EG', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
+// ============================================
+// COMPONENTS
+// ============================================
+
+const StatCard = ({ icon, value, label, sublabel, color, onClick }) => (
+  <div className={`stat-card ${color}`} onClick={onClick} style={{ cursor: onClick ? 'pointer' : 'default' }}>
+    <div className="stat-card-icon"><span>{icon}</span></div>
+    <div className="stat-card-content">
+      <h3 className="stat-value">{value}</h3>
+      <p className="stat-label">{label}</p>
+      {sublabel && <span className="stat-sublabel">{sublabel}</span>}
+    </div>
+  </div>
+);
+
+// ============================================
+// MAIN COMPONENT
+// ============================================
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
-  const [currentUser, setCurrentUser] = useState(null);
-  const [activeTab, setActiveTab] = useState('dashboard');
+  
+  // Core State
+  const [admin, setAdmin] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState('statistics');
+  
+  // Modal
+  const [modal, setModal] = useState({ isOpen: false, type: '', title: '', message: '', onConfirm: null });
+  
+  // Statistics
+  const [statistics, setStatistics] = useState({
+    totalDoctors: 0, activeDoctors: 0, inactiveDoctors: 0,
+    totalPatients: 0, activePatients: 0, inactivePatients: 0,
+    totalVisits: 0, todayVisits: 0
+  });
+  
+  // Doctors
   const [doctors, setDoctors] = useState([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-
-  // New Doctor Form State
+  const [doctorsLoading, setDoctorsLoading] = useState(false);
+  const [doctorSearchTerm, setDoctorSearchTerm] = useState('');
+  const [doctorFilter, setDoctorFilter] = useState('all');
+  const [selectedDoctor, setSelectedDoctor] = useState(null);
+  const [showDoctorDetails, setShowDoctorDetails] = useState(false);
+  
+  // Patients
+  const [patients, setPatients] = useState([]);
+  const [patientsLoading, setPatientsLoading] = useState(false);
+  const [patientSearchTerm, setPatientSearchTerm] = useState('');
+  const [patientFilter, setPatientFilter] = useState('all');
+  const [selectedPatient, setSelectedPatient] = useState(null);
+  const [showPatientDetails, setShowPatientDetails] = useState(false);
+  
+  // Add Doctor Form - Fields matching database schema
+  const [showAddDoctorForm, setShowAddDoctorForm] = useState(false);
+  const [addDoctorLoading, setAddDoctorLoading] = useState(false);
   const [newDoctor, setNewDoctor] = useState({
+    // === PERSONS COLLECTION FIELDS ===
     firstName: '',
     lastName: '',
-    nationalId: '',
-    email: '',
+    nationalId: '',           // unique in persons
     phoneNumber: '',
-    medicalLicenseNumber: '',
-    institution: '',
-    password: '',
-    autoGeneratePassword: true
+    gender: 'male',
+    dateOfBirth: '',
+    address: '',
+    governorate: '',
+    city: '',
+    
+    // === DOCTORS COLLECTION FIELDS (strict schema) ===
+    medicalLicenseNumber: '', // required, pattern: ^[A-Z0-9]{8,20}$
+    specialization: '',       // required, pattern: ^[a-zA-Z\s-]+$, 3-100 chars
+    subSpecialization: '',    // optional, 3-100 chars or null
+    yearsOfExperience: '',    // int, 0-60
+    hospitalAffiliation: '',  // string, 3-150 chars
+    availableDays: [],        // array[1-7], enum weekdays
+    consultationFee: ''       // int|double, 0-1000000
   });
+  const [generatedCredentials, setGeneratedCredentials] = useState(null);
+  
+  // Deactivation
+  const [showDeactivateModal, setShowDeactivateModal] = useState(false);
+  const [deactivateTarget, setDeactivateTarget] = useState(null);
+  const [deactivateType, setDeactivateType] = useState('');
+  const [deactivateReason, setDeactivateReason] = useState('');
+  const [deactivateNotes, setDeactivateNotes] = useState('');
+  
+  // Audit Logs
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditLoading, setAuditLoading] = useState(false);
 
-  // Edit Doctor State
-  const [editingDoctor, setEditingDoctor] = useState(null);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-
-  // Modal State
-  const [modal, setModal] = useState({
-    isOpen: false,
-    type: '',
-    title: '',
-    message: '',
-    onClose: null
-  });
-
-  // Statistics
-  const [stats, setStats] = useState({
-    totalDoctors: 0,
-    activeDoctors: 0,
-    newThisMonth: 0,
-    totalPatients: 0
-  });
-
-  /**
-   * Check if user is admin on mount
-   */
+  // ============================================
+  // INITIALIZATION
+  // ============================================
+  
   useEffect(() => {
-    const user = JSON.parse(localStorage.getItem('currentUser') || 'null');
-    
-    if (!user || user.role !== 'admin') {
-      navigate('/');
-      return;
-    }
-    
-    setCurrentUser(user);
-    loadDoctors();
-    calculateStats();
+    const init = async () => {
+      setLoading(true);
+      const currentUser = authAPI.getCurrentUser();
+      
+      if (!currentUser) {
+        openModal('error', 'غير مصرح', 'يجب عليك تسجيل الدخول أولاً', () => navigate('/'));
+        return;
+      }
+      
+      if (currentUser.roles?.[0] !== 'admin') {
+        openModal('error', 'غير مصرح', 'هذه الصفحة متاحة للمسؤولين فقط', () => navigate('/'));
+        return;
+      }
+      
+      setAdmin(currentUser);
+      await loadStatistics();
+      setLoading(false);
+    };
+    init();
   }, [navigate]);
 
-  /**
-   * Load all doctors from localStorage
-   */
-  const loadDoctors = () => {
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const doctorsList = users.filter(u => u.role === 'doctor');
-    setDoctors(doctorsList);
-  };
+  // ============================================
+  // API CALLS
+  // ============================================
 
-  /**
-   * Calculate statistics
-   */
-  const calculateStats = () => {
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const doctorsList = users.filter(u => u.role === 'doctor');
-    const patientsList = users.filter(u => u.role === 'patient');
-    
-    const currentMonth = new Date().getMonth();
-    const currentYear = new Date().getFullYear();
-    
-    const newThisMonth = doctorsList.filter(d => {
-      if (!d.registrationDate) return false;
-      const regDate = new Date(d.registrationDate);
-      return regDate.getMonth() === currentMonth && regDate.getFullYear() === currentYear;
-    }).length;
-
-    setStats({
-      totalDoctors: doctorsList.length,
-      activeDoctors: doctorsList.length,
-      newThisMonth: newThisMonth,
-      totalPatients: patientsList.length
-    });
-  };
-
-  /**
-   * Generate random password
-   */
-  const generatePassword = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$';
-    let password = '';
-    for (let i = 0; i < 12; i++) {
-      password += chars.charAt(Math.floor(Math.random() * chars.length));
+  const loadStatistics = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const headers = { 'Authorization': `Bearer ${token}` };
+      
+      const [doctorsRes, patientsRes, statsRes] = await Promise.all([
+        fetch('http://localhost:5000/api/admin/doctors', { headers }),
+        fetch('http://localhost:5000/api/admin/patients', { headers }),
+        fetch('http://localhost:5000/api/admin/statistics', { headers })
+      ]);
+      
+      const [doctorsData, patientsData, statsData] = await Promise.all([
+        doctorsRes.json(), patientsRes.json(), statsRes.json()
+      ]);
+      
+      const allDoctors = doctorsData.success ? (doctorsData.doctors || []) : [];
+      const allPatients = patientsData.success ? (patientsData.patients || []) : [];
+      
+      setStatistics({
+        totalDoctors: allDoctors.length,
+        activeDoctors: allDoctors.filter(d => d.isActive !== false).length,
+        inactiveDoctors: allDoctors.filter(d => d.isActive === false).length,
+        totalPatients: allPatients.length,
+        activePatients: allPatients.filter(p => p.isActive !== false).length,
+        inactivePatients: allPatients.filter(p => p.isActive === false).length,
+        totalVisits: statsData.totalVisits || 0,
+        todayVisits: statsData.todayVisits || 0
+      });
+    } catch (error) {
+      console.error('Error loading statistics:', error);
     }
-    return password;
   };
 
-  /**
-   * Handle auto-generate password toggle
-   */
-  const handleAutoPasswordToggle = () => {
-    const autoGen = !newDoctor.autoGeneratePassword;
-    setNewDoctor({
-      ...newDoctor,
-      autoGeneratePassword: autoGen,
-      password: autoGen ? generatePassword() : ''
-    });
-  };
-
-  /**
-   * Open modal
-   */
-  const openModal = (type, title, message, onClose = null) => {
-    setModal({ isOpen: true, type, title, message, onClose });
-  };
-
-  /**
-   * Close modal
-   */
-  const closeModal = () => {
-    if (modal.onClose) {
-      modal.onClose();
+  const loadDoctors = async () => {
+    setDoctorsLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('http://localhost:5000/api/admin/doctors', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success) setDoctors(data.doctors || []);
+    } catch (error) {
+      console.error('Error loading doctors:', error);
+    } finally {
+      setDoctorsLoading(false);
     }
-    setModal({ isOpen: false, type: '', title: '', message: '', onClose: null });
   };
 
-  /**
-   * Validate form
-   */
+  const loadPatients = async () => {
+    setPatientsLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('http://localhost:5000/api/admin/patients', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success) setPatients(data.patients || []);
+    } catch (error) {
+      console.error('Error loading patients:', error);
+    } finally {
+      setPatientsLoading(false);
+    }
+  };
+
+  const loadAuditLogs = async () => {
+    setAuditLoading(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('http://localhost:5000/api/admin/audit-logs', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (data.success) setAuditLogs(data.logs || []);
+    } catch (error) {
+      console.error('Error loading audit logs:', error);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  const handleTabChange = (tab) => {
+    setActiveTab(tab);
+    if (tab === 'doctors' && doctors.length === 0) loadDoctors();
+    else if (tab === 'patients' && patients.length === 0) loadPatients();
+    else if (tab === 'audit' && auditLogs.length === 0) loadAuditLogs();
+  };
+
+  // ============================================
+  // FORM VALIDATION - Matching Database Schema
+  // ============================================
+
   const validateDoctorForm = () => {
-    // Check required fields
-    if (!newDoctor.firstName || !newDoctor.lastName || !newDoctor.nationalId || 
-        !newDoctor.email || !newDoctor.phoneNumber || !newDoctor.medicalLicenseNumber || 
-        !newDoctor.institution) {
-      openModal('error', 'خطأ في البيانات', 'الرجاء ملء جميع الحقول المطلوبة');
+    // === PERSON VALIDATION ===
+    if (!newDoctor.firstName.trim()) {
+      openModal('error', 'خطأ', 'الرجاء إدخال الاسم الأول');
+      return false;
+    }
+    if (!newDoctor.lastName.trim()) {
+      openModal('error', 'خطأ', 'الرجاء إدخال الكنية');
+      return false;
+    }
+    if (!newDoctor.nationalId.trim() || newDoctor.nationalId.length !== 11) {
+      openModal('error', 'خطأ', 'الرجاء إدخال الرقم الوطني (11 رقم)');
+      return false;
+    }
+    if (!newDoctor.phoneNumber.trim()) {
+      openModal('error', 'خطأ', 'الرجاء إدخال رقم الهاتف');
+      return false;
+    }
+    if (!newDoctor.governorate) {
+      openModal('error', 'خطأ', 'الرجاء اختيار المحافظة');
       return false;
     }
 
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(newDoctor.email)) {
-      openModal('error', 'خطأ في البيانات', 'البريد الإلكتروني غير صحيح');
+    // === DOCTOR VALIDATION (matching database schema) ===
+    
+    // medicalLicenseNumber: pattern ^[A-Z0-9]{8,20}$
+    const license = newDoctor.medicalLicenseNumber.toUpperCase().trim();
+    if (!license) {
+      openModal('error', 'خطأ', 'الرجاء إدخال رقم الترخيص الطبي');
+      return false;
+    }
+    if (!/^[A-Z0-9]{8,20}$/.test(license)) {
+      openModal('error', 'خطأ في رقم الترخيص', 
+        'رقم الترخيص يجب أن يكون:\n• 8-20 حرف/رقم\n• أحرف إنجليزية كبيرة (A-Z) وأرقام (0-9) فقط\n• مثال: SY12345678');
       return false;
     }
 
-    // Validate national ID (should be 10 digits)
-    if (newDoctor.nationalId.length !== 11 || !/^\d+$/.test(newDoctor.nationalId)) {
-      openModal('error', 'خطأ في البيانات', 'الرقم الوطني يجب أن يكون 11 رقم');
+    // specialization: pattern ^[a-zA-Z\s-]+$, 3-100 chars
+    if (!newDoctor.specialization) {
+      openModal('error', 'خطأ', 'الرجاء اختيار التخصص');
+      return false;
+    }
+    if (newDoctor.specialization.length < 3 || newDoctor.specialization.length > 100) {
+      openModal('error', 'خطأ', 'التخصص يجب أن يكون بين 3-100 حرف');
       return false;
     }
 
-    // Check if email already exists
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    if (users.some(u => u.email === newDoctor.email)) {
-      openModal('error', 'خطأ في البيانات', 'البريد الإلكتروني مسجل مسبقاً');
+    // hospitalAffiliation: 3-150 chars (required in our form)
+    if (!newDoctor.hospitalAffiliation.trim()) {
+      openModal('error', 'خطأ', 'الرجاء إدخال اسم المستشفى أو المركز الصحي');
+      return false;
+    }
+    if (newDoctor.hospitalAffiliation.length < 3 || newDoctor.hospitalAffiliation.length > 150) {
+      openModal('error', 'خطأ', 'اسم المستشفى يجب أن يكون بين 3-150 حرف');
       return false;
     }
 
-    // Check if national ID already exists
-    if (users.some(u => u.nationalId === newDoctor.nationalId)) {
-      openModal('error', 'خطأ في البيانات', 'الرقم الوطني مسجل مسبقاً');
+    // availableDays: array 1-7 items
+    if (newDoctor.availableDays.length === 0) {
+      openModal('error', 'خطأ', 'الرجاء اختيار أيام العمل (يوم واحد على الأقل)');
+      return false;
+    }
+    if (newDoctor.availableDays.length > 7) {
+      openModal('error', 'خطأ', 'لا يمكن اختيار أكثر من 7 أيام');
       return false;
     }
 
-    // Check if medical license already exists
-    if (users.some(u => u.medicalLicenseNumber === newDoctor.medicalLicenseNumber)) {
-      openModal('error', 'خطأ في البيانات', 'رقم الترخيص الطبي مسجل مسبقاً');
+    // subSpecialization: if provided, must be 3-100 chars
+    if (newDoctor.subSpecialization.trim() && 
+        (newDoctor.subSpecialization.length < 3 || newDoctor.subSpecialization.length > 100)) {
+      openModal('error', 'خطأ', 'التخصص الفرعي يجب أن يكون بين 3-100 حرف');
+      return false;
+    }
+
+    // yearsOfExperience: 0-60
+    const years = parseInt(newDoctor.yearsOfExperience) || 0;
+    if (years < 0 || years > 60) {
+      openModal('error', 'خطأ', 'سنوات الخبرة يجب أن تكون بين 0-60');
+      return false;
+    }
+
+    // consultationFee: 0-1000000
+    const fee = parseFloat(newDoctor.consultationFee) || 0;
+    if (fee < 0 || fee > 1000000) {
+      openModal('error', 'خطأ', 'رسوم الكشف يجب أن تكون بين 0-1,000,000');
+      return false;
+    }
+
+    // Clinic address
+    if (!newDoctor.address.trim()) {
+      openModal('error', 'خطأ', 'الرجاء إدخال عنوان العيادة');
       return false;
     }
 
     return true;
   };
 
-  /**
-   * Handle create doctor
-   */
-  const handleCreateDoctor = async (e) => {
-    e.preventDefault();
-    
-    if (!validateDoctorForm()) {
+  // ============================================
+  // ADD DOCTOR
+  // ============================================
+
+  const handleAddDoctor = async () => {
+    if (!validateDoctorForm()) return;
+
+    setAddDoctorLoading(true);
+
+    try {
+      const email = generateDoctorEmail(newDoctor.firstName, newDoctor.lastName, newDoctor.medicalLicenseNumber);
+      const password = generatePassword();
+
+      // Structure matching database collections
+      const payload = {
+        // For PERSONS collection
+        person: {
+          firstName: newDoctor.firstName.trim(),
+          lastName: newDoctor.lastName.trim(),
+          nationalId: newDoctor.nationalId.trim(),
+          phoneNumber: newDoctor.phoneNumber.trim(),
+          gender: newDoctor.gender,
+          dateOfBirth: newDoctor.dateOfBirth || null,
+          address: newDoctor.address.trim(),
+          governorate: newDoctor.governorate,
+          city: newDoctor.city.trim() || null
+        },
+        
+        // For ACCOUNTS collection
+        account: {
+          email: email,
+          password: password, // Backend will hash this
+          roles: ['doctor'],
+          isActive: true
+        },
+        
+        // For DOCTORS collection (matching exact schema)
+        doctor: {
+          medicalLicenseNumber: newDoctor.medicalLicenseNumber.toUpperCase().trim(),
+          specialization: newDoctor.specialization,
+          subSpecialization: newDoctor.subSpecialization.trim() || null,
+          yearsOfExperience: parseInt(newDoctor.yearsOfExperience) || 0,
+          hospitalAffiliation: newDoctor.hospitalAffiliation.trim(),
+          availableDays: newDoctor.availableDays,
+          consultationFee: parseFloat(newDoctor.consultationFee) || 0
+        }
+      };
+
+      const token = localStorage.getItem('token');
+      const res = await fetch('http://localhost:5000/api/admin/doctors', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+
+      if (data.success) {
+        setGeneratedCredentials({
+          email,
+          password,
+          doctorName: `${newDoctor.firstName} ${newDoctor.lastName}`
+        });
+        
+        // Reset form
+        setNewDoctor({
+          firstName: '', lastName: '', nationalId: '', phoneNumber: '',
+          gender: 'male', dateOfBirth: '', address: '', governorate: '', city: '',
+          medicalLicenseNumber: '', specialization: '', subSpecialization: '',
+          yearsOfExperience: '', hospitalAffiliation: '', availableDays: [], consultationFee: ''
+        });
+        
+        loadDoctors();
+        loadStatistics();
+        logAuditAction('ADD_DOCTOR', `تم إضافة طبيب جديد: ${payload.person.firstName} ${payload.person.lastName}`);
+      } else {
+        openModal('error', 'خطأ', data.message || 'حدث خطأ أثناء إضافة الطبيب');
+      }
+    } catch (error) {
+      console.error('Error adding doctor:', error);
+      openModal('error', 'خطأ', 'حدث خطأ في الاتصال بالخادم');
+    } finally {
+      setAddDoctorLoading(false);
+    }
+  };
+
+  const handleDayToggle = (day) => {
+    setNewDoctor(prev => ({
+      ...prev,
+      availableDays: prev.availableDays.includes(day)
+        ? prev.availableDays.filter(d => d !== day)
+        : [...prev.availableDays, day]
+    }));
+  };
+
+  // ============================================
+  // DEACTIVATION
+  // ============================================
+
+  const handleDeactivate = (target, type) => {
+    setDeactivateTarget(target);
+    setDeactivateType(type);
+    setDeactivateReason('');
+    setDeactivateNotes('');
+    setShowDeactivateModal(true);
+  };
+
+  const confirmDeactivation = async () => {
+    if (!deactivateReason) {
+      openModal('error', 'خطأ', 'الرجاء اختيار سبب إلغاء التفعيل');
       return;
     }
 
-    setIsLoading(true);
-
     try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 800));
+      const token = localStorage.getItem('token');
+      const endpoint = `http://localhost:5000/api/admin/${deactivateType}s/${deactivateTarget._id}/deactivate`;
 
-      const users = JSON.parse(localStorage.getItem('users') || '[]');
+      const res = await fetch(endpoint, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          reason: deactivateReason,
+          notes: deactivateNotes,
+          deactivatedBy: admin._id
+        })
+      });
 
-      // Create new doctor object
-      const doctor = {
-        id: Date.now(),
-        email: newDoctor.email,
-        password: newDoctor.autoGeneratePassword ? generatePassword() : newDoctor.password,
-        role: 'doctor',
-        firstName: newDoctor.firstName,
-        lastName: newDoctor.lastName,
-        nationalId: newDoctor.nationalId,
-        phoneNumber: newDoctor.phoneNumber,
-        medicalLicenseNumber: newDoctor.medicalLicenseNumber,
-        institution: newDoctor.institution,
-        specialization: 'أمراض القلب', // Fixed: All are cardiologists
-        registrationDate: new Date().toISOString(),
-        createdBy: currentUser.email,
-        account: {
-          isActive: true,
-          createdAt: new Date().toISOString()
-        }
-      };
+      const data = await res.json();
 
-      // Save to localStorage
-      users.push(doctor);
-      localStorage.setItem('users', JSON.stringify(users));
-
-      setIsLoading(false);
-
-      // Show success modal with password
-      openModal(
-        'success',
-        'تم إنشاء الحساب بنجاح! ✅',
-        `تم إنشاء حساب الطبيب:\n\nالاسم: ${doctor.firstName} ${doctor.lastName}\nالبريد: ${doctor.email}\nكلمة المرور: ${doctor.password}\n\n⚠️ الرجاء حفظ كلمة المرور وإرسالها للطبيب`,
-        () => {
-          // Reset form
-          setNewDoctor({
-            firstName: '',
-            lastName: '',
-            nationalId: '',
-            email: '',
-            phoneNumber: '',
-            medicalLicenseNumber: '',
-            institution: '',
-            password: '',
-            autoGeneratePassword: true
-          });
-          loadDoctors();
-          calculateStats();
-          setActiveTab('manage');
-        }
-      );
-
-      console.log('✅ Doctor created:', doctor);
-
+      if (data.success) {
+        setShowDeactivateModal(false);
+        openModal('success', 'تم بنجاح', 'تم إلغاء تفعيل الحساب');
+        deactivateType === 'doctor' ? loadDoctors() : loadPatients();
+        loadStatistics();
+        
+        const reasonText = DEACTIVATION_REASONS.find(r => r.id === deactivateReason)?.nameAr;
+        const name = deactivateTarget.firstName || deactivateTarget.person?.firstName;
+        logAuditAction(`DEACTIVATE_${deactivateType.toUpperCase()}`, 
+          `تم إلغاء تفعيل ${deactivateType === 'doctor' ? 'الطبيب' : 'المريض'}: ${name} - السبب: ${reasonText}`);
+      } else {
+        openModal('error', 'خطأ', data.message || 'حدث خطأ');
+      }
     } catch (error) {
-      setIsLoading(false);
-      console.error('Error creating doctor:', error);
-      openModal('error', 'خطأ في النظام', 'حدث خطأ أثناء إنشاء الحساب');
+      openModal('error', 'خطأ', 'حدث خطأ في الاتصال');
     }
   };
 
-  /**
-   * Handle edit doctor
-   */
-  const handleEditDoctor = (doctor) => {
-    setEditingDoctor({...doctor});
-    setIsEditModalOpen(true);
+  const handleReactivate = async (target, type) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`http://localhost:5000/api/admin/${type}s/${target._id}/reactivate`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        openModal('success', 'تم', 'تم إعادة تفعيل الحساب');
+        type === 'doctor' ? loadDoctors() : loadPatients();
+        loadStatistics();
+        logAuditAction(`REACTIVATE_${type.toUpperCase()}`, 
+          `تم إعادة تفعيل: ${target.firstName || target.person?.firstName}`);
+      }
+    } catch (error) {
+      openModal('error', 'خطأ', 'حدث خطأ');
+    }
   };
 
-  /**
-   * Handle save edited doctor
-   */
-  const handleSaveEditedDoctor = () => {
-    if (!editingDoctor) return;
+  // ============================================
+  // AUDIT & EXPORT
+  // ============================================
 
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    const doctorIndex = users.findIndex(u => u.id === editingDoctor.id);
+  const logAuditAction = async (action, description) => {
+    try {
+      const token = localStorage.getItem('token');
+      await fetch('http://localhost:5000/api/admin/audit-logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ action, description, adminId: admin._id, adminName: `${admin.firstName} ${admin.lastName}` })
+      });
+    } catch (e) { console.error(e); }
+  };
+
+  const exportToCSV = (type) => {
+    const data = type === 'doctors' ? doctors : patients;
+    let headers, rows;
     
-    if (doctorIndex !== -1) {
-      users[doctorIndex] = {
-        ...users[doctorIndex],
-        ...editingDoctor,
-        updatedAt: new Date().toISOString(),
-        updatedBy: currentUser.email
-      };
-      
-      localStorage.setItem('users', JSON.stringify(users));
-      loadDoctors();
-      setIsEditModalOpen(false);
-      setEditingDoctor(null);
-      
-      openModal('success', 'تم التحديث', 'تم تحديث بيانات الطبيب بنجاح');
+    if (type === 'doctors') {
+      headers = ['الاسم', 'رقم الترخيص', 'التخصص', 'المستشفى', 'الهاتف', 'الحالة'];
+      rows = data.map(d => [
+        `${d.firstName || d.person?.firstName} ${d.lastName || d.person?.lastName}`,
+        d.medicalLicenseNumber,
+        MEDICAL_SPECIALIZATIONS.find(s => s.id === d.specialization)?.nameAr || d.specialization,
+        d.hospitalAffiliation,
+        d.phoneNumber || d.person?.phoneNumber,
+        d.isActive !== false ? 'نشط' : 'غير نشط'
+      ]);
+    } else {
+      headers = ['الاسم', 'الرقم الوطني', 'الجنس', 'الهاتف', 'الحالة'];
+      rows = data.map(p => [
+        `${p.firstName || p.person?.firstName} ${p.lastName || p.person?.lastName}`,
+        p.nationalId || p.person?.nationalId,
+        (p.gender || p.person?.gender) === 'male' ? 'ذكر' : 'أنثى',
+        p.phoneNumber || p.person?.phoneNumber,
+        p.isActive !== false ? 'نشط' : 'غير نشط'
+      ]);
     }
+    
+    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${type}_${new Date().toISOString().split('T')[0]}.csv`;
+    link.click();
+    logAuditAction(`EXPORT_${type.toUpperCase()}`, `تم تصدير قائمة ${type === 'doctors' ? 'الأطباء' : 'المرضى'}`);
   };
 
-  /**
-   * Handle delete doctor
-   */
-  const handleDeleteDoctor = (doctorId) => {
-    if (window.confirm('هل أنت متأكد من حذف حساب هذا الطبيب؟')) {
-      const users = JSON.parse(localStorage.getItem('users') || '[]');
-      const filteredUsers = users.filter(u => u.id !== doctorId);
-      localStorage.setItem('users', JSON.stringify(filteredUsers));
-      loadDoctors();
-      calculateStats();
-      openModal('success', 'تم الحذف', 'تم حذف حساب الطبيب بنجاح');
-    }
+  // ============================================
+  // MODAL HELPERS
+  // ============================================
+
+  const openModal = (type, title, message, onConfirm = null) => {
+    setModal({ isOpen: true, type, title, message, onConfirm });
   };
 
-  /**
-   * Handle logout
-   */
+  const closeModal = () => setModal({ isOpen: false, type: '', title: '', message: '', onConfirm: null });
+
   const handleLogout = () => {
-    localStorage.removeItem('currentUser');
-    navigate('/');
+    openModal('confirm', 'تسجيل الخروج', 'هل أنت متأكد؟', () => authAPI.logout());
   };
 
-  /**
-   * Filter doctors based on search
-   */
-  const filteredDoctors = doctors.filter(doctor => {
-    const searchLower = searchTerm.toLowerCase();
-    return (
-      doctor.firstName?.toLowerCase().includes(searchLower) ||
-      doctor.lastName?.toLowerCase().includes(searchLower) ||
-      doctor.email?.toLowerCase().includes(searchLower) ||
-      doctor.nationalId?.includes(searchLower) ||
-      doctor.medicalLicenseNumber?.includes(searchLower) ||
-      doctor.institution?.toLowerCase().includes(searchLower)
-    );
+  // ============================================
+  // FILTERS
+  // ============================================
+
+  const filteredDoctors = doctors.filter(d => {
+    const name = `${d.firstName || d.person?.firstName || ''} ${d.lastName || d.person?.lastName || ''}`.toLowerCase();
+    const license = (d.medicalLicenseNumber || '').toLowerCase();
+    const matchSearch = name.includes(doctorSearchTerm.toLowerCase()) || license.includes(doctorSearchTerm.toLowerCase());
+    const matchFilter = doctorFilter === 'all' || 
+      (doctorFilter === 'active' && d.isActive !== false) ||
+      (doctorFilter === 'inactive' && d.isActive === false);
+    return matchSearch && matchFilter;
   });
+
+  const filteredPatients = patients.filter(p => {
+    const name = `${p.firstName || p.person?.firstName || ''} ${p.lastName || p.person?.lastName || ''}`.toLowerCase();
+    const nid = p.nationalId || p.person?.nationalId || '';
+    const matchSearch = name.includes(patientSearchTerm.toLowerCase()) || nid.includes(patientSearchTerm);
+    const matchFilter = patientFilter === 'all' ||
+      (patientFilter === 'active' && p.isActive !== false) ||
+      (patientFilter === 'inactive' && p.isActive === false);
+    return matchSearch && matchFilter;
+  });
+
+  // ============================================
+  // RENDER
+  // ============================================
+
+  if (loading) {
+    return (
+      <div className="admin-loading-container">
+        <div className="admin-loading-content">
+          <div className="ministry-emblem">🏛️</div>
+          <div className="loading-spinner-admin"></div>
+          <h2>وزارة الصحة</h2>
+          <p>جاري تحميل لوحة التحكم...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!admin) return null;
 
   return (
     <div className="admin-dashboard">
-      {/* Modal */}
+      <Navbar />
+
+      {/* Standard Modal */}
       {modal.isOpen && (
         <div className="modal-overlay" onClick={closeModal}>
-          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-container" onClick={e => e.stopPropagation()}>
             <div className={`modal-header ${modal.type}`}>
-              {modal.type === 'success' && <div className="modal-icon success-icon">✓</div>}
-              {modal.type === 'error' && <div className="modal-icon error-icon">✕</div>}
-              <h2 className="modal-title">{modal.title}</h2>
+              <div className="modal-icon">{modal.type === 'success' ? '✓' : modal.type === 'error' ? '✕' : '؟'}</div>
+              <h2>{modal.title}</h2>
             </div>
-            <div className="modal-body">
-              <p className="modal-message" style={{ whiteSpace: 'pre-line' }}>{modal.message}</p>
-            </div>
+            <div className="modal-body"><p style={{ whiteSpace: 'pre-line' }}>{modal.message}</p></div>
             <div className="modal-footer">
-              <button className="modal-button primary" onClick={modal.onClose || closeModal}>
-                حسناً
-              </button>
+              {modal.type === 'confirm' ? (
+                <>
+                  <button className="modal-button secondary" onClick={closeModal}>إلغاء</button>
+                  <button className="modal-button primary" onClick={() => { if (modal.onConfirm) modal.onConfirm(); closeModal(); }}>تأكيد</button>
+                </>
+              ) : (
+                <button className="modal-button primary" onClick={() => { if (modal.onConfirm) modal.onConfirm(); closeModal(); }}>حسناً</button>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Edit Doctor Modal */}
-      {isEditModalOpen && editingDoctor && (
-        <div className="modal-overlay" onClick={() => setIsEditModalOpen(false)}>
-          <div className="modal-container large" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header info">
-              <h2 className="modal-title">تعديل بيانات الطبيب</h2>
+      {/* Deactivation Modal */}
+      {showDeactivateModal && (
+        <div className="modal-overlay" onClick={() => setShowDeactivateModal(false)}>
+          <div className="deactivate-modal" onClick={e => e.stopPropagation()}>
+            <div className="deactivate-modal-header">
+              <div className="deactivate-icon">⚠️</div>
+              <h2>إلغاء تفعيل الحساب</h2>
+              <p>{deactivateTarget?.firstName || deactivateTarget?.person?.firstName} {deactivateTarget?.lastName || deactivateTarget?.person?.lastName}</p>
             </div>
-            <div className="modal-body">
-              <div className="edit-form">
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>الاسم الأول</label>
-                    <input
-                      type="text"
-                      value={editingDoctor.firstName}
-                      onChange={(e) => setEditingDoctor({...editingDoctor, firstName: e.target.value})}
-                      className="form-input"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>اسم العائلة</label>
-                    <input
-                      type="text"
-                      value={editingDoctor.lastName}
-                      onChange={(e) => setEditingDoctor({...editingDoctor, lastName: e.target.value})}
-                      className="form-input"
-                    />
-                  </div>
-                </div>
-
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>البريد الإلكتروني</label>
-                    <input
-                      type="email"
-                      value={editingDoctor.email}
-                      onChange={(e) => setEditingDoctor({...editingDoctor, email: e.target.value})}
-                      className="form-input"
-                      dir="ltr"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>رقم الهاتف</label>
-                    <input
-                      type="tel"
-                      value={editingDoctor.phoneNumber}
-                      onChange={(e) => setEditingDoctor({...editingDoctor, phoneNumber: e.target.value})}
-                      className="form-input"
-                      dir="ltr"
-                    />
-                  </div>
-                </div>
-
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>رقم الترخيص الطبي</label>
-                    <input
-                      type="text"
-                      value={editingDoctor.medicalLicenseNumber}
-                      onChange={(e) => setEditingDoctor({...editingDoctor, medicalLicenseNumber: e.target.value})}
-                      className="form-input"
-                      dir="ltr"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>المؤسسة الطبية</label>
-                    <input
-                      type="text"
-                      value={editingDoctor.institution}
-                      onChange={(e) => setEditingDoctor({...editingDoctor, institution: e.target.value})}
-                      className="form-input"
-                    />
-                  </div>
+            <div className="deactivate-modal-body">
+              <div className="form-group">
+                <label>سبب إلغاء التفعيل <span className="required">*</span></label>
+                <div className="deactivate-reasons-grid">
+                  {DEACTIVATION_REASONS.map(r => (
+                    <div key={r.id} className={`reason-card ${deactivateReason === r.id ? 'selected' : ''}`}
+                      onClick={() => setDeactivateReason(r.id)}>
+                      <span className="reason-icon">{r.icon}</span>
+                      <span className="reason-name">{r.nameAr}</span>
+                    </div>
+                  ))}
                 </div>
               </div>
+              <div className="form-group">
+                <label>ملاحظات</label>
+                <textarea value={deactivateNotes} onChange={e => setDeactivateNotes(e.target.value)} rows={3} placeholder="ملاحظات إضافية..." />
+              </div>
             </div>
-            <div className="modal-footer">
-              <button className="modal-button secondary" onClick={() => setIsEditModalOpen(false)}>
-                إلغاء
-              </button>
-              <button className="modal-button primary" onClick={handleSaveEditedDoctor}>
-                حفظ التغييرات
-              </button>
+            <div className="deactivate-modal-footer">
+              <button className="btn-secondary" onClick={() => setShowDeactivateModal(false)}>إلغاء</button>
+              <button className="btn-danger" onClick={confirmDeactivation} disabled={!deactivateReason}>تأكيد</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Header */}
-      <header className="admin-header">
-        <div className="header-content">
-          <div className="header-left">
-            <div className="logo-container">
-              <div className="heart-pulse-container">
-                <svg className="heart-pulse-svg" viewBox="0 0 50 25" xmlns="http://www.w3.org/2000/svg">
-                  <defs>
-                    <linearGradient id="pulseGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" stopColor="#a23f97" stopOpacity="0.6"/>
-                      <stop offset="50%" stopColor="#ff4444" stopOpacity="1"/>
-                      <stop offset="100%" stopColor="#a23f97ff" stopOpacity="0.6"/>
-                    </linearGradient>
-                  </defs>
-                  <path 
-                    className="pulse-line" 
-                    d="M2,12.5 Q6,12.5 8,8 T12,12.5 T16,8 T20,12.5 T24,8 T28,12.5 T32,8 T36,12.5 T40,8 T44,12.5 L48,12.5" 
-                    fill="none" 
-                    stroke="url(#pulseGradient)" 
-                    strokeWidth="2"
-                  />
-                  <circle className="pulse-dot" cx="2" cy="12.5" r="2" fill="#ff4444"/>
-                </svg>
+      {/* Credentials Modal */}
+      {generatedCredentials && (
+        <div className="modal-overlay">
+          <div className="credentials-modal">
+            <div className="credentials-header">
+              <div className="credentials-icon">✅</div>
+              <h2>تم إضافة الطبيب بنجاح</h2>
+              <p>{generatedCredentials.doctorName}</p>
+            </div>
+            <div className="credentials-body">
+              <div className="credentials-warning">
+                <span>⚠️</span>
+                <p>احفظ هذه البيانات الآن! لن تظهر كلمة المرور مرة أخرى.</p>
               </div>
-              <h1 className="logo-text">لوحة تحكم الإدارة</h1>
+              <div className="credential-item">
+                <label>البريد الإلكتروني:</label>
+                <div className="credential-value">
+                  <code>{generatedCredentials.email}</code>
+                  <button className="copy-btn" onClick={() => { navigator.clipboard.writeText(generatedCredentials.email); openModal('success', 'تم', 'تم نسخ البريد'); }}>📋</button>
+                </div>
+              </div>
+              <div className="credential-item">
+                <label>كلمة المرور:</label>
+                <div className="credential-value">
+                  <code>{generatedCredentials.password}</code>
+                  <button className="copy-btn" onClick={() => { navigator.clipboard.writeText(generatedCredentials.password); openModal('success', 'تم', 'تم نسخ كلمة المرور'); }}>📋</button>
+                </div>
+              </div>
             </div>
-          </div>
-          
-          <div className="header-right">
-            <div className="user-info">
-              <span className="user-name">{currentUser?.firstName} {currentUser?.lastName}</span>
-              <span className="user-role">مسؤول النظام</span>
+            <div className="credentials-footer">
+              <button className="btn-primary" onClick={() => { setGeneratedCredentials(null); setShowAddDoctorForm(false); }}>تم - إغلاق</button>
             </div>
-            <button className="logout-button" onClick={handleLogout}>
-              تسجيل الخروج
-            </button>
           </div>
         </div>
-      </header>
+      )}
 
-      {/* Main Content */}
-      <main className="admin-main">
-        {/* Statistics Cards */}
-        <div className="stats-container">
-          <div className="stat-card blue">
-            <div className="stat-icon">👨‍⚕️</div>
-            <div className="stat-details">
-              <h3 className="stat-number">{stats.totalDoctors}</h3>
-              <p className="stat-label">إجمالي الأطباء</p>
+      <div className="admin-container">
+        {/* Header */}
+        <div className="admin-header">
+          <div className="admin-header-content">
+            <div className="ministry-badge">
+              <div className="ministry-icon">🏛️</div>
+              <div className="ministry-info">
+                <h1>وزارة الصحة</h1>
+                <p>الجمهورية العربية السورية</p>
+              </div>
+            </div>
+            <div className="admin-title">
+              <h2>لوحة تحكم المسؤول</h2>
+              <p>Patient 360°</p>
             </div>
           </div>
-
-          <div className="stat-card green">
-            <div className="stat-icon">✅</div>
-            <div className="stat-details">
-              <h3 className="stat-number">{stats.activeDoctors}</h3>
-              <p className="stat-label">الأطباء النشطون</p>
+          <div className="admin-user-section">
+            <div className="admin-user-info">
+              <span className="admin-avatar">👤</span>
+              <div className="admin-user-details">
+                <span className="admin-name">{admin.firstName} {admin.lastName}</span>
+                <span className="admin-role">مسؤول النظام</span>
+              </div>
             </div>
-          </div>
-
-          <div className="stat-card purple">
-            <div className="stat-icon">📅</div>
-            <div className="stat-details">
-              <h3 className="stat-number">{stats.newThisMonth}</h3>
-              <p className="stat-label">جديد هذا الشهر</p>
-            </div>
-          </div>
-
-          <div className="stat-card orange">
-            <div className="stat-icon">👥</div>
-            <div className="stat-details">
-              <h3 className="stat-number">{stats.totalPatients}</h3>
-              <p className="stat-label">إجمالي المرضى</p>
-            </div>
+            <button className="logout-btn-admin" onClick={handleLogout}>🚪 خروج</button>
           </div>
         </div>
 
         {/* Tabs */}
-        <div className="tabs-container">
-          <div className="tabs">
-            <button 
-              className={`tab ${activeTab === 'dashboard' ? 'active' : ''}`}
-              onClick={() => setActiveTab('dashboard')}
-            >
-              📊 لوحة المعلومات
+        <div className="admin-tabs">
+          {[
+            { id: 'statistics', icon: '📊', label: 'الإحصائيات' },
+            { id: 'doctors', icon: '👨‍⚕️', label: 'الأطباء' },
+            { id: 'patients', icon: '👥', label: 'المرضى' },
+            { id: 'audit', icon: '📜', label: 'السجلات' }
+          ].map(tab => (
+            <button key={tab.id} className={`admin-tab ${activeTab === tab.id ? 'active' : ''}`}
+              onClick={() => handleTabChange(tab.id)}>
+              <span className="tab-icon">{tab.icon}</span>
+              <span>{tab.label}</span>
             </button>
-            <button 
-              className={`tab ${activeTab === 'create' ? 'active' : ''}`}
-              onClick={() => setActiveTab('create')}
-            >
-              ➕ إنشاء حساب طبيب
-            </button>
-            <button 
-              className={`tab ${activeTab === 'manage' ? 'active' : ''}`}
-              onClick={() => setActiveTab('manage')}
-            >
-              📋 إدارة الأطباء
-            </button>
-          </div>
+          ))}
         </div>
 
-        {/* Tab Content */}
-        <div className="tab-content">
-          {/* Dashboard Tab */}
-          {activeTab === 'dashboard' && (
-            <div className="dashboard-content">
-              <div className="welcome-card">
-                <h2>مرحباً، {currentUser?.firstName}! 👋</h2>
-                <p>أنت تستخدم لوحة تحكم وزارة الصحة لإدارة حسابات الأطباء في نظام Patient 360°</p>
+        {/* Content */}
+        <div className="admin-content">
+          
+          {/* === STATISTICS TAB === */}
+          {activeTab === 'statistics' && (
+            <div className="tab-content statistics-content">
+              <div className="stats-grid">
+                <StatCard icon="👨‍⚕️" value={statistics.totalDoctors} label="الأطباء" sublabel={`${statistics.activeDoctors} نشط`} color="blue" onClick={() => handleTabChange('doctors')} />
+                <StatCard icon="👥" value={statistics.totalPatients} label="المرضى" sublabel={`${statistics.activePatients} نشط`} color="green" onClick={() => handleTabChange('patients')} />
+                <StatCard icon="📋" value={statistics.totalVisits} label="الزيارات" sublabel={`${statistics.todayVisits} اليوم`} color="purple" />
+                <StatCard icon="🏥" value={MEDICAL_SPECIALIZATIONS.length} label="التخصصات" color="orange" />
               </div>
 
-              <div className="info-cards">
-                <div className="info-card">
-                  <div className="card-header">
-                    <h3>إحصائيات النظام</h3>
-                    <span className="card-icon">📈</span>
-                  </div>
-                  <div className="card-content">
-                    <div className="info-item">
-                      <span className="info-label">إجمالي الأطباء المسجلين:</span>
-                      <span className="info-value">{stats.totalDoctors}</span>
-                    </div>
-                    <div className="info-item">
-                      <span className="info-label">إجمالي المرضى المسجلين:</span>
-                      <span className="info-value">{stats.totalPatients}</span>
-                    </div>
-                    <div className="info-item">
-                      <span className="info-label">أطباء جدد هذا الشهر:</span>
-                      <span className="info-value">{stats.newThisMonth}</span>
-                    </div>
+              <div className="stats-row">
+                <div className="stat-section">
+                  <h3>👨‍⚕️ الأطباء</h3>
+                  <div className="status-cards">
+                    <div className="status-card active"><span>✅</span><span>{statistics.activeDoctors} نشط</span></div>
+                    <div className="status-card inactive"><span>⏸️</span><span>{statistics.inactiveDoctors} غير نشط</span></div>
                   </div>
                 </div>
+                <div className="stat-section">
+                  <h3>👥 المرضى</h3>
+                  <div className="status-cards">
+                    <div className="status-card active"><span>✅</span><span>{statistics.activePatients} نشط</span></div>
+                    <div className="status-card inactive"><span>⏸️</span><span>{statistics.inactivePatients} غير نشط</span></div>
+                  </div>
+                </div>
+              </div>
 
-                <div className="info-card">
-                  <div className="card-header">
-                    <h3>آخر النشاطات</h3>
-                    <span className="card-icon">🔔</span>
-                  </div>
-                  <div className="card-content">
-                    <div className="activity-item">
-                      <span className="activity-icon">✅</span>
-                      <span className="activity-text">النظام يعمل بشكل طبيعي</span>
-                    </div>
-                    <div className="activity-item">
-                      <span className="activity-icon">👨‍⚕️</span>
-                      <span className="activity-text">{stats.totalDoctors} طبيب مسجل</span>
-                    </div>
-                    <div className="activity-item">
-                      <span className="activity-icon">👥</span>
-                      <span className="activity-text">{stats.totalPatients} مريض مسجل</span>
-                    </div>
-                  </div>
+              <div className="quick-actions-section">
+                <h3>⚡ إجراءات سريعة</h3>
+                <div className="quick-actions-grid">
+                  <button className="quick-action-btn" onClick={() => { handleTabChange('doctors'); setTimeout(() => setShowAddDoctorForm(true), 100); }}>
+                    <span>➕</span><span>إضافة طبيب</span>
+                  </button>
+                  <button className="quick-action-btn" onClick={() => handleTabChange('doctors')}><span>👨‍⚕️</span><span>عرض الأطباء</span></button>
+                  <button className="quick-action-btn" onClick={() => handleTabChange('patients')}><span>👥</span><span>عرض المرضى</span></button>
+                  <button className="quick-action-btn" onClick={() => handleTabChange('audit')}><span>📜</span><span>السجلات</span></button>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Create Doctor Tab */}
-          {activeTab === 'create' && (
-            <div className="create-doctor-content">
-              <div className="form-card">
-                <div className="form-header">
-                  <h2>إنشاء حساب طبيب جديد</h2>
-                  <p>الرجاء إدخال جميع البيانات المطلوبة</p>
+          {/* === DOCTORS TAB === */}
+          {activeTab === 'doctors' && (
+            <div className="tab-content doctors-content">
+              <div className="content-header">
+                <div><h2>👨‍⚕️ إدارة الأطباء</h2><p>إضافة وإدارة حسابات الأطباء</p></div>
+                <div className="header-actions">
+                  <button className="btn-export" onClick={() => exportToCSV('doctors')} disabled={!doctors.length}>📥 تصدير</button>
+                  <button className="btn-primary" onClick={() => setShowAddDoctorForm(true)}>➕ إضافة طبيب</button>
                 </div>
+              </div>
 
-                <form onSubmit={handleCreateDoctor}>
-                  <div className="form-section">
-                    <h3 className="section-title">المعلومات الشخصية</h3>
-                    
-                    <div className="form-row">
-                      <div className="form-group">
-                        <label className="form-label">الاسم الأول <span className="required">*</span></label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder="أحمد"
-                          value={newDoctor.firstName}
-                          onChange={(e) => setNewDoctor({...newDoctor, firstName: e.target.value})}
-                          required
-                          disabled={isLoading}
-                        />
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label">اسم العائلة <span className="required">*</span></label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder="محمد"
-                          value={newDoctor.lastName}
-                          onChange={(e) => setNewDoctor({...newDoctor, lastName: e.target.value})}
-                          required
-                          disabled={isLoading}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="form-row">
-                      <div className="form-group">
-                        <label className="form-label">الرقم الوطني <span className="required">*</span></label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder="12345678901"
-                          value={newDoctor.nationalId}
-                          onChange={(e) => setNewDoctor({...newDoctor, nationalId: e.target.value})}
-                          required
-                          disabled={isLoading}
-                          dir="ltr"
-                          maxLength="11"
-                        />
-                        <small className="form-hint">11   رقم</small>
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label">رقم الهاتف <span className="required">*</span></label>
-                        <input
-                          type="tel"
-                          className="form-input"
-                          placeholder="+963933527091"
-                          value={newDoctor.phoneNumber}
-                          onChange={(e) => setNewDoctor({...newDoctor, phoneNumber: e.target.value})}
-                          required
-                          disabled={isLoading}
-                          dir="ltr"
-                        />
-                      </div>
-                    </div>
+              {/* Add Doctor Form */}
+              {showAddDoctorForm && (
+                <div className="add-doctor-form-container">
+                  <div className="form-header">
+                    <h3>➕ إضافة طبيب جديد</h3>
+                    <button className="close-form-btn" onClick={() => setShowAddDoctorForm(false)}>✕</button>
                   </div>
 
-                  <div className="form-section">
-                    <h3 className="section-title">المعلومات المهنية</h3>
-                    
-                    <div className="form-row">
-                      <div className="form-group">
-                        <label className="form-label">رقم الترخيص الطبي <span className="required">*</span></label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder="MD12345678"
-                          value={newDoctor.medicalLicenseNumber}
-                          onChange={(e) => setNewDoctor({...newDoctor, medicalLicenseNumber: e.target.value})}
-                          required
-                          disabled={isLoading}
-                          dir="ltr"
-                        />
-                        <small className="form-hint">رقم الترخيص من وزارة الصحة</small>
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label">المؤسسة الطبية <span className="required">*</span></label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder="مشفى الأسد الجامعي"
-                          value={newDoctor.institution}
-                          onChange={(e) => setNewDoctor({...newDoctor, institution: e.target.value})}
-                          required
-                          disabled={isLoading}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="info-box">
-                      <span className="info-icon">ℹ️</span>
-                      <span className="info-text">
-                        جميع الأطباء في هذا النظام متخصصون في أمراض القلب
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="form-section">
-                    <h3 className="section-title">معلومات الحساب</h3>
-                    
-                    <div className="form-group">
-                      <label className="form-label">البريد الإلكتروني <span className="required">*</span></label>
-                      <input
-                        type="email"
-                        className="form-input"
-                        placeholder="doctor@example.com"
-                        value={newDoctor.email}
-                        onChange={(e) => setNewDoctor({...newDoctor, email: e.target.value})}
-                        required
-                        disabled={isLoading}
-                        dir="ltr"
-                      />
-                      <small className="form-hint">سيستخدم للدخول إلى النظام</small>
-                    </div>
-
-                    <div className="form-group">
-                      <div className="checkbox-group">
-                        <input
-                          type="checkbox"
-                          id="autoPassword"
-                          checked={newDoctor.autoGeneratePassword}
-                          onChange={handleAutoPasswordToggle}
-                          disabled={isLoading}
-                        />
-                        <label htmlFor="autoPassword">
-                          توليد كلمة مرور تلقائية (موصى به)
-                        </label>
-                      </div>
-                    </div>
-
-                    {!newDoctor.autoGeneratePassword && (
-                      <div className="form-group">
-                        <label className="form-label">كلمة المرور <span className="required">*</span></label>
-                        <input
-                          type="text"
-                          className="form-input"
-                          placeholder="أدخل كلمة المرور"
-                          value={newDoctor.password}
-                          onChange={(e) => setNewDoctor({...newDoctor, password: e.target.value})}
-                          required
-                          disabled={isLoading}
-                          dir="ltr"
-                        />
-                        <small className="form-hint">على الأقل 8 أحرف</small>
-                      </div>
-                    )}
-
-                    {newDoctor.autoGeneratePassword && (
-                      <div className="password-preview">
-                        <label className="form-label">كلمة المرور المولدة:</label>
-                        <div className="generated-password">
-                          <code>{newDoctor.password || generatePassword()}</code>
+                  <div className="form-body">
+                    {/* Personal Info */}
+                    <div className="form-section">
+                      <h4>👤 المعلومات الشخصية (persons collection)</h4>
+                      <div className="form-grid">
+                        <div className="form-group">
+                          <label>الاسم الأول <span className="required">*</span></label>
+                          <input type="text" value={newDoctor.firstName} onChange={e => setNewDoctor({...newDoctor, firstName: e.target.value})} placeholder="الاسم الأول" />
                         </div>
-                        <small className="form-hint">سيتم عرض كلمة المرور بعد الإنشاء</small>
+                        <div className="form-group">
+                          <label>الكنية <span className="required">*</span></label>
+                          <input type="text" value={newDoctor.lastName} onChange={e => setNewDoctor({...newDoctor, lastName: e.target.value})} placeholder="الكنية" />
+                        </div>
+                        <div className="form-group">
+                          <label>الرقم الوطني <span className="required">*</span> <small>(11 رقم)</small></label>
+                          <input type="text" value={newDoctor.nationalId} onChange={e => setNewDoctor({...newDoctor, nationalId: e.target.value.replace(/\D/g, '').slice(0, 11)})} placeholder="00000000000" maxLength={11} dir="ltr" />
+                        </div>
+                        <div className="form-group">
+                          <label>الجنس</label>
+                          <select value={newDoctor.gender} onChange={e => setNewDoctor({...newDoctor, gender: e.target.value})}>
+                            <option value="male">ذكر</option>
+                            <option value="female">أنثى</option>
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label>تاريخ الميلاد</label>
+                          <input type="date" value={newDoctor.dateOfBirth} onChange={e => setNewDoctor({...newDoctor, dateOfBirth: e.target.value})} />
+                        </div>
+                        <div className="form-group">
+                          <label>رقم الهاتف <span className="required">*</span></label>
+                          <input type="tel" value={newDoctor.phoneNumber} onChange={e => setNewDoctor({...newDoctor, phoneNumber: e.target.value})} placeholder="09XXXXXXXX" dir="ltr" />
+                        </div>
+                        <div className="form-group">
+                          <label>المحافظة <span className="required">*</span></label>
+                          <select value={newDoctor.governorate} onChange={e => setNewDoctor({...newDoctor, governorate: e.target.value})}>
+                            <option value="">اختر المحافظة</option>
+                            {SYRIAN_GOVERNORATES.map(g => <option key={g.id} value={g.id}>{g.nameAr}</option>)}
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label>المدينة</label>
+                          <input type="text" value={newDoctor.city} onChange={e => setNewDoctor({...newDoctor, city: e.target.value})} placeholder="المدينة" />
+                        </div>
+                        <div className="form-group full-width">
+                          <label>عنوان العيادة <span className="required">*</span></label>
+                          <textarea value={newDoctor.address} onChange={e => setNewDoctor({...newDoctor, address: e.target.value})} placeholder="العنوان التفصيلي للعيادة" rows={2} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Doctor Info - Matching Schema */}
+                    <div className="form-section">
+                      <h4>🩺 المعلومات المهنية (doctors collection)</h4>
+                      <div className="schema-note">
+                        <strong>⚠️ متطلبات قاعدة البيانات:</strong>
+                        <ul>
+                          <li>رقم الترخيص: 8-20 حرف/رقم إنجليزي كبير (A-Z, 0-9)</li>
+                          <li>التخصص: باللغة الإنجليزية فقط</li>
+                          <li>أيام العمل: يوم واحد على الأقل</li>
+                        </ul>
+                      </div>
+                      
+                      <div className="form-grid">
+                        <div className="form-group">
+                          <label>رقم الترخيص الطبي <span className="required">*</span></label>
+                          <small className="field-hint"> مثال: SY12345678</small>
+                          <input type="text" value={newDoctor.medicalLicenseNumber}
+                            onChange={e => setNewDoctor({...newDoctor, medicalLicenseNumber: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 20)})}
+                            placeholder="SY12345678" dir="ltr" maxLength={20} className="mono-input" />
+                        </div>
+                        
+                        <div className="form-group">
+                          <label>التخصص <span className="required">*</span></label>
+                          <small className="field-hint">3-100 حرف</small>
+                          <select value={newDoctor.specialization} onChange={e => setNewDoctor({...newDoctor, specialization: e.target.value})}>
+                            <option value="">اختر التخصص</option>
+                            {MEDICAL_SPECIALIZATIONS.map(s => <option key={s.id} value={s.id}>{s.icon} {s.nameAr} ({s.id})</option>)}
+                          </select>
+                        </div>
+                        
+                        <div className="form-group">
+                          <label>التخصص الفرعي</label>
+                          <small className="field-hint">3-100 حرف (اختياري)</small>
+                          <input type="text" value={newDoctor.subSpecialization}
+                            onChange={e => setNewDoctor({...newDoctor, subSpecialization: e.target.value.slice(0, 100)})}
+                            placeholder="التخصص الفرعي" maxLength={100} />
+                        </div>
+                        
+                        <div className="form-group">
+                          <label>سنوات الخبرة</label>
+                          <small className="field-hint">0-60 سنة</small>
+                          <input type="number" value={newDoctor.yearsOfExperience}
+                            onChange={e => setNewDoctor({...newDoctor, yearsOfExperience: Math.min(60, Math.max(0, parseInt(e.target.value) || 0)).toString()})}
+                            min="0" max="60" placeholder="0" />
+                        </div>
+                        
+                        <div className="form-group">
+                          <label>المستشفى / المركز الصحي <span className="required">*</span></label>
+                          <small className="field-hint">3-150 حرف</small>
+                          <input type="text" value={newDoctor.hospitalAffiliation}
+                            onChange={e => setNewDoctor({...newDoctor, hospitalAffiliation: e.target.value.slice(0, 150)})}
+                            placeholder="اسم المستشفى أو المركز الصحي" maxLength={150} />
+                        </div>
+                        
+                        <div className="form-group">
+                          <label>رسوم الكشف (ل.س)</label>
+                          <small className="field-hint">0-1,000,000</small>
+                          <input type="number" value={newDoctor.consultationFee}
+                            onChange={e => setNewDoctor({...newDoctor, consultationFee: Math.min(1000000, Math.max(0, parseInt(e.target.value) || 0)).toString()})}
+                            min="0" max="1000000" placeholder="0" />
+                        </div>
+                      </div>
+
+                      {/* Available Days */}
+                      <div className="form-group full-width">
+                        <label>أيام العمل <span className="required">*</span></label>
+                        <small className="field-hint">اختر 1-7 أيام (enum: Monday-Sunday)</small>
+                        <div className="days-grid">
+                          {WEEKDAYS.map(day => (
+                            <div key={day.id} className={`day-card ${newDoctor.availableDays.includes(day.id) ? 'selected' : ''}`}
+                              onClick={() => handleDayToggle(day.id)}>
+                              <span className="day-name-ar">{day.nameAr}</span>
+                              <span className="day-name-en">{day.id}</span>
+                            </div>
+                          ))}
+                        </div>
+                        {newDoctor.availableDays.length > 0 && (
+                          <div className="selected-days">
+                            الأيام المختارة: {newDoctor.availableDays.join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Email Preview */}
+                    {newDoctor.firstName && newDoctor.lastName && newDoctor.medicalLicenseNumber.length >= 8 && (
+                      <div className="email-preview">
+                        <span className="preview-label">📧 البريد الإلكتروني المُولّد:</span>
+                        <code>{generateDoctorEmail(newDoctor.firstName, newDoctor.lastName, newDoctor.medicalLicenseNumber)}</code>
                       </div>
                     )}
                   </div>
 
-                  <div className="form-actions">
-                    <button 
-                      type="button" 
-                      className="btn-secondary"
-                      onClick={() => {
-                        setNewDoctor({
-                          firstName: '',
-                          lastName: '',
-                          nationalId: '',
-                          email: '',
-                          phoneNumber: '',
-                          medicalLicenseNumber: '',
-                          institution: '',
-                          password: '',
-                          autoGeneratePassword: true
-                        });
-                      }}
-                      disabled={isLoading}
-                    >
-                      مسح النموذج
+                  <div className="form-footer">
+                    <button className="btn-secondary" onClick={() => setShowAddDoctorForm(false)}>إلغاء</button>
+                    <button className="btn-primary" onClick={handleAddDoctor} disabled={addDoctorLoading}>
+                      {addDoctorLoading ? '⏳ جاري...' : '✅ إضافة الطبيب'}
                     </button>
-                    <button 
-                      type="submit" 
-                      className="btn-primary"
-                      disabled={isLoading}
-                    >
-                      {isLoading ? 'جارٍ الإنشاء...' : '✅ إنشاء الحساب'}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
-
-          {/* Manage Doctors Tab */}
-          {activeTab === 'manage' && (
-            <div className="manage-doctors-content">
-              <div className="table-card">
-                <div className="table-header">
-                  <h2>إدارة الأطباء</h2>
-                  <div className="search-box">
-                    <input
-                      type="text"
-                      className="search-input"
-                      placeholder="🔍 البحث بالاسم، البريد، الرقم الوطني..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                    />
                   </div>
                 </div>
+              )}
 
-                <div className="table-container">
-                  {filteredDoctors.length === 0 ? (
-                    <div className="empty-state">
-                      <div className="empty-icon">👨‍⚕️</div>
-                      <h3>لا يوجد أطباء</h3>
-                      <p>لم يتم العثور على أي أطباء مسجلين</p>
-                    </div>
-                  ) : (
-                    <table className="doctors-table">
-                      <thead>
-                        <tr>
-                          <th>الاسم الكامل</th>
-                          <th>البريد الإلكتروني</th>
-                          <th>الرقم الوطني</th>
-                          <th>رقم الترخيص</th>
-                          <th>المؤسسة</th>
-                          <th>رقم الهاتف</th>
-                          <th>تاريخ التسجيل</th>
-                          <th>الإجراءات</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredDoctors.map(doctor => (
-                          <tr key={doctor.id}>
-                            <td className="doctor-name">
-                              <div className="name-cell">
-                                <span className="doctor-icon">👨‍⚕️</span>
-                                <span>{doctor.firstName} {doctor.lastName}</span>
+              {/* Search & Filter */}
+              <div className="search-filter-bar">
+                <div className="search-box">
+                  <span>🔍</span>
+                  <input type="text" placeholder="بحث..." value={doctorSearchTerm} onChange={e => setDoctorSearchTerm(e.target.value)} />
+                </div>
+                <div className="filter-buttons">
+                  <button className={`filter-btn ${doctorFilter === 'all' ? 'active' : ''}`} onClick={() => setDoctorFilter('all')}>الكل ({doctors.length})</button>
+                  <button className={`filter-btn ${doctorFilter === 'active' ? 'active' : ''}`} onClick={() => setDoctorFilter('active')}>نشط</button>
+                  <button className={`filter-btn ${doctorFilter === 'inactive' ? 'active' : ''}`} onClick={() => setDoctorFilter('inactive')}>غير نشط</button>
+                </div>
+              </div>
+
+              {/* Doctors Table */}
+              {doctorsLoading ? (
+                <div className="loading-state"><div className="spinner"></div><p>جاري التحميل...</p></div>
+              ) : filteredDoctors.length === 0 ? (
+                <div className="empty-state"><span>👨‍⚕️</span><h3>لا يوجد أطباء</h3></div>
+              ) : (
+                <div className="data-table-container">
+                  <table className="data-table">
+                    <thead>
+                      <tr><th>الطبيب</th><th>رقم الترخيص</th><th>التخصص</th><th>المستشفى</th><th>الحالة</th><th>الإجراءات</th></tr>
+                    </thead>
+                    <tbody>
+                      {filteredDoctors.map((d, i) => {
+                        const firstName = d.firstName || d.person?.firstName || '';
+                        const lastName = d.lastName || d.person?.lastName || '';
+                        const email = d.email || d.account?.email || '';
+                        const gender = d.gender || d.person?.gender || 'male';
+                        const spec = MEDICAL_SPECIALIZATIONS.find(s => s.id === d.specialization);
+                        
+                        return (
+                          <tr key={d._id || i} className={d.isActive === false ? 'inactive-row' : ''}>
+                            <td>
+                              <div className="user-cell">
+                                <span className="user-avatar">{gender === 'female' ? '👩‍⚕️' : '👨‍⚕️'}</span>
+                                <div><div className="user-name">د. {firstName} {lastName}</div><div className="user-email">{email}</div></div>
                               </div>
                             </td>
-                            <td dir="ltr">{doctor.email}</td>
-                            <td dir="ltr">{doctor.nationalId}</td>
-                            <td dir="ltr">{doctor.medicalLicenseNumber}</td>
-                            <td>{doctor.institution}</td>
-                            <td dir="ltr">{doctor.phoneNumber}</td>
-                            <td>{new Date(doctor.registrationDate).toLocaleDateString('ar-EG', {
-                              year: 'numeric',
-                              month: '2-digit',
-                              day: '2-digit'
-                            })}</td>
+                            <td><code>{d.medicalLicenseNumber || '-'}</code></td>
+                            <td>{spec ? <span className="specialty-badge">{spec.icon} {spec.nameAr}</span> : d.specialization || '-'}</td>
+                            <td>{d.hospitalAffiliation || '-'}</td>
+                            <td><span className={`status-badge ${d.isActive !== false ? 'active' : 'inactive'}`}>{d.isActive !== false ? '✅ نشط' : '⏸️ غير نشط'}</span></td>
                             <td>
                               <div className="action-buttons">
-                                <button 
-                                  className="btn-edit"
-                                  onClick={() => handleEditDoctor(doctor)}
-                                  title="تعديل"
-                                >
-                                  ✏️
-                                </button>
-                                <button 
-                                  className="btn-delete"
-                                  onClick={() => handleDeleteDoctor(doctor.id)}
-                                  title="حذف"
-                                >
-                                  🗑️
-                                </button>
+                                <button className="action-btn view" onClick={() => { setSelectedDoctor(d); setShowDoctorDetails(true); }}>👁️</button>
+                                {d.isActive !== false ? (
+                                  <button className="action-btn deactivate" onClick={() => handleDeactivate(d, 'doctor')}>⏸️</button>
+                                ) : (
+                                  <button className="action-btn reactivate" onClick={() => handleReactivate(d, 'doctor')}>▶️</button>
+                                )}
                               </div>
                             </td>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
+              )}
 
-                <div className="table-footer">
-                  <p>إجمالي الأطباء: {filteredDoctors.length}</p>
+              {/* Doctor Details Modal */}
+              {showDoctorDetails && selectedDoctor && (
+                <div className="modal-overlay" onClick={() => setShowDoctorDetails(false)}>
+                  <div className="details-modal" onClick={e => e.stopPropagation()}>
+                    <div className="details-modal-header">
+                      <span className="details-avatar">{(selectedDoctor.gender || selectedDoctor.person?.gender) === 'female' ? '👩‍⚕️' : '👨‍⚕️'}</span>
+                      <div>
+                        <h2>د. {selectedDoctor.firstName || selectedDoctor.person?.firstName} {selectedDoctor.lastName || selectedDoctor.person?.lastName}</h2>
+                        <p>{MEDICAL_SPECIALIZATIONS.find(s => s.id === selectedDoctor.specialization)?.nameAr || selectedDoctor.specialization}</p>
+                      </div>
+                      <button className="close-modal-btn" onClick={() => setShowDoctorDetails(false)}>✕</button>
+                    </div>
+                    <div className="details-modal-body">
+                      <div className="details-grid">
+                        <div><strong>رقم الترخيص:</strong> {selectedDoctor.medicalLicenseNumber}</div>
+                        <div><strong>التخصص:</strong> {selectedDoctor.specialization}</div>
+                        <div><strong>سنوات الخبرة:</strong> {selectedDoctor.yearsOfExperience || 0}</div>
+                        <div><strong>المستشفى:</strong> {selectedDoctor.hospitalAffiliation}</div>
+                        <div><strong>رسوم الكشف:</strong> {selectedDoctor.consultationFee || 0} ل.س</div>
+                        <div><strong>أيام العمل:</strong> {selectedDoctor.availableDays?.map(d => WEEKDAYS.find(w => w.id === d)?.nameAr).join('، ')}</div>
+                      </div>
+                      <div className="status-display">
+                        <span className={`big-status-badge ${selectedDoctor.isActive !== false ? 'active' : 'inactive'}`}>
+                          {selectedDoctor.isActive !== false ? '✅ نشط' : '⏸️ غير نشط'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="details-modal-footer">
+                      <button className="btn-secondary" onClick={() => setShowDoctorDetails(false)}>إغلاق</button>
+                      {selectedDoctor.isActive !== false ? (
+                        <button className="btn-danger" onClick={() => { setShowDoctorDetails(false); handleDeactivate(selectedDoctor, 'doctor'); }}>⏸️ إلغاء التفعيل</button>
+                      ) : (
+                        <button className="btn-success" onClick={() => { setShowDoctorDetails(false); handleReactivate(selectedDoctor, 'doctor'); }}>▶️ إعادة التفعيل</button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* === PATIENTS TAB === */}
+          {activeTab === 'patients' && (
+            <div className="tab-content patients-content">
+              <div className="content-header">
+                <div><h2>👥 إدارة المرضى</h2><p>عرض وإدارة حسابات المرضى</p></div>
+                <button className="btn-export" onClick={() => exportToCSV('patients')} disabled={!patients.length}>📥 تصدير</button>
+              </div>
+
+              <div className="info-banner">ℹ️ البيانات الطبية متاحة فقط للأطباء المعالجين.</div>
+
+              <div className="search-filter-bar">
+                <div className="search-box"><span>🔍</span><input type="text" placeholder="بحث..." value={patientSearchTerm} onChange={e => setPatientSearchTerm(e.target.value)} /></div>
+                <div className="filter-buttons">
+                  <button className={`filter-btn ${patientFilter === 'all' ? 'active' : ''}`} onClick={() => setPatientFilter('all')}>الكل</button>
+                  <button className={`filter-btn ${patientFilter === 'active' ? 'active' : ''}`} onClick={() => setPatientFilter('active')}>نشط</button>
+                  <button className={`filter-btn ${patientFilter === 'inactive' ? 'active' : ''}`} onClick={() => setPatientFilter('inactive')}>غير نشط</button>
                 </div>
               </div>
+
+              {patientsLoading ? (
+                <div className="loading-state"><div className="spinner"></div></div>
+              ) : filteredPatients.length === 0 ? (
+                <div className="empty-state"><span>👥</span><h3>لا يوجد مرضى</h3></div>
+              ) : (
+                <div className="data-table-container">
+                  <table className="data-table">
+                    <thead><tr><th>المريض</th><th>الرقم الوطني</th><th>الجنس</th><th>الحالة</th><th>الإجراءات</th></tr></thead>
+                    <tbody>
+                      {filteredPatients.map((p, i) => {
+                        const firstName = p.firstName || p.person?.firstName || '';
+                        const lastName = p.lastName || p.person?.lastName || '';
+                        const email = p.email || p.account?.email || '';
+                        const gender = p.gender || p.person?.gender || 'male';
+                        const nid = p.nationalId || p.person?.nationalId || '';
+                        
+                        return (
+                          <tr key={p._id || i} className={p.isActive === false ? 'inactive-row' : ''}>
+                            <td>
+                              <div className="user-cell">
+                                <span className="user-avatar">{gender === 'female' ? '👩' : '👨'}</span>
+                                <div><div className="user-name">{firstName} {lastName}</div><div className="user-email">{email}</div></div>
+                              </div>
+                            </td>
+                            <td><code>{nid}</code></td>
+                            <td>{gender === 'male' ? 'ذكر' : 'أنثى'}</td>
+                            <td><span className={`status-badge ${p.isActive !== false ? 'active' : 'inactive'}`}>{p.isActive !== false ? '✅' : '⏸️'}</span></td>
+                            <td>
+                              <div className="action-buttons">
+                                <button className="action-btn view" onClick={() => { setSelectedPatient(p); setShowPatientDetails(true); }}>👁️</button>
+                                {p.isActive !== false ? (
+                                  <button className="action-btn deactivate" onClick={() => handleDeactivate(p, 'patient')}>⏸️</button>
+                                ) : (
+                                  <button className="action-btn reactivate" onClick={() => handleReactivate(p, 'patient')}>▶️</button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* Patient Details */}
+              {showPatientDetails && selectedPatient && (
+                <div className="modal-overlay" onClick={() => setShowPatientDetails(false)}>
+                  <div className="details-modal" onClick={e => e.stopPropagation()}>
+                    <div className="details-modal-header patient">
+                      <span className="details-avatar">{(selectedPatient.gender || selectedPatient.person?.gender) === 'female' ? '👩' : '👨'}</span>
+                      <div>
+                        <h2>{selectedPatient.firstName || selectedPatient.person?.firstName} {selectedPatient.lastName || selectedPatient.person?.lastName}</h2>
+                        <p>مريض</p>
+                      </div>
+                      <button className="close-modal-btn" onClick={() => setShowPatientDetails(false)}>✕</button>
+                    </div>
+                    <div className="details-modal-body">
+                      <div className="details-grid">
+                        <div><strong>الرقم الوطني:</strong> {selectedPatient.nationalId || selectedPatient.person?.nationalId}</div>
+                        <div><strong>الهاتف:</strong> {selectedPatient.phoneNumber || selectedPatient.person?.phoneNumber || '-'}</div>
+                        <div><strong>البريد:</strong> {selectedPatient.email || selectedPatient.account?.email}</div>
+                      </div>
+                      <div className="medical-notice">🔒 البيانات الطبية محمية</div>
+                    </div>
+                    <div className="details-modal-footer">
+                      <button className="btn-secondary" onClick={() => setShowPatientDetails(false)}>إغلاق</button>
+                      {selectedPatient.isActive !== false ? (
+                        <button className="btn-danger" onClick={() => { setShowPatientDetails(false); handleDeactivate(selectedPatient, 'patient'); }}>⏸️ إلغاء</button>
+                      ) : (
+                        <button className="btn-success" onClick={() => { setShowPatientDetails(false); handleReactivate(selectedPatient, 'patient'); }}>▶️ تفعيل</button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* === AUDIT TAB === */}
+          {activeTab === 'audit' && (
+            <div className="tab-content audit-content">
+              <div className="content-header">
+                <div><h2>📜 سجل النظام</h2><p>تتبع الإجراءات الإدارية</p></div>
+                <button className="btn-secondary" onClick={loadAuditLogs}>🔄 تحديث</button>
+              </div>
+
+              {auditLoading ? (
+                <div className="loading-state"><div className="spinner"></div></div>
+              ) : auditLogs.length === 0 ? (
+                <div className="empty-state"><span>📜</span><h3>لا توجد سجلات</h3></div>
+              ) : (
+                <div className="audit-logs-container">
+                  {auditLogs.map((log, i) => (
+                    <div key={i} className="audit-log-item">
+                      <span className="log-icon">{log.action?.includes('ADD') ? '➕' : log.action?.includes('DEACTIVATE') ? '⏸️' : log.action?.includes('REACTIVATE') ? '▶️' : '📋'}</span>
+                      <div className="log-content">
+                        <p>{log.description}</p>
+                        <small>👤 {log.adminName} • 🕐 {formatDateTime(log.timestamp)}</small>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
-      </main>
+      </div>
     </div>
   );
 };

@@ -99,7 +99,76 @@ const visitSchema = new mongoose.Schema({
     type: String,
     trim: true,
     maxlength: [5000, 'ملاحظات الطبيب لا يمكن أن تتجاوز 5000 حرف']
-  }
+  },
+  
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // NEW: Attachments (Images/PDFs)
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  attachments: [{
+    fileName: {
+      type: String,
+      required: [true, 'اسم الملف مطلوب'],
+      trim: true,
+      maxlength: [255, 'اسم الملف يجب ألا يتجاوز 255 حرفاً']
+    },
+    fileType: {
+      type: String,
+      required: [true, 'نوع الملف مطلوب'],
+      enum: {
+        values: ['image', 'pdf', 'document'],
+        message: 'نوع الملف يجب أن يكون image أو pdf أو document'
+      }
+    },
+    mimeType: {
+      type: String,
+      required: [true, 'نوع MIME مطلوب'],
+      enum: {
+        values: [
+          'image/jpeg',
+          'image/jpg', 
+          'image/png',
+          'image/gif',
+          'image/webp',
+          'application/pdf',
+          'application/msword',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        ],
+        message: 'نوع الملف غير مدعوم'
+      }
+    },
+    fileSize: {
+      type: Number,
+      required: [true, 'حجم الملف مطلوب'],
+      min: [1, 'حجم الملف يجب أن يكون أكبر من 0'],
+      max: [10485760, 'حجم الملف يجب ألا يتجاوز 10MB (10485760 bytes)']
+    },
+    filePath: {
+      type: String,
+      required: [true, 'مسار الملف مطلوب'],
+      trim: true,
+      maxlength: [500, 'مسار الملف يجب ألا يتجاوز 500 حرف']
+    },
+    fileUrl: {
+      type: String,
+      trim: true,
+      maxlength: [500, 'رابط الملف يجب ألا يتجاوز 500 حرف']
+    },
+    description: {
+      type: String,
+      trim: true,
+      maxlength: [200, 'وصف الملف يجب ألا يتجاوز 200 حرف'],
+      default: ''
+    },
+    uploadedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Account',
+      required: [true, 'معرف المستخدم الذي رفع الملف مطلوب']
+    },
+    uploadedAt: {
+      type: Date,
+      default: Date.now
+    }
+  }]
   
 }, {
   timestamps: true,

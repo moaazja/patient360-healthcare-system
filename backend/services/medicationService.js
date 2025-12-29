@@ -10,6 +10,8 @@ const Visit = require('../models/Visit');
  */
 exports.getCurrentMedications = async (patientId) => {
   try {
+    console.log('🔍 [medicationService] Getting medications for patient:', patientId);
+    
     // Get all completed visits with medications
     const visits = await Visit.find({
       patientId,
@@ -26,6 +28,8 @@ exports.getCurrentMedications = async (patientId) => {
       })
       .sort({ visitDate: -1 })
       .lean();
+
+    console.log('📋 [medicationService] Found visits:', visits.length);
 
     if (visits.length === 0) {
       return {
@@ -56,6 +60,12 @@ exports.getCurrentMedications = async (patientId) => {
 
     // Filter for active medications
     const activeMedications = filterActiveMedications(allMedications);
+    
+    console.log('📦 [medicationService] All medications:', allMedications.length);
+    console.log('✅ [medicationService] Active medications:', activeMedications.length);
+    if (allMedications.length > 0) {
+      console.log('📝 [medicationService] Sample medication:', JSON.stringify(allMedications[0], null, 2));
+    }
 
     return {
       success: true,
@@ -70,7 +80,6 @@ exports.getCurrentMedications = async (patientId) => {
     };
   }
 };
-
 /**
  * Generate weekly medication schedule
  */
@@ -288,7 +297,8 @@ function filterActiveMedications(medications) {
     // If duration contains "مستمر" or "continuous", it's always active
     if (med.duration && (
       med.duration.includes('مستمر') || 
-      med.duration.toLowerCase().includes('continuous')
+      med.duration.toLowerCase().includes('continuous') ||
+      med.duration.toLowerCase().includes('ongoing')
     )) {
       return true;
     }
@@ -304,11 +314,33 @@ function filterActiveMedications(medications) {
       return now <= endDate;
     }
 
-    // If no clear duration, assume active if prescribed in last 30 days
+    // If duration contains weeks
+    const weeksMatch = med.duration?.match(/(\d+)\s*(أسبوع|week)/i);
+    if (weeksMatch) {
+      const weeks = parseInt(weeksMatch[1]);
+      const prescribedDate = new Date(med.visitDate);
+      const endDate = new Date(prescribedDate);
+      endDate.setDate(endDate.getDate() + (weeks * 7));
+      
+      return now <= endDate;
+    }
+
+    // If duration contains months
+    const monthsMatch = med.duration?.match(/(\d+)\s*(شهر|month)/i);
+    if (monthsMatch) {
+      const months = parseInt(monthsMatch[1]);
+      const prescribedDate = new Date(med.visitDate);
+      const endDate = new Date(prescribedDate);
+      endDate.setMonth(endDate.getMonth() + months);
+      
+      return now <= endDate;
+    }
+
+    // ✅ DEFAULT: If no clear duration, assume active if prescribed in last 90 days (3 months)
     const prescribedDate = new Date(med.visitDate);
     const daysSincePrescribed = (now - prescribedDate) / (1000 * 60 * 60 * 24);
     
-    return daysSincePrescribed <= 30;
+    return daysSincePrescribed <= 90;  // ← غيرنا من 30 لـ 90 يوم
   });
 }
 

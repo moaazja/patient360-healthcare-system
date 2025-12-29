@@ -12,7 +12,10 @@ const medicationService = require('../services/medicationService');
  */
 exports.getCurrentMedications = async (req, res) => {
   try {
-    const patientId = req.user.patientId;
+    // ✅ استخدم personId بدل patientId
+    const patientId = req.user.personId;
+    
+    console.log('🔍 getCurrentMedications - Patient ID:', patientId);
 
     const result = await medicationService.getCurrentMedications(patientId);
 
@@ -37,7 +40,10 @@ exports.getCurrentMedications = async (req, res) => {
  */
 exports.getMedicationSchedule = async (req, res) => {
   try {
-    const patientId = req.user.patientId;
+    // ✅ استخدم personId بدل patientId
+    const patientId = req.user.personId;
+    
+    console.log('📅 getMedicationSchedule - Patient ID:', patientId);
 
     const result = await medicationService.getMedicationSchedule(patientId);
 
@@ -62,7 +68,9 @@ exports.getMedicationSchedule = async (req, res) => {
  */
 exports.getMedicationHistory = async (req, res) => {
   try {
-    const patientId = req.user.patientId;
+    // ✅ استخدم personId بدل patientId
+    const patientId = req.user.personId;
+    
     const filters = {
       startDate: req.query.startDate,
       endDate: req.query.endDate,
@@ -94,7 +102,8 @@ exports.getMedicationHistory = async (req, res) => {
  */
 exports.checkInteractions = async (req, res) => {
   try {
-    const patientId = req.user.patientId;
+    // ✅ استخدم personId بدل patientId
+    const patientId = req.user.personId;
 
     const result = await medicationService.checkMedicationInteractions(patientId);
 

@@ -2,6 +2,7 @@ const express = require('express');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const helmet = require('helmet');
+const path = require('path');
 
 // Load environment variables
 dotenv.config();
@@ -15,8 +16,11 @@ connectDB();
 // Import middleware and routes
 const { apiLimiter } = require('./middleware/security');
 const authRoutes = require('./routes/auth');
-const patientRoutes = require('./routes/patient'); // ← NEW
+const patientRoutes = require('./routes/patient');
 const doctorRoutes = require('./routes/doctor');
+const adminRoutes = require('./routes/admin');
+const visitRoutes = require('./routes/visit');  // ← NEW
+
 
 // Initialize express app
 const app = express();
@@ -38,6 +42,10 @@ app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 
+// Serve uploaded files (MUST BE BEFORE ROUTES)
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+console.log('📁 Static files served from /uploads');
+
 // Rate limiting
 app.use('/api/', apiLimiter);
 
@@ -45,6 +53,9 @@ app.use('/api/', apiLimiter);
 app.use('/api/auth', authRoutes);
 app.use('/api/patient', patientRoutes); 
 app.use('/api/doctor', doctorRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api/visits', visitRoutes);  // ← NEW
+
 
 // Welcome route
 app.get('/', (req, res) => {
@@ -57,7 +68,10 @@ app.get('/', (req, res) => {
       auth: '/api/auth',
       signup: 'POST /api/auth/signup',
       login: 'POST /api/auth/login',
-      patient: '/api/patient', // ← NEW
+      patient: '/api/patient',
+      doctor: '/api/doctor',
+      admin: '/api/admin',
+      visits: '/api/visits',  // ← NEW
       verify: 'GET /api/auth/verify',
       updateLastLogin: 'POST /api/auth/update-last-login'
     }
@@ -94,6 +108,8 @@ app.listen(PORT, () => {
   console.log(`🔐 Auth Routes: http://localhost:${PORT}/api/auth`);
   console.log(`👤 Patient Routes: http://localhost:${PORT}/api/patient`); 
   console.log(`👨‍⚕️ Doctor Routes: http://localhost:${PORT}/api/doctor`);
+  console.log(`📋 Admin Routes: http://localhost:${PORT}/api/admin`);
+  console.log(`🏥 Visit Routes: http://localhost:${PORT}/api/visits`);  // ← NEW
   console.log('✅ CORS enabled for http://localhost:3000');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 });

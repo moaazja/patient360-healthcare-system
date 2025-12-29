@@ -42,9 +42,37 @@ const accountSchema = new mongoose.Schema({
   lastLogin: {
     type: Date,
     default: null
+  },
+  
+  // NEW: Deactivation tracking fields
+  deactivationReason: {
+    type: String,
+    enum: ['death', 'license_revoked', 'user_request', 'fraud', 'retirement', 'transfer', 'other', null],
+    default: null
+  },
+  deactivationNotes: {
+    type: String,
+    maxlength: [1000, 'ملاحظات إلغاء التفعيل يجب ألا تتجاوز 1000 حرف'],
+    default: null
+  },
+  deactivatedAt: {
+    type: Date,
+    default: null
+  },
+  deactivatedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Account',
+    default: null
+  },
+  reactivatedAt: {
+    type: Date,
+    default: null
+  },
+  reactivatedBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Account',
+    default: null
   }
-  // ❌ REMOVED: loginAttempts
-  // ❌ REMOVED: lockUntil
 }, {
   timestamps: true,
   collection: 'accounts'
@@ -76,8 +104,6 @@ accountSchema.methods.comparePassword = async function(candidatePassword) {
     return false;
   }
 };
-
-// ❌ REMOVED: isLocked method
 
 // Indexes
 accountSchema.index({ email: 1 }, { unique: true });
