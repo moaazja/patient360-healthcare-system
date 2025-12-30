@@ -749,3 +749,353 @@ exports.getUserAuditLogs = async (req, res) => {
     });
   }
 };
+
+// ==================== DOCTOR REQUESTS ====================
+
+/**
+ * @desc    Get all doctor requests
+ * @route   GET /api/admin/doctor-requests
+ * @access  Private (Admin only)
+ */
+exports.getAllDoctorRequests = async (req, res) => {
+  try {
+    console.log('📋 Fetching all doctor requests...');
+
+    const { status } = req.query;
+
+    // Build query
+    const query = {};
+    if (status) {
+      query.status = status;
+    }
+
+    // Fetch requests
+    const DoctorRequest = require('../models/DoctorRequest');
+    const requests = await DoctorRequest.find(query)
+      .populate('reviewedBy', 'email')
+      .populate('createdPersonId', 'firstName lastName')
+      .sort({ createdAt: -1 })
+      .lean();
+
+    console.log(`✅ Found ${requests.length} doctor requests`);
+
+    // Format response
+    const formattedRequests = requests.map(request => ({
+      _id: request._id,
+      personalInfo: {
+        firstName: request.firstName,
+        lastName: request.lastName,
+        nationalId: request.nationalId,
+        dateOfBirth: request.dateOfBirth,
+        gender: request.gender,
+        phoneNumber: request.phoneNumber,
+        address: request.address,
+        governorate: request.governorate,
+        city: request.city
+      },
+      accountInfo: {
+        email: request.email
+      },
+      doctorInfo: {
+        medicalLicenseNumber: request.medicalLicenseNumber,
+        specialization: request.specialization,
+        subSpecialization: request.subSpecialization,
+        yearsOfExperience: request.yearsOfExperience,
+        hospitalAffiliation: request.hospitalAffiliation,
+        availableDays: request.availableDays,
+        consultationFee: request.consultationFee
+      },
+      requestInfo: {
+        status: request.status,
+        submittedAt: request.createdAt,
+        reviewedBy: request.reviewedBy,
+        reviewedAt: request.reviewedAt,
+        rejectionReason: request.rejectionReason,
+        adminNotes: request.adminNotes
+      }
+    }));
+
+    res.json({
+      success: true,
+      count: formattedRequests.length,
+      requests: formattedRequests
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching doctor requests:', error);
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في جلب طلبات التسجيل'
+    });
+  }
+};
+
+/**
+ * @desc    Get doctor request by ID
+ * @route   GET /api/admin/doctor-requests/:id
+ * @access  Private (Admin only)
+ */
+exports.getDoctorRequestById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    console.log('📋 Fetching doctor request:', id);
+
+    const DoctorRequest = require('../models/DoctorRequest');
+    const request = await DoctorRequest.findById(id)
+      .populate('reviewedBy', 'email')
+      .populate('createdPersonId', 'firstName lastName')
+      .populate('createdAccountId', 'email')
+      .populate('createdDoctorId')
+      .lean();
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        message: 'طلب التسجيل غير موجود'
+      });
+    }
+
+    console.log('✅ Doctor request found');
+
+    res.json({
+      success: true,
+      request
+    });
+
+  } catch (error) {
+    console.error('❌ Error fetching doctor request:', error);
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في جلب تفاصيل الطلب'
+    });
+  }
+};
+
+/**
+ * @desc    Approve doctor request
+ * @route   POST /api/admin/doctor-requests/:id/approve
+ * @access  Private (Admin only)
+ */
+exports.approveDoctorRequest = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { adminNotes } = req.body;
+
+    console.log('✅ Approving doctor request:', id);
+
+    // ==================== FIND REQUEST ====================
+    const DoctorRequest = require('../models/DoctorRequest');
+    const request = await DoctorRequest.findById(id);
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        message: 'طلب التسجيل غير موجود'
+      });
+    }
+
+    if (request.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: `هذا الطلب ${request.status === 'approved' ? 'مقبول' : 'مرفوض'} مسبقاً`
+      });
+    }
+
+    // ==================== CREATE PERSON ====================
+    console.log('1️⃣ Creating Person...');
+
+    const person = await Person.create({
+      nationalId: request.nationalId,
+      firstName: request.firstName,
+      lastName: request.lastName,
+      dateOfBirth: request.dateOfBirth,
+      gender: request.gender,
+      phoneNumber: request.phoneNumber,
+      address: request.address,
+      governorate: request.governorate,
+      city: request.city,
+      isMinor: false
+    });
+
+    console.log('✅ Person created:', person._id);
+
+    // ==================== CREATE ACCOUNT ====================
+    console.log('2️⃣ Creating Account...');
+
+    // ✅ Use doctor's ORIGINAL signup credentials
+    const emailToUse = request.email.trim().toLowerCase();
+    const passwordToUse = request.password;  // ← Already hashed from signup!
+    const plainPasswordToShow = request.plainPassword;  // ← للعرض فقط
+
+    console.log('📧 Email from signup:', emailToUse);
+    console.log('🔐 Password from signup: [HASHED]');
+    console.log('📝 Plain password for display:', plainPasswordToShow);
+
+    // Check if email already exists
+    const existingAccount = await Account.findOne({ email: emailToUse });
+    if (existingAccount) {
+      console.error('❌ Email already exists:', emailToUse);
+      return res.status(400).json({
+        success: false,
+        message: `البريد الإلكتروني ${emailToUse} موجود مسبقاً في النظام`
+      });
+    }
+
+    const account = await Account.create({
+      email: emailToUse,
+      password: passwordToUse,  // ← Already hashed from signup!
+      roles: ['doctor'],
+      personId: person._id,
+      isActive: true
+    });
+
+    console.log('✅ Account created:', account._id);
+    console.log('✅ Email:', account.email);
+    console.log('✅ Using original signup password');
+
+    // ==================== CREATE DOCTOR ====================
+    console.log('3️⃣ Creating Doctor...');
+
+    const doctor = await Doctor.create({
+      personId: person._id,
+      medicalLicenseNumber: request.medicalLicenseNumber,
+      specialization: request.specialization,
+      subSpecialization: request.subSpecialization,
+      yearsOfExperience: request.yearsOfExperience,
+      hospitalAffiliation: request.hospitalAffiliation,
+      availableDays: request.availableDays,
+      consultationFee: request.consultationFee,
+      availableTimes: {
+        start: '09:00',
+        end: '17:00'
+      }
+    });
+
+    console.log('✅ Doctor created:', doctor._id);
+
+    // ==================== UPDATE REQUEST ====================
+    console.log('4️⃣ Updating request status...');
+
+    request.status = 'approved';
+    request.reviewedBy = req.user._id;
+    request.reviewedAt = new Date();
+    request.adminNotes = adminNotes || '';
+    request.createdPersonId = person._id;
+    request.createdAccountId = account._id;
+    request.createdDoctorId = doctor._id;
+
+    await request.save();
+
+    console.log('✅ Request approved successfully');
+
+    // ==================== SEND RESPONSE ====================
+    res.json({
+      success: true,
+      message: 'تم قبول طلب التسجيل وإنشاء حساب الطبيب بنجاح',
+      data: {
+        doctorId: doctor._id,
+        personId: person._id,
+        accountId: account._id,
+        email: emailToUse,
+        password: plainPasswordToShow,  // ← ✅ من signup (plaintext)
+        doctorName: `${person.firstName} ${person.lastName}`,
+        medicalLicenseNumber: doctor.medicalLicenseNumber,
+        specialization: doctor.specialization
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error approving doctor request:', error);
+
+    // Handle duplicate key errors
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      let arabicField = field;
+      if (field === 'nationalId') arabicField = 'الرقم الوطني';
+      if (field === 'email') arabicField = 'البريد الإلكتروني';
+      if (field === 'medicalLicenseNumber') arabicField = 'رقم الترخيص الطبي';
+      
+      return res.status(400).json({
+        success: false,
+        message: `${arabicField} موجود مسبقاً في النظام`
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ أثناء قبول الطلب: ' + error.message
+    });
+  }
+};
+
+/**
+ * @desc    Reject doctor request
+ * @route   POST /api/admin/doctor-requests/:id/reject
+ * @access  Private (Admin only)
+ */
+exports.rejectDoctorRequest = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rejectionReason, adminNotes } = req.body;
+
+    console.log('❌ Rejecting doctor request:', id);
+
+    // Validate rejection reason
+    if (!rejectionReason) {
+      return res.status(400).json({
+        success: false,
+        message: 'سبب الرفض مطلوب'
+      });
+    }
+
+    // ==================== FIND REQUEST ====================
+    const DoctorRequest = require('../models/DoctorRequest');
+    const request = await DoctorRequest.findById(id);
+
+    if (!request) {
+      return res.status(404).json({
+        success: false,
+        message: 'طلب التسجيل غير موجود'
+      });
+    }
+
+    if (request.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: `هذا الطلب ${request.status === 'approved' ? 'مقبول' : 'مرفوض'} مسبقاً`
+      });
+    }
+
+    // ==================== UPDATE REQUEST ====================
+    request.status = 'rejected';
+    request.reviewedBy = req.user._id;
+    request.reviewedAt = new Date();
+    request.rejectionReason = rejectionReason;
+    request.adminNotes = adminNotes || '';
+
+    await request.save();
+
+    console.log('✅ Request rejected successfully');
+
+    // ==================== SEND RESPONSE ====================
+    res.json({
+      success: true,
+      message: 'تم رفض طلب التسجيل',
+      data: {
+        requestId: request._id,
+        doctorName: `${request.firstName} ${request.lastName}`,
+        email: request.email,
+        rejectionReason: request.rejectionReason,
+        reviewedAt: request.reviewedAt
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Error rejecting doctor request:', error);
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ أثناء رفض الطلب'
+    });
+  }
+};

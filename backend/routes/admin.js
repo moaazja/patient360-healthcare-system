@@ -1,6 +1,5 @@
 // backend/routes/admin.js
-// Admin Routes for Patient360 System
-// WITHOUT RATE LIMITING
+// Admin Routes with Doctor Request Management - FIXED
 
 const express = require('express');
 const router = express.Router();
@@ -16,6 +15,28 @@ router.use(restrictTo('admin'));
 router.get('/statistics', 
   auditLog('VIEW_STATISTICS'), 
   adminController.getStatistics
+);
+
+// ==================== DOCTOR REQUESTS (NEW) ====================
+router.get('/doctor-requests',
+  auditLog('VIEW_DOCTOR_REQUESTS'),
+  adminController.getAllDoctorRequests
+);
+
+router.get('/doctor-requests/:id',
+  auditLog('VIEW_DOCTOR_REQUEST_DETAILS'),
+  adminController.getDoctorRequestById
+);
+
+// ✅ FIXED: Changed /approve to /accept to match frontend
+router.post('/doctor-requests/:id/accept',
+  auditLog('APPROVE_DOCTOR_REQUEST'),
+  adminController.approveDoctorRequest
+);
+
+router.post('/doctor-requests/:id/reject',
+  auditLog('REJECT_DOCTOR_REQUEST'),
+  adminController.rejectDoctorRequest
 );
 
 // ==================== DOCTORS MANAGEMENT ====================

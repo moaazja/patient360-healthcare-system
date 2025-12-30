@@ -24,6 +24,10 @@ const auditLogSchema = new mongoose.Schema({
       'ADD_DOCTOR', 'UPDATE_DOCTOR', 'DEACTIVATE_DOCTOR', 'ACTIVATE_DOCTOR',
       'VIEW_DOCTOR_DETAILS', 'VIEW_DOCTORS',
       
+      // Doctor Request Management (NEW)
+      'VIEW_DOCTOR_REQUESTS', 'VIEW_DOCTOR_REQUEST_DETAILS', 
+      'APPROVE_DOCTOR_REQUEST', 'REJECT_DOCTOR_REQUEST',
+      
       // Patient Management
       'ADD_PATIENT', 'UPDATE_PATIENT', 'DEACTIVATE_PATIENT', 'ACTIVATE_PATIENT',
       'VIEW_PATIENT_DETAILS', 'VIEW_PATIENTS',
@@ -52,19 +56,20 @@ const auditLogSchema = new mongoose.Schema({
     required: true
   },
   
-  // Resource affected
+  // Resource affected - FIXED: Only resource types, not action names
   resourceType: {
     type: String,
     enum: [
-      // Resource types
-      'Doctor', 'Patient', 'Visit', 'Account', 'System', 'Other',
-      
-      // Admin action types (to prevent validation errors)
-      'VIEW_DOCTORS', 'VIEW_DOCTOR_DETAILS', 'ADD_DOCTOR', 'UPDATE_DOCTOR', 
-      'DEACTIVATE_DOCTOR', 'ACTIVATE_DOCTOR',
-      'VIEW_PATIENTS', 'VIEW_PATIENT_DETAILS', 'ADD_PATIENT', 'UPDATE_PATIENT',
-      'DEACTIVATE_PATIENT', 'ACTIVATE_PATIENT',
-      'VIEW_STATISTICS', 'VIEW_AUDIT_LOGS', 'VIEW_USER_AUDIT_LOGS'
+      'Doctor',
+      'DoctorRequest',  // ✅ FIXED: Was missing, actions were here instead
+      'Patient', 
+      'Visit', 
+      'Account', 
+      'Admin',
+      'AuditLog',
+      'Statistics',
+      'System', 
+      'Other'
     ],
     default: 'Other'
   },

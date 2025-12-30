@@ -1,31 +1,42 @@
+// backend/routes/auth.js
+// COMPLETE FILE - Authentication routes with file upload support
+
 const express = require('express');
 const router = express.Router();
 
 // Import controllers
 const authController = require('../controllers/authController');
-const simpleSignupController = require('../controllers/simpleSignup');
 
 // Import middleware
 const security = require('../middleware/security');
 const auth = require('../middleware/auth');
 
-// Public routes
+// Import file upload middleware
+const { uploadFields, handleUploadErrors } = require('../middleware/uploadDoctorFiles');
 
-// Simple Signup (الطريقة الجديدة البسيطة)
+// ==================== PUBLIC ROUTES ====================
+
+// Patient Signup
 router.post('/register', security.loginLimiter, authController.signup);
 router.post('/signup', security.loginLimiter, authController.signup);
 
-// Original Signup
-router.post('/signup', security.loginLimiter, authController.signup);
-
-// Login route - REMOVED VALIDATION FOR NOW
-router.post('/login', 
-  security.loginLimiter,
-  authController.login
+// Doctor Registration Request (WITH FILE UPLOADS)
+// CRITICAL: uploadFields MUST come BEFORE authController.registerDoctorRequest
+router.post('/register-doctor', 
+  uploadFields,              // Process files FIRST
+  handleUploadErrors,        // Handle upload errors
+  authController.registerDoctorRequest  // Then process request
 );
 
-// Protected routes
+// Login
+router.post('/login', security.loginLimiter, authController.login);
+
+// ==================== PROTECTED ROUTES ====================
+
+// Verify token
 router.get('/verify', auth.protect, authController.verifyToken);
+
+// Update last login
 router.post('/update-last-login', auth.protect, authController.updateLastLogin);
 
 module.exports = router;

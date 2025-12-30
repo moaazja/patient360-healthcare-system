@@ -1,3 +1,6 @@
+// backend/models/Doctor.js
+// COMPLETE Doctor Model with File Upload Support
+
 const mongoose = require('mongoose');
 
 const doctorSchema = new mongoose.Schema({
@@ -7,6 +10,7 @@ const doctorSchema = new mongoose.Schema({
     required: [true, 'معرف الشخص مطلوب'],
     unique: true
   },
+  
   medicalLicenseNumber: {
     type: String,
     required: [true, 'رقم الترخيص الطبي مطلوب'],
@@ -14,6 +18,7 @@ const doctorSchema = new mongoose.Schema({
     trim: true,
     match: [/^[A-Z0-9]{8,20}$/, 'رقم الترخيص يجب أن يكون 8-20 حرفاً كبيراً أو رقماً']
   },
+  
   specialization: {
     type: String,
     required: [true, 'التخصص مطلوب'],
@@ -47,18 +52,21 @@ const doctorSchema = new mongoose.Schema({
       message: 'التخصص غير صالح'
     }
   },
+  
   subSpecialization: {
     type: String,
     default: null,
     minlength: [3, 'التخصص الفرعي يجب أن يكون 3 أحرف على الأقل'],
     maxlength: [100, 'التخصص الفرعي يجب ألا يتجاوز 100 حرف']
   },
+  
   yearsOfExperience: {
     type: Number,
     default: 0,
     min: [0, 'سنوات الخبرة يجب أن تكون 0 على الأقل'],
     max: [60, 'سنوات الخبرة يجب ألا تتجاوز 60 سنة']
   },
+  
   hospitalAffiliation: {
     type: String,
     required: [true, 'اسم المستشفى مطلوب'],
@@ -66,6 +74,7 @@ const doctorSchema = new mongoose.Schema({
     minlength: [3, 'اسم المستشفى يجب أن يكون 3 أحرف على الأقل'],
     maxlength: [150, 'اسم المستشفى يجب ألا يتجاوز 150 حرفاً']
   },
+  
   availableDays: {
     type: [String],
     required: [true, 'أيام العمل مطلوبة'],
@@ -80,15 +89,50 @@ const doctorSchema = new mongoose.Schema({
       message: 'اسم اليوم غير صالح'
     }
   },
+  
   consultationFee: {
     type: Number,
     default: 0,
     min: [0, 'رسوم الاستشارة يجب أن تكون 0 أو أكثر'],
     max: [1000000, 'رسوم الاستشارة يجب ألا تتجاوز 1,000,000']
   },
+  
   availableTimes: {
     start: { type: String, default: '09:00' },
     end: { type: String, default: '17:00' }
+  },
+  
+  // ==================== FILE UPLOADS (NEW) ====================
+  // These files are copied from DoctorRequest when admin approves
+  
+  // Medical Certificate (شهادة الطب)
+  medicalCertificate: {
+    fileName: { type: String },
+    filePath: { type: String },
+    fileUrl: { type: String },
+    mimeType: { type: String },
+    fileSize: { type: Number },
+    uploadedAt: { type: Date }
+  },
+  
+  // License Document (الترخيص الطبي)
+  licenseDocument: {
+    fileName: { type: String },
+    filePath: { type: String },
+    fileUrl: { type: String },
+    mimeType: { type: String },
+    fileSize: { type: Number },
+    uploadedAt: { type: Date }
+  },
+  
+  // Profile Photo (الصورة الشخصية)
+  profilePhoto: {
+    fileName: { type: String },
+    filePath: { type: String },
+    fileUrl: { type: String },
+    mimeType: { type: String },
+    fileSize: { type: Number },
+    uploadedAt: { type: Date }
   }
 }, {
   timestamps: true,

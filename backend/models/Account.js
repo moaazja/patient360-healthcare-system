@@ -80,11 +80,21 @@ const accountSchema = new mongoose.Schema({
 
 // Hash password before saving
 accountSchema.pre('save', async function(next) {
+  // Only hash if password is modified
   if (!this.isModified('password')) {
     return next();
   }
 
   try {
+    // ✅ Check if password is already hashed
+    const isAlreadyHashed = this.password.startsWith('$2b$') || this.password.startsWith('$2a$');
+    
+    if (isAlreadyHashed) {
+      console.log('✅ Password already hashed, skipping hash');
+      return next();
+    }
+
+    // Hash new password
     const salt = await bcrypt.genSalt(10);
     this.password = await bcrypt.hash(this.password, salt);
     console.log('✅ Password hashed successfully');
