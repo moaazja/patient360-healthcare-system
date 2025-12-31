@@ -1,6 +1,11 @@
 // src/pages/DoctorDashboard.jsx
-// ✅ PROFESSIONAL REDESIGN - Tab Navigation + Patient History CV
-// Matches PatientDashboard Design System
+// ✅ ENHANCED PROFESSIONAL REDESIGN v2.0
+// Patient 360° - Government Healthcare Platform
+// Features:
+// - Photo upload in visit logs
+// - Redesigned ECG AI output with professional cards
+// - Tab-based navigation with patient history
+// - Full responsive design
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -9,20 +14,245 @@ import { logout as logoutService } from '../services/authService';
 import '../styles/DoctorDashboard.css';
 
 /**
- * Doctor Dashboard Component - Professional Healthcare Platform
- * 
- * Features:
- * - Tab-based navigation for organized workflow
- * - Patient search with parent-child selection for minors
- * - Complete patient medical history (CV) from all doctors
- * - Vital signs, diagnosis, and medication management
- * - ECG AI Analysis (Cardiologists only)
- * 
- * @component
+ * ============================================
+ * ECG CONDITION DESCRIPTIONS
+ * ============================================
+ * Maps ECG conditions to Arabic descriptions and severity levels
+ */
+const ECG_CONDITIONS = {
+  'Normal': {
+    nameAr: 'تخطيط طبيعي',
+    description: 'تخطيط القلب الكهربائي ضمن الحدود الطبيعية. لا توجد علامات على اضطرابات في النظم أو نقص التروية.',
+    severity: 'normal',
+    icon: '✅',
+    recommendations: [
+      'متابعة نمط الحياة الصحي',
+      'ممارسة الرياضة بانتظام',
+      'فحص دوري كل سنة'
+    ]
+  },
+  'Myocardial Infarction': {
+    nameAr: 'احتشاء عضلة القلب',
+    description: 'علامات تدل على نوبة قلبية حادة أو سابقة. يتطلب تدخلاً طبياً فورياً.',
+    severity: 'critical',
+    icon: '🚨',
+    recommendations: [
+      'تدخل طبي طارئ فوري',
+      'قسطرة قلبية تشخيصية',
+      'مراقبة في العناية المركزة القلبية'
+    ]
+  },
+  'ST/T change': {
+    nameAr: 'تغيرات ST/T',
+    description: 'تغيرات في مقطع ST أو موجة T قد تشير إلى نقص تروية أو اضطرابات في القلب.',
+    severity: 'warning',
+    icon: '⚠️',
+    recommendations: [
+      'فحوصات إضافية مطلوبة',
+      'اختبار الجهد',
+      'متابعة دورية'
+    ]
+  },
+  'Conduction Disturbance': {
+    nameAr: 'اضطراب التوصيل',
+    description: 'اضطراب في نظام التوصيل الكهربائي للقلب مثل إحصار الحزمة أو إحصار أذيني بطيني.',
+    severity: 'warning',
+    icon: '🔌',
+    recommendations: [
+      'تقييم شامل للقلب',
+      'هولتر مراقبة 24 ساعة',
+      'استشارة كهربية القلب'
+    ]
+  },
+  'Hypertrophy': {
+    nameAr: 'تضخم القلب',
+    description: 'علامات تدل على تضخم في عضلة القلب، قد يكون نتيجة ارتفاع ضغط الدم أو أمراض صمامية.',
+    severity: 'warning',
+    icon: '💪',
+    recommendations: [
+      'إيكو القلب',
+      'مراقبة ضغط الدم',
+      'تقييم أسباب التضخم'
+    ]
+  }
+};
+
+/**
+ * ============================================
+ * ECG RESULT CARD COMPONENT
+ * ============================================
+ * Beautiful card design for ECG analysis results
+ */
+const ECGResultCard = ({ result }) => {
+  const condition = ECG_CONDITIONS[result.prediction] || {
+    nameAr: result.prediction,
+    description: 'تم تحليل تخطيط القلب بواسطة الذكاء الاصطناعي.',
+    severity: 'info',
+    icon: '🔬',
+    recommendations: ['مراجعة الطبيب للتقييم النهائي']
+  };
+
+  const getSeverityClass = (severity) => {
+    switch (severity) {
+      case 'critical': return 'severity-critical';
+      case 'warning': return 'severity-warning';
+      case 'normal': return 'severity-normal';
+      default: return 'severity-info';
+    }
+  };
+
+  return (
+    <div className="ecg-result-modern">
+      {/* Header with Main Diagnosis */}
+      <div className={`ecg-result-header ${getSeverityClass(condition.severity)}`}>
+        <div className="result-header-icon">
+          <span>{condition.icon}</span>
+        </div>
+        <div className="result-header-content">
+          <div className="result-header-label">التشخيص الرئيسي</div>
+          <h2 className="result-diagnosis-title">{condition.nameAr}</h2>
+          <p className="result-diagnosis-en">{result.prediction}</p>
+        </div>
+        <div className="result-confidence-badge">
+          <div className="confidence-circle">
+            <svg viewBox="0 0 36 36">
+              <path
+                className="confidence-bg"
+                d="M18 2.0845
+                  a 15.9155 15.9155 0 0 1 0 31.831
+                  a 15.9155 15.9155 0 0 1 0 -31.831"
+              />
+              <path
+                className="confidence-progress"
+                strokeDasharray={`${parseFloat(result.confidence_percentage) || 0}, 100`}
+                d="M18 2.0845
+                  a 15.9155 15.9155 0 0 1 0 31.831
+                  a 15.9155 15.9155 0 0 1 0 -31.831"
+              />
+            </svg>
+            <span className="confidence-text">{result.confidence_percentage}</span>
+          </div>
+          <span className="confidence-label">نسبة الثقة</span>
+        </div>
+      </div>
+
+      {/* Description Card */}
+      <div className="ecg-description-card">
+        <div className="description-icon">📋</div>
+        <div className="description-content">
+          <h4>شرح التشخيص</h4>
+          <p>{condition.description}</p>
+        </div>
+      </div>
+
+      {/* Top Predictions Grid */}
+      <div className="ecg-predictions-section">
+        <div className="predictions-header">
+          <span className="predictions-icon">📊</span>
+          <h3>أعلى الاحتمالات</h3>
+        </div>
+        <div className="predictions-grid">
+          {result.top_predictions && result.top_predictions.map((pred, index) => (
+            <div key={index} className={`prediction-card ${index === 0 ? 'primary' : ''}`}>
+              <div className="prediction-rank">
+                <span>{index + 1}</span>
+              </div>
+              <div className="prediction-content">
+                <h4>{pred.label}</h4>
+                <div className="prediction-bar-container">
+                  <div 
+                    className="prediction-bar" 
+                    style={{ width: pred.percentage }}
+                  ></div>
+                </div>
+                <span className="prediction-percentage">{pred.percentage}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Recommendations Section */}
+      <div className="ecg-recommendations-section">
+        <div className="recommendations-header">
+          <span className="recommendations-icon">💡</span>
+          <h3>التوصيات الطبية</h3>
+        </div>
+        <div className="recommendations-list">
+          {condition.recommendations.map((rec, index) => (
+            <div key={index} className="recommendation-item">
+              <span className="rec-number">{index + 1}</span>
+              <span className="rec-text">{rec}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Warning Banner if Critical */}
+      {result.warning && (
+        <div className="ecg-warning-banner">
+          <span className="warning-icon">⚠️</span>
+          <div className="warning-content">
+            <h4>تحذير مهم</h4>
+            <p>{result.warning}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Disclaimer */}
+      <div className="ecg-disclaimer">
+        <span className="disclaimer-icon">ℹ️</span>
+        <p>
+          <strong>ملاحظة:</strong> هذه النتائج استرشادية من الذكاء الاصطناعي ولا تغني عن التقييم السريري الشامل والخبرة الطبية المباشرة.
+        </p>
+      </div>
+    </div>
+  );
+};
+
+/**
+ * ============================================
+ * PHOTO PREVIEW COMPONENT
+ * ============================================
+ * Displays uploaded photo with remove option
+ */
+const PhotoPreview = ({ photo, onRemove }) => {
+  const [previewUrl, setPreviewUrl] = useState(null);
+
+  useEffect(() => {
+    if (photo && photo instanceof File) {
+      const url = URL.createObjectURL(photo);
+      setPreviewUrl(url);
+      return () => URL.revokeObjectURL(url);
+    } else if (typeof photo === 'string') {
+      setPreviewUrl(photo);
+    }
+  }, [photo]);
+
+  if (!previewUrl) return null;
+
+  return (
+    <div className="photo-preview-container">
+      <div className="photo-preview-wrapper">
+        <img src={previewUrl} alt="Visit attachment" className="photo-preview-image" />
+        <button className="photo-remove-btn" onClick={onRemove} type="button">
+          <span>✕</span>
+        </button>
+      </div>
+      <span className="photo-preview-label">📷 صورة مرفقة</span>
+    </div>
+  );
+};
+
+/**
+ * ============================================
+ * DOCTOR DASHBOARD MAIN COMPONENT
+ * ============================================
  */
 const DoctorDashboard = () => {
   const navigate = useNavigate();
   const resultRef = useRef(null);
+  const ecgFileInputRef = useRef(null);
   
   // ═══════════════════════════════════════════════════════════════
   // STATE MANAGEMENT
@@ -51,8 +281,16 @@ const DoctorDashboard = () => {
   
   // ECG States (Cardiologists Only)
   const [ecgFile, setEcgFile] = useState(null);
-  const [aiDiagnosis, setAiDiagnosis] = useState('');
+  const [ecgPreview, setEcgPreview] = useState(null);
+  const [aiDiagnosis, setAiDiagnosis] = useState(null);
   const [ecgAnalyzing, setEcgAnalyzing] = useState(false);
+  
+  // ═══════════════════════════════════════════════════════════════
+  // NEW: VISIT PHOTO STATE
+  // ═══════════════════════════════════════════════════════════════
+  const [visitPhoto, setVisitPhoto] = useState(null);
+  const [visitPhotoPreview, setVisitPhotoPreview] = useState(null);
+  const photoInputRef = useRef(null);
   
   // Vital Signs State
   const [vitalSigns, setVitalSigns] = useState({
@@ -90,14 +328,18 @@ const DoctorDashboard = () => {
    * Check if the logged-in doctor is a cardiologist
    */
   const isCardiologist = useCallback(() => {
-    if (!user || !user.specialization) return false;
+    if (!user || !user.roleData || !user.roleData.doctor || !user.roleData.doctor.specialization) {
+      return false;
+    }
+    
     const cardioSpecializations = [
       'cardiology', 'cardiologist', 'طب القلب', 'طبيب قلب',
       'أمراض القلب', 'جراحة القلب', 'cardiac surgery',
       'interventional cardiology', 'electrophysiology'
     ];
+    
     return cardioSpecializations.some(spec => 
-      user.specialization.toLowerCase().includes(spec.toLowerCase())
+      user.roleData.doctor.specialization.toLowerCase().includes(spec.toLowerCase())
     );
   }, [user]);
 
@@ -199,7 +441,7 @@ const DoctorDashboard = () => {
   // PATIENT SEARCH WITH PARENT-CHILD SYSTEM
   // ═══════════════════════════════════════════════════════════════
 
-const handleSearchPatient = async () => {
+  const handleSearchPatient = async () => {
     if (!searchId.trim()) {
       setSearchError('الرجاء إدخال الرقم الوطني للمريض');
       return;
@@ -215,7 +457,6 @@ const handleSearchPatient = async () => {
       
       console.log('🔍 Searching for patient:', searchId);
       
-      // Search for patient by national ID
       const response = await fetch(`http://localhost:5000/api/doctor/search/${searchId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -230,7 +471,6 @@ const handleSearchPatient = async () => {
         return;
       }
       
-      // Directly select this patient (no children check for now)
       await selectPatient(data.patient);
       
     } catch (error) {
@@ -248,10 +488,8 @@ const handleSearchPatient = async () => {
     setSelectedPatient(patient);
     setShowFamilySelection(false);
     
-    // Reset form fields
     resetFormFields();
     
-    // Load patient's complete medical history from all doctors
     try {
       const token = localStorage.getItem('token');
       const nationalId = patient.nationalId || patient.childId;
@@ -282,7 +520,6 @@ const handleSearchPatient = async () => {
       setPatientHistory([]);
     }
     
-    // Switch to patient overview
     setActiveSection('overview');
   };
 
@@ -313,7 +550,10 @@ const handleSearchPatient = async () => {
     setDoctorNotes('');
     setMedications([]);
     setEcgFile(null);
-    setAiDiagnosis('');
+    setEcgPreview(null);
+    setAiDiagnosis(null);
+    setVisitPhoto(null);
+    setVisitPhotoPreview(null);
   };
 
   /**
@@ -359,6 +599,41 @@ const handleSearchPatient = async () => {
   };
 
   // ═══════════════════════════════════════════════════════════════
+  // VISIT PHOTO HANDLING
+  // ═══════════════════════════════════════════════════════════════
+
+  const handlePhotoUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
+      if (validTypes.includes(file.type)) {
+        if (file.size > 10 * 1024 * 1024) { // 10MB limit
+          openModal('error', 'خطأ', 'حجم الصورة يجب أن لا يتجاوز 10 ميغابايت');
+          e.target.value = '';
+          return;
+        }
+        setVisitPhoto(file);
+        const url = URL.createObjectURL(file);
+        setVisitPhotoPreview(url);
+      } else {
+        openModal('error', 'خطأ', 'الرجاء اختيار صورة (PNG, JPG, WEBP)');
+        e.target.value = '';
+      }
+    }
+  };
+
+  const handleRemovePhoto = () => {
+    setVisitPhoto(null);
+    if (visitPhotoPreview) {
+      URL.revokeObjectURL(visitPhotoPreview);
+    }
+    setVisitPhotoPreview(null);
+    if (photoInputRef.current) {
+      photoInputRef.current.value = '';
+    }
+  };
+
+  // ═══════════════════════════════════════════════════════════════
   // ECG HANDLING (CARDIOLOGISTS ONLY)
   // ═══════════════════════════════════════════════════════════════
 
@@ -368,11 +643,28 @@ const handleSearchPatient = async () => {
       const validTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'];
       if (validTypes.includes(file.type)) {
         setEcgFile(file);
-        setAiDiagnosis('');
+        setAiDiagnosis(null);
+        
+        // Create preview for images
+        if (file.type.startsWith('image/')) {
+          const url = URL.createObjectURL(file);
+          setEcgPreview(url);
+        } else {
+          setEcgPreview(null);
+        }
       } else {
         openModal('error', 'خطأ', 'الرجاء اختيار ملف PDF أو صورة (PNG, JPG)');
         e.target.value = '';
       }
+    }
+  };
+
+  const handleRemoveEcg = () => {
+    setEcgFile(null);
+    setEcgPreview(null);
+    setAiDiagnosis(null);
+    if (ecgFileInputRef.current) {
+      ecgFileInputRef.current.value = '';
     }
   };
 
@@ -383,41 +675,61 @@ const handleSearchPatient = async () => {
     }
     
     setEcgAnalyzing(true);
-    setAiDiagnosis('');
+    setAiDiagnosis(null);
     
     try {
-      // TODO: Replace with actual AI endpoint
-      await new Promise(resolve => setTimeout(resolve, 3000));
+      console.log('🤖 Starting ECG AI analysis...');
       
-      const simulatedResults = {
-        rhythm: 'Normal Sinus Rhythm',
-        heartRate: vitalSigns.heartRate || '72',
-        findings: [
-          'إيقاع جيبي طبيعي',
-          'معدل ضربات القلب ضمن المعدل الطبيعي',
-          'لا توجد علامات على نقص التروية'
-        ],
-        interpretation: 'تخطيط القلب يُظهر إيقاعاً جيبياً طبيعياً. لا توجد تشوهات ملحوظة.',
-        confidence: 94,
-        recommendations: ['متابعة روتينية', 'الحفاظ على نمط حياة صحي']
-      };
+      const formData = new FormData();
+      formData.append('ecg_image', ecgFile);
       
-      setAiDiagnosis(JSON.stringify(simulatedResults, null, 2));
+      const token = localStorage.getItem('token');
+      
+      const response = await fetch('http://localhost:5000/api/ecg/analyze', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData
+      });
+      
+      const data = await response.json();
+      
+      console.log('📥 AI Response:', data);
+      
+      if (!response.ok || !data.success) {
+        throw new Error(data.message || 'فشل تحليل ECG');
+      }
+      
+      // Set the structured result for the new card design
+      setAiDiagnosis({
+        prediction: data.prediction,
+        confidence_percentage: data.confidence_percentage,
+        top_predictions: data.top_predictions,
+        warning: data.warning,
+        probabilities: data.probabilities,
+        timestamp: new Date().toISOString()
+      });
+      
+      // Scroll to results
+      setTimeout(() => {
+        if (resultRef.current) {
+          resultRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }, 100);
+      
+      console.log('✅ ECG analysis completed successfully');
       
     } catch (error) {
-      console.error('ECG Analysis Error:', error);
-      openModal('error', 'خطأ', 'حدث خطأ في تحليل تخطيط القلب');
+      console.error('❌ ECG Analysis Error:', error);
+      openModal('error', 'خطأ في التحليل', error.message || 'حدث خطأ أثناء تحليل تخطيط القلب');
     } finally {
       setEcgAnalyzing(false);
     }
   };
 
   // ═══════════════════════════════════════════════════════════════
-  // SAVE VISIT DATA
-  // ═══════════════════════════════════════════════════════════════
-
-// ═══════════════════════════════════════════════════════════════
-  // SAVE VISIT DATA - FIXED VERSION
+  // SAVE VISIT DATA WITH PHOTO
   // ═══════════════════════════════════════════════════════════════
 
   const handleSaveVisit = async () => {
@@ -439,28 +751,37 @@ const handleSearchPatient = async () => {
     setSaving(true);
     
     try {
-      const visitData = {
-        chiefComplaint: chiefComplaint.trim(),
-        diagnosis: diagnosis.trim(),
-        prescribedMedications: medications,
-        doctorNotes: doctorNotes.trim() || '',
-        visitType: 'regular'
-      };
-      
       const token = localStorage.getItem('token');
       const nationalId = selectedPatient.nationalId || selectedPatient.childId;
       
-      console.log('📤 Sending visit data:', visitData);
+      // Use FormData to support file upload
+      const formData = new FormData();
+      formData.append('chiefComplaint', chiefComplaint.trim());
+      formData.append('diagnosis', diagnosis.trim());
+      formData.append('prescribedMedications', JSON.stringify(medications));
+      formData.append('doctorNotes', doctorNotes.trim() || '');
+      formData.append('visitType', 'regular');
+      formData.append('vitalSigns', JSON.stringify(vitalSigns));
+      
+      // Add photo if exists
+      if (visitPhoto) {
+        formData.append('visitPhoto', visitPhoto);
+      }
+      
+      // Add ECG data if exists (for cardiologists)
+      if (aiDiagnosis && isCardiologist()) {
+        formData.append('ecgAnalysis', JSON.stringify(aiDiagnosis));
+      }
+      
+      console.log('📤 Sending visit data with photo...');
       console.log('🆔 Patient national ID:', nationalId);
-      console.log('🔗 API URL:', `http://localhost:5000/api/doctor/patient/${nationalId}/visit`);
       
       const response = await fetch(`http://localhost:5000/api/doctor/patient/${nationalId}/visit`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(visitData)
+        body: formData
       });
       
       const data = await response.json();
@@ -554,380 +875,285 @@ const handleSearchPatient = async () => {
       )}
 
       <div className="dashboard-container">
-        {/* Welcome Header */}
-        <div className="welcome-header">
-          <div className="welcome-content">
-            <div className="doctor-avatar-header">
+        {/* Doctor Header */}
+        <div className="doctor-header-section">
+          <div className="doctor-header-content">
+            <div className="doctor-avatar">
               <span>👨‍⚕️</span>
-              {isCardiologist() && <span className="cardio-badge-small">❤️</span>}
             </div>
-            <div className="welcome-text">
-              <h1>مرحباً د. {user.firstName} {user.lastName} 👋</h1>
-              <p>
-                {user.specialization || 'طبيب'} - {user.institution || user.hospitalAffiliation || 'المؤسسة الصحية'}
-                {isCardiologist() && <span className="ai-badge-header">🤖 ECG AI متاح</span>}
-              </p>
+            <div className="doctor-header-info">
+              <h1>د. {user.firstName} {user.lastName}</h1>
+              <div className="doctor-meta">
+                {user.roleData?.doctor?.specialization && (
+                  <span className="specialization-badge">
+                    {user.roleData.doctor.specialization === 'Cardiologist' ? '❤️' : '🩺'}
+                    {user.roleData.doctor.specialization}
+                  </span>
+                )}
+                {user.roleData?.doctor?.hospitalAffiliation && (
+                  <span className="hospital-badge">
+                    🏥 {user.roleData.doctor.hospitalAffiliation}
+                  </span>
+                )}
+              </div>
             </div>
           </div>
           <button className="logout-btn" onClick={handleLogout}>
-            تسجيل الخروج 🚪
+            <span>🚪</span>
+            <span>تسجيل الخروج</span>
           </button>
         </div>
 
-        {/* Main Content */}
-        {!selectedPatient ? (
-          /* ═══════════════════════════════════════════════════════════════
-             SEARCH SECTION (Main Page)
-             ═══════════════════════════════════════════════════════════════ */
-          <div className="section-content">
-            <div className="search-main-container">
-              {/* Search Header */}
-              <div className="search-page-header">
-                <div className="search-header-content">
-                  <div className="search-icon-box">
-                    <span className="search-icon-main">🔍</span>
-                    <div className="search-pulse-ring"></div>
-                  </div>
-                  <div className="search-header-text">
-                    <h1>البحث عن مريض</h1>
-                    <p>Patient Search - ابحث باستخدام الرقم الوطني</p>
-                  </div>
-                </div>
+        {/* Patient Search Section */}
+        {!selectedPatient && (
+          <div className="search-section">
+            <div className="search-card">
+              <div className="search-header">
+                <span className="search-icon">🔍</span>
+                <h2>البحث عن مريض</h2>
               </div>
-
-              {/* Search Card */}
-              <div className="search-card">
-                <div className="search-card-header">
-                  <span>🆔</span>
-                  <div>
-                    <h3>أدخل الرقم الوطني</h3>
-                    <p>يدعم البحث عن الأطفال عبر رقم ولي الأمر</p>
-                  </div>
-                </div>
-                
-                <div className="search-input-container">
+              
+              <div className="search-form">
+                <div className="search-input-wrapper">
                   <input
                     type="text"
+                    placeholder="أدخل الرقم الوطني للمريض..."
                     value={searchId}
                     onChange={(e) => setSearchId(e.target.value)}
-                    placeholder="الرقم الوطني للمريض أو ولي الأمر..."
-                    className="search-input-main"
-                    onKeyPress={(e) => e.key === 'Enter' && !searchLoading && handleSearchPatient()}
-                    disabled={searchLoading}
-                    dir="ltr"
+                    onKeyPress={(e) => e.key === 'Enter' && handleSearchPatient()}
                   />
-                  <button
-                    className={`search-btn-main ${searchLoading ? 'loading' : ''}`}
+                  <button 
+                    className={`search-btn ${searchLoading ? 'loading' : ''}`}
                     onClick={handleSearchPatient}
-                    disabled={searchLoading || !searchId.trim()}
+                    disabled={searchLoading}
                   >
                     {searchLoading ? (
-                      <><span className="spinner"></span><span>جاري البحث...</span></>
+                      <span className="spinner-small"></span>
                     ) : (
-                      <><span>🔍</span><span>بحث</span></>
+                      <>
+                        <span>🔎</span>
+                        <span>بحث</span>
+                      </>
                     )}
                   </button>
                 </div>
                 
                 {searchError && (
                   <div className="search-error">
-                    <span>❌</span>
-                    <p>{searchError}</p>
+                    <span>⚠️</span>
+                    <span>{searchError}</span>
                   </div>
                 )}
               </div>
 
-              {/* Family Selection Modal */}
+              {/* Family Selection */}
               {showFamilySelection && familyMembers.length > 0 && (
-                <div className="family-selection-card">
-                  <div className="family-card-header">
-                    <span>👨‍👩‍👧‍👦</span>
-                    <div>
-                      <h3>اختر المريض</h3>
-                      <p>تم العثور على عدة أفراد مرتبطين بهذا الرقم</p>
-                    </div>
-                  </div>
-                  
-                  <div className="family-members-list">
+                <div className="family-selection">
+                  <h3>اختر المريض:</h3>
+                  <div className="family-members-grid">
                     {familyMembers.map((member, index) => (
                       <button
-                        key={member.id || member.childId || index}
-                        className={`family-member-btn ${member.isParent ? 'parent' : 'child'}`}
+                        key={index}
+                        className="family-member-card"
                         onClick={() => handleFamilyMemberSelect(member)}
                       >
-                        <div className="member-avatar">
-                          {member.isParent ? '👤' : '👶'}
-                        </div>
-                        <div className="member-info">
-                          <span className="member-name">{member.displayName}</span>
-                          <span className="member-details">
-                            {member.gender === 'male' ? 'ذكر' : member.gender === 'female' ? 'أنثى' : ''}
-                            {member.dateOfBirth && ` • ${formatDate(member.dateOfBirth)}`}
-                          </span>
-                        </div>
-                        <span className="member-arrow">←</span>
+                        <span className="member-icon">
+                          {member.isChild ? '👶' : member.gender === 'male' ? '👨' : '👩'}
+                        </span>
+                        <span className="member-name">{member.firstName} {member.lastName}</span>
+                        {member.isChild && <span className="child-badge">طفل</span>}
                       </button>
                     ))}
                   </div>
-                  
-                  <button 
-                    className="cancel-selection-btn"
-                    onClick={() => {
-                      setShowFamilySelection(false);
-                      setFamilyMembers([]);
-                    }}
-                  >
-                    إلغاء
-                  </button>
                 </div>
               )}
-
-              {/* Quick Info Cards */}
-              <div className="info-cards-row">
-                <div className="info-tip-card">
-                  <span className="tip-icon">💡</span>
-                  <div className="tip-content">
-                    <h4>نصيحة</h4>
-                    <p>يمكنك البحث برقم ولي الأمر للوصول لملفات أطفاله المسجلين</p>
-                  </div>
-                </div>
-                
-                {isCardiologist() && (
-                  <div className="info-tip-card cardio">
-                    <span className="tip-icon">❤️</span>
-                    <div className="tip-content">
-                      <h4>طبيب قلب</h4>
-                      <p>لديك صلاحية استخدام نموذج الذكاء الاصطناعي لتحليل ECG</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* How It Works */}
-              <div className="how-it-works-section">
-                <div className="how-works-header">
-                  <span>📖</span>
-                  <div>
-                    <h3>كيف يعمل النظام؟</h3>
-                  </div>
-                </div>
-                <div className="steps-container">
-                  <div className="step-item">
-                    <div className="step-number"><span>1</span></div>
-                    <div className="step-info">
-                      <h4>البحث</h4>
-                      <p>ابحث بالرقم الوطني</p>
-                    </div>
-                  </div>
-                  <div className="step-arrow">→</div>
-                  <div className="step-item">
-                    <div className="step-number"><span>2</span></div>
-                    <div className="step-info">
-                      <h4>السجل الطبي</h4>
-                      <p>عرض تاريخ المريض</p>
-                    </div>
-                  </div>
-                  <div className="step-arrow">→</div>
-                  <div className="step-item">
-                    <div className="step-number"><span>3</span></div>
-                    <div className="step-info">
-                      <h4>التشخيص</h4>
-                      <p>إضافة زيارة جديدة</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
-        ) : (
-          /* ═══════════════════════════════════════════════════════════════
-             PATIENT SELECTED - TAB NAVIGATION
-             ═══════════════════════════════════════════════════════════════ */
-          <>
-            {/* Back Button */}
-            <button className="back-to-search-btn" onClick={handleBackToSearch}>
-              <span>→</span>
-              <span>العودة للبحث</span>
-            </button>
+        )}
 
-            {/* Patient Mini Header */}
-            <div className="patient-mini-header">
-              <div className="patient-mini-info">
-                <div className="patient-mini-avatar">
-                  <span>{selectedPatient.gender === 'male' ? '👨' : '👩'}</span>
-                </div>
-                <div className="patient-mini-text">
-                  <h2>{selectedPatient.firstName} {selectedPatient.lastName}</h2>
-                  <p>
-                    {selectedPatient.nationalId || selectedPatient.childId}
-                    {calculateAge(selectedPatient.dateOfBirth) && ` • ${calculateAge(selectedPatient.dateOfBirth)} سنة`}
-                    {selectedPatient.childId && !selectedPatient.nationalId && (
-                      <span className="minor-tag">قاصر</span>
-                    )}
-                  </p>
+        {/* Patient Selected - Dashboard View */}
+        {selectedPatient && (
+          <>
+            {/* Back Button & Patient Info */}
+            <div className="patient-header-bar">
+              <button className="back-btn" onClick={handleBackToSearch}>
+                <span>→</span>
+                <span>بحث جديد</span>
+              </button>
+              
+              <div className="patient-quick-info">
+                <span className="patient-avatar">
+                  {selectedPatient.gender === 'male' ? '👨' : '👩'}
+                </span>
+                <div className="patient-name-info">
+                  <h3>{selectedPatient.firstName} {selectedPatient.lastName}</h3>
+                  <span className="patient-id">{selectedPatient.nationalId || selectedPatient.childId}</span>
                 </div>
               </div>
-              {selectedPatient.bloodType && (
-                <div className="patient-blood-type">
-                  <span>🩸</span>
-                  <span>{selectedPatient.bloodType}</span>
-                </div>
-              )}
             </div>
 
             {/* Navigation Tabs */}
             <div className="dashboard-tabs">
-              <button 
+              <button
                 className={`tab-btn ${activeSection === 'overview' ? 'active' : ''}`}
                 onClick={() => setActiveSection('overview')}
               >
-                <span className="tab-icon">👤</span>
-                نظرة عامة
+                <span>📋</span>
+                <span>الملف الطبي</span>
               </button>
-              <button 
+              <button
                 className={`tab-btn ${activeSection === 'history' ? 'active' : ''}`}
                 onClick={() => setActiveSection('history')}
               >
-                <span className="tab-icon">📋</span>
-                السجل الطبي
+                <span>📜</span>
+                <span>سجل الزيارات</span>
               </button>
-              <button 
+              <button
                 className={`tab-btn ${activeSection === 'newVisit' ? 'active' : ''}`}
                 onClick={() => setActiveSection('newVisit')}
               >
-                <span className="tab-icon">➕</span>
-                زيارة جديدة
+                <span>➕</span>
+                <span>زيارة جديدة</span>
               </button>
               {isCardiologist() && (
-                <button 
-                  className={`tab-btn cardio ${activeSection === 'ecg' ? 'active' : ''}`}
+                <button
+                  className={`tab-btn ecg-tab ${activeSection === 'ecg' ? 'active' : ''}`}
                   onClick={() => setActiveSection('ecg')}
                 >
-                  <span className="tab-icon">❤️</span>
-                  تحليل ECG
+                  <span>❤️</span>
+                  <span>تحليل ECG</span>
                 </button>
               )}
             </div>
 
             {/* Tab Content */}
-            <div className="section-content">
+            <div className="tab-content">
               {/* ═══════════════════════════════════════════════════════════════
-                  OVERVIEW TAB
+                  OVERVIEW TAB - Patient Medical File
                   ═══════════════════════════════════════════════════════════════ */}
               {activeSection === 'overview' && (
                 <div className="tab-content-container">
-                  {/* Patient Full Info */}
-                  <div className="data-section">
-                    <div className="section-header">
-                      <div className="section-title-wrapper">
-                        <span className="section-icon">👤</span>
-                        <h2>المعلومات الشخصية</h2>
+                  {/* Patient Profile Card */}
+                  <div className="patient-profile-card">
+                    <div className="profile-header">
+                      <div className="profile-avatar">
+                        <span>{selectedPatient.gender === 'male' ? '👨' : '👩'}</span>
                       </div>
-                    </div>
-                    <div className="info-cards-grid">
-                      <InfoCard icon="🆔" title="الرقم الوطني" value={selectedPatient.nationalId || selectedPatient.childId || '-'} />
-                      <InfoCard icon="👤" title="الاسم الكامل" value={`${selectedPatient.firstName} ${selectedPatient.lastName}`} />
-                      <InfoCard icon="🎂" title="العمر" value={calculateAge(selectedPatient.dateOfBirth) ? `${calculateAge(selectedPatient.dateOfBirth)} سنة` : '-'} />
-                      <InfoCard icon="📅" title="تاريخ الميلاد" value={formatDate(selectedPatient.dateOfBirth)} />
-                      <InfoCard icon={selectedPatient.gender === 'male' ? '♂️' : '♀️'} title="الجنس" value={selectedPatient.gender === 'male' ? 'ذكر' : selectedPatient.gender === 'female' ? 'أنثى' : '-'} />
-                      <InfoCard icon="📱" title="رقم الهاتف" value={selectedPatient.phone || selectedPatient.phoneNumber || '-'} dir="ltr" />
-                      <InfoCard icon="📍" title="العنوان" value={selectedPatient.address || '-'} fullWidth />
+                      <div className="profile-info">
+                        <h2>{selectedPatient.firstName} {selectedPatient.lastName}</h2>
+                        <div className="profile-meta">
+                          <span><strong>الرقم الوطني:</strong> {selectedPatient.nationalId || selectedPatient.childId}</span>
+                          {calculateAge(selectedPatient.dateOfBirth) && (
+                            <span><strong>العمر:</strong> {calculateAge(selectedPatient.dateOfBirth)} سنة</span>
+                          )}
+                          <span><strong>الجنس:</strong> {selectedPatient.gender === 'male' ? 'ذكر' : 'أنثى'}</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
 
+                  {/* Medical Info Grid */}
+                  <div className="medical-info-grid">
+                    <InfoCard 
+                      icon="🩸" 
+                      title="فصيلة الدم" 
+                      value={selectedPatient.bloodType || '-'} 
+                    />
+                    <InfoCard 
+                      icon="📏" 
+                      title="الطول" 
+                      value={selectedPatient.height ? `${selectedPatient.height} سم` : '-'} 
+                    />
+                    <InfoCard 
+                      icon="⚖️" 
+                      title="الوزن" 
+                      value={selectedPatient.weight ? `${selectedPatient.weight} كغ` : '-'} 
+                    />
+                    <InfoCard 
+                      icon="🚬" 
+                      title="حالة التدخين" 
+                      value={selectedPatient.smokingStatus === 'non-smoker' ? 'غير مدخن' : 
+                             selectedPatient.smokingStatus === 'former smoker' ? 'مدخن سابق' : 
+                             selectedPatient.smokingStatus === 'current smoker' ? 'مدخن حالي' : '-'} 
+                    />
+                  </div>
+
                   {/* Medical Alerts */}
-                  <div className="medical-alerts-section">
-                    <AlertCard 
-                      type="allergies"
+                  <div className="medical-alerts-grid">
+                    <AlertCard
+                      type="danger"
                       icon="⚠️"
                       title="الحساسية"
                       items={selectedPatient.allergies}
                       emptyMessage="لا توجد حساسية مسجلة"
                     />
-                    <AlertCard 
-                      type="diseases"
+                    <AlertCard
+                      type="warning"
                       icon="🏥"
                       title="الأمراض المزمنة"
                       items={selectedPatient.chronicDiseases}
                       emptyMessage="لا توجد أمراض مزمنة"
                     />
-                    <AlertCard 
-                      type="family"
+                    <AlertCard
+                      type="info"
                       icon="👨‍👩‍👧‍👦"
                       title="التاريخ العائلي"
                       items={selectedPatient.familyHistory}
-                      emptyMessage="لا يوجد تاريخ عائلي مسجل"
+                      emptyMessage="لا يوجد تاريخ عائلي"
                     />
                   </div>
 
-                  {/* Quick Stats */}
-                  <div className="quick-stats-row">
-                    <div className="stat-card">
-                      <span className="stat-icon">📋</span>
-                      <div className="stat-info">
-                        <h3>{patientHistory.length}</h3>
-                        <p>زيارات سابقة</p>
+                  {/* Emergency Contact */}
+                  {selectedPatient.emergencyContactName && (
+                    <div className="emergency-contact-card">
+                      <div className="emergency-header">
+                        <span>🆘</span>
+                        <h3>جهة اتصال الطوارئ</h3>
+                      </div>
+                      <div className="emergency-info">
+                        <span><strong>الاسم:</strong> {selectedPatient.emergencyContactName}</span>
+                        <span><strong>الصلة:</strong> {selectedPatient.emergencyContactRelationship}</span>
+                        <span><strong>الهاتف:</strong> {selectedPatient.emergencyContactPhone}</span>
                       </div>
                     </div>
-                    {selectedPatient.bloodType && (
-                      <div className="stat-card blood">
-                        <span className="stat-icon">🩸</span>
-                        <div className="stat-info">
-                          <h3>{selectedPatient.bloodType}</h3>
-                          <p>فصيلة الدم</p>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                  )}
                 </div>
               )}
 
               {/* ═══════════════════════════════════════════════════════════════
-                  MEDICAL HISTORY TAB (Patient CV)
+                  HISTORY TAB - Visit History
                   ═══════════════════════════════════════════════════════════════ */}
               {activeSection === 'history' && (
                 <div className="tab-content-container">
-                  <div className="history-header-section">
-                    <div className="history-title">
-                      <span>📋</span>
-                      <div>
-                        <h2>السجل الطبي الكامل</h2>
-                        <p>جميع الزيارات السابقة لدى كافة الأطباء</p>
-                      </div>
+                  <div className="history-header">
+                    <span>📜</span>
+                    <div>
+                      <h2>سجل الزيارات الطبية</h2>
+                      <p>جميع زيارات المريض من مختلف الأطباء</p>
                     </div>
-                    <div className="visits-count-badge">
-                      <span>{patientHistory.length}</span>
-                      <span>زيارة</span>
-                    </div>
+                    <span className="visits-count">{patientHistory.length} زيارة</span>
                   </div>
 
                   {patientHistory.length === 0 ? (
                     <div className="empty-state">
-                      <div className="empty-icon">📋</div>
+                      <span className="empty-icon">📋</span>
                       <h3>لا توجد زيارات سابقة</h3>
                       <p>لم يتم تسجيل أي زيارات طبية لهذا المريض بعد</p>
-                      <button 
-                        className="add-visit-btn"
-                        onClick={() => setActiveSection('newVisit')}
-                      >
-                        <span>➕</span>
-                        إضافة أول زيارة
-                      </button>
                     </div>
                   ) : (
                     <div className="visits-timeline">
                       {patientHistory.map((visit, index) => (
-                        <div key={visit.id || index} className="visit-card">
+                        <div key={visit._id || index} className="visit-card">
                           <div className="visit-card-header">
-                            <div className="visit-date-badge">
-                              <span>📅</span>
-                              <span>{formatDateTime(visit.visitDate)}</span>
+                            <div className="visit-date">
+                              <span className="date-icon">📅</span>
+                              <span>{formatDateTime(visit.visitDate || visit.createdAt)}</span>
                             </div>
-                            <div className="visit-doctor-info">
-                              <span>👨‍⚕️</span>
+                            <div className="visit-doctor">
+                              <span className="doctor-icon">👨‍⚕️</span>
                               <span>{visit.doctorName || 'طبيب'}</span>
-                              {visit.specialization && (
-                                <span className="spec-tag">{visit.specialization}</span>
+                              {visit.doctorSpecialization && (
+                                <span className="doc-spec">({visit.doctorSpecialization})</span>
                               )}
                             </div>
                           </div>
@@ -984,6 +1210,21 @@ const handleSearchPatient = async () => {
                               <div className="visit-field notes">
                                 <label>ملاحظات الطبيب:</label>
                                 <p>{visit.doctorNotes}</p>
+                              </div>
+                            )}
+
+                            {/* Display visit photo if exists */}
+                            {visit.photoUrl && (
+                              <div className="visit-photo-section">
+                                <label>📷 صورة مرفقة:</label>
+                                <div className="visit-photo-wrapper">
+                                  <img 
+                                    src={visit.photoUrl} 
+                                    alt="Visit attachment" 
+                                    className="visit-photo-thumbnail"
+                                    onClick={() => window.open(visit.photoUrl, '_blank')}
+                                  />
+                                </div>
                               </div>
                             )}
                           </div>
@@ -1100,7 +1341,7 @@ const handleSearchPatient = async () => {
                   <div className="form-section">
                     <div className="form-section-header">
                       <span>🔬</span>
-                      <h3>التشخيص</h3>
+                      <h3>التشخيص *</h3>
                     </div>
                     <textarea
                       value={diagnosis}
@@ -1109,6 +1350,56 @@ const handleSearchPatient = async () => {
                       className="form-textarea"
                       rows={3}
                     />
+                  </div>
+
+                  {/* ═══════════════════════════════════════════════════════════════
+                      NEW: PHOTO UPLOAD SECTION
+                      ═══════════════════════════════════════════════════════════════ */}
+                  <div className="form-section photo-upload-section">
+                    <div className="form-section-header">
+                      <span>📷</span>
+                      <h3>إرفاق صورة (اختياري)</h3>
+                    </div>
+                    <p className="form-section-hint">يمكنك إرفاق صورة للتقارير أو الفحوصات أو أي وثيقة متعلقة بالزيارة</p>
+                    
+                    {!visitPhoto ? (
+                      <label className="photo-upload-area">
+                        <input
+                          type="file"
+                          accept="image/png,image/jpeg,image/jpg,image/webp"
+                          onChange={handlePhotoUpload}
+                          ref={photoInputRef}
+                          className="hidden-input"
+                        />
+                        <div className="upload-content">
+                          <div className="upload-icon-circle">
+                            <span>📷</span>
+                          </div>
+                          <h4>اضغط لرفع صورة</h4>
+                          <p>PNG, JPG, WEBP - الحد الأقصى 10MB</p>
+                        </div>
+                      </label>
+                    ) : (
+                      <div className="photo-preview-card">
+                        <div className="preview-image-wrapper">
+                          <img src={visitPhotoPreview} alt="Preview" className="preview-image" />
+                          <button 
+                            className="remove-photo-btn" 
+                            onClick={handleRemovePhoto}
+                            type="button"
+                          >
+                            <span>✕</span>
+                          </button>
+                        </div>
+                        <div className="preview-info">
+                          <span className="file-icon">📎</span>
+                          <span className="file-name">{visitPhoto.name}</span>
+                          <span className="file-size">
+                            ({(visitPhoto.size / 1024 / 1024).toFixed(2)} MB)
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Medications */}
@@ -1214,79 +1505,117 @@ const handleSearchPatient = async () => {
               )}
 
               {/* ═══════════════════════════════════════════════════════════════
-                  ECG TAB (Cardiologists Only)
+                  ECG TAB (Cardiologists Only) - REDESIGNED
                   ═══════════════════════════════════════════════════════════════ */}
               {activeSection === 'ecg' && isCardiologist() && (
-                <div className="tab-content-container">
-                  <div className="ecg-header-section">
-                    <div className="ecg-header-icon">
-                      <span>❤️</span>
-                      <div className="ecg-pulse"></div>
+                <div className="tab-content-container ecg-section">
+                  {/* ECG Header */}
+                  <div className="ecg-page-header">
+                    <div className="ecg-header-icon-wrapper">
+                      <span className="ecg-heart-icon">❤️</span>
+                      <div className="ecg-pulse-ring"></div>
+                      <div className="ecg-pulse-ring delay-1"></div>
                     </div>
-                    <div className="ecg-header-text">
-                      <h2>تحليل تخطيط القلب (ECG)</h2>
-                      <p>AI-Powered ECG Analysis - نموذج الذكاء الاصطناعي</p>
+                    <div className="ecg-header-content">
+                      <h1>تحليل تخطيط القلب (ECG)</h1>
+                      <p>AI-Powered ECG Analysis System</p>
                     </div>
-                    <div className="cardio-only-badge">
+                    <div className="ecg-ai-badge">
                       <span>🤖</span>
-                      <span>متاح لأطباء القلب</span>
+                      <span>Powered by AI</span>
                     </div>
                   </div>
 
                   {/* Upload Section */}
-                  <div className="ecg-upload-section">
-                    <label className="ecg-upload-area">
-                      <input
-                        type="file"
-                        accept=".pdf,.png,.jpg,.jpeg"
-                        onChange={handleEcgUpload}
-                        className="hidden-input"
-                      />
-                      <div className="upload-content">
-                        <div className="upload-icon">📤</div>
-                        <h3>رفع ملف ECG</h3>
-                        <p>اضغط لاختيار ملف أو اسحب الملف هنا</p>
-                        <span className="upload-hint">PDF, PNG, JPG</span>
-                        {ecgFile && (
-                          <div className="file-selected-badge">
-                            <span>✓</span>
-                            <span>{ecgFile.name}</span>
+                  <div className="ecg-upload-card">
+                    <div className="ecg-upload-header">
+                      <span>📤</span>
+                      <h3>رفع ملف تخطيط القلب</h3>
+                    </div>
+
+                    {!ecgFile ? (
+                      <label className="ecg-upload-dropzone">
+                        <input
+                          type="file"
+                          accept=".pdf,.png,.jpg,.jpeg"
+                          onChange={handleEcgUpload}
+                          ref={ecgFileInputRef}
+                          className="hidden-input"
+                        />
+                        <div className="dropzone-content">
+                          <div className="dropzone-icon">
+                            <span>📤</span>
+                          </div>
+                          <h4>اضغط لاختيار ملف أو اسحب الملف هنا</h4>
+                          <p>PDF, PNG, JPG - تخطيط القلب الكهربائي</p>
+                          <div className="dropzone-formats">
+                            <span className="format-tag">📄 PDF</span>
+                            <span className="format-tag">🖼️ PNG</span>
+                            <span className="format-tag">🖼️ JPG</span>
+                          </div>
+                        </div>
+                      </label>
+                    ) : (
+                      <div className="ecg-file-preview-card">
+                        {ecgPreview ? (
+                          <div className="ecg-image-preview">
+                            <img src={ecgPreview} alt="ECG Preview" />
+                          </div>
+                        ) : (
+                          <div className="ecg-pdf-preview">
+                            <span className="pdf-icon">📄</span>
+                            <span className="pdf-name">{ecgFile.name}</span>
                           </div>
                         )}
+                        <div className="ecg-file-info">
+                          <span className="file-name">📎 {ecgFile.name}</span>
+                          <span className="file-size">({(ecgFile.size / 1024 / 1024).toFixed(2)} MB)</span>
+                          <button className="remove-ecg-btn" onClick={handleRemoveEcg}>
+                            <span>✕</span> إزالة
+                          </button>
+                        </div>
                       </div>
-                    </label>
+                    )}
 
+                    {/* Analyze Button */}
                     <button
-                      className={`analyze-ecg-btn ${ecgAnalyzing ? 'analyzing' : ''} ${!ecgFile ? 'disabled' : ''}`}
+                      className={`ecg-analyze-btn ${ecgAnalyzing ? 'analyzing' : ''} ${!ecgFile ? 'disabled' : ''}`}
                       onClick={handleAiDiagnosis}
                       disabled={!ecgFile || ecgAnalyzing}
                     >
                       {ecgAnalyzing ? (
-                        <><span className="spinner"></span><span>جاري التحليل...</span></>
+                        <>
+                          <div className="analyze-spinner"></div>
+                          <span>جاري التحليل بالذكاء الاصطناعي...</span>
+                        </>
                       ) : (
-                        <><span>🤖</span><span>تحليل بالذكاء الاصطناعي</span></>
+                        <>
+                          <span className="analyze-icon">🤖</span>
+                          <span>تحليل بالذكاء الاصطناعي</span>
+                        </>
                       )}
                     </button>
                   </div>
 
-                  {/* AI Results */}
+                  {/* AI Results - New Design */}
                   {aiDiagnosis && (
-                    <div className="ai-results-section" ref={resultRef}>
-                      <div className="results-header">
-                        <span>✅</span>
-                        <h3>نتائج التحليل</h3>
-                      </div>
-                      <pre className="ai-output">{aiDiagnosis}</pre>
+                    <div ref={resultRef}>
+                      <ECGResultCard result={aiDiagnosis} />
                     </div>
                   )}
 
                   {/* Info Notice */}
-                  <div className="ecg-notice">
-                    <span>⚠️</span>
-                    <p>
-                      <strong>تنبيه:</strong> نتائج الذكاء الاصطناعي استرشادية ولا تغني عن التقييم السريري. 
-                      يرجى مراجعة النتائج واتخاذ القرار الطبي المناسب.
-                    </p>
+                  <div className="ecg-info-notice">
+                    <div className="notice-icon">💡</div>
+                    <div className="notice-content">
+                      <h4>كيفية الاستخدام</h4>
+                      <ol>
+                        <li>ارفع صورة أو ملف PDF لتخطيط القلب</li>
+                        <li>اضغط على زر "تحليل بالذكاء الاصطناعي"</li>
+                        <li>راجع النتائج والتوصيات</li>
+                        <li>اتخذ القرار الطبي المناسب بناءً على خبرتك السريرية</li>
+                      </ol>
+                    </div>
                   </div>
                 </div>
               )}

@@ -9,6 +9,158 @@ import Navbar from '../components/common/Navbar';
 import { authAPI } from '../services/api';
 import '../styles/AdminDashboard.css';
 
+// ============================================
+// RESPONSIVE HELPER COMPONENTS
+// ============================================
+
+/**
+ * ResponsiveTable - Displays as table on desktop, cards on mobile
+ */
+const ResponsiveTable = ({ columns, data, loading, emptyMessage, emptyIcon, renderActions }) => {
+  if (loading) {
+    return (
+      <div className="loading-state">
+        <div className="loading-spinner"></div>
+        <p>جاري التحميل...</p>
+      </div>
+    );
+  }
+
+  if (!data || data.length === 0) {
+    return (
+      <div className="empty-state">
+        <span className="empty-icon">{emptyIcon || '📋'}</span>
+        <h4>{emptyMessage || 'لا توجد بيانات'}</h4>
+      </div>
+    );
+  }
+
+  return (
+    <div className="responsive-table-wrapper">
+      {/* Desktop Table View */}
+      <table className="admin-table desktop-table">
+        <thead>
+          <tr>
+            {columns.map((col, i) => (
+              <th key={i} className={col.className || ''}>{col.header}</th>
+            ))}
+            {renderActions && <th className="actions-col">الإجراءات</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((row, rowIndex) => (
+            <tr key={row._id || rowIndex}>
+              {columns.map((col, colIndex) => (
+                <td key={colIndex} className={col.cellClassName || ''} data-label={col.header}>
+                  {col.render ? col.render(row) : row[col.field]}
+                </td>
+              ))}
+              {renderActions && (
+                <td className="actions-cell">{renderActions(row)}</td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Mobile Cards View */}
+      <div className="mobile-cards">
+        {data.map((row, rowIndex) => (
+          <div key={row._id || rowIndex} className="mobile-card">
+            <div className="mobile-card-header">
+              {columns[0]?.render ? columns[0].render(row) : row[columns[0]?.field]}
+            </div>
+            <div className="mobile-card-body">
+              {columns.slice(1).map((col, colIndex) => (
+                <div key={colIndex} className="mobile-card-row">
+                  <span className="mobile-label">{col.header}:</span>
+                  <span className="mobile-value">
+                    {col.render ? col.render(row) : row[col.field]}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {renderActions && (
+              <div className="mobile-card-actions">{renderActions(row)}</div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+/**
+ * SearchFilterBar - Responsive search and filter controls
+ */
+const SearchFilterBar = ({ 
+  searchValue, 
+  onSearchChange, 
+  searchPlaceholder, 
+  filters,
+  activeFilter,
+  onFilterChange 
+}) => (
+  <div className="search-filter-bar responsive">
+    <div className="search-input-wrapper">
+      <span className="search-icon">🔍</span>
+      <input
+        type="text"
+        placeholder={searchPlaceholder || 'بحث...'}
+        value={searchValue}
+        onChange={(e) => onSearchChange(e.target.value)}
+        className="search-input"
+      />
+      {searchValue && (
+        <button className="clear-search-btn" onClick={() => onSearchChange('')}>✕</button>
+      )}
+    </div>
+    {filters && (
+      <div className="filter-buttons responsive">
+        {filters.map((filter) => (
+          <button
+            key={filter.value}
+            className={`filter-btn ${filter.colorClass || ''} ${activeFilter === filter.value ? 'active' : ''}`}
+            onClick={() => onFilterChange(filter.value)}
+          >
+            {filter.icon && <span className="filter-icon">{filter.icon}</span>}
+            {filter.label}
+            {filter.count !== undefined && <span className="filter-count">({filter.count})</span>}
+          </button>
+        ))}
+      </div>
+    )}
+  </div>
+);
+
+/**
+ * ResponsiveModal - Modal with responsive sizing
+ */
+const ResponsiveModal = ({ 
+  isOpen, 
+  onClose, 
+  title, 
+  children, 
+  size = 'medium',
+  footer 
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div 
+        className={`modal-content responsive-modal ${size}`} 
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button className="modal-close" onClick={onClose}>✕</button>
+        {title && <h3 className="modal-title">{title}</h3>}
+        <div className="modal-body">{children}</div>
+        {footer && <div className="modal-footer">{footer}</div>}
+      </div>
+    </div>
+  );
+};
+
 /**
  * ============================================
  * DATABASE SCHEMA REFERENCE (from metadata)
@@ -210,15 +362,30 @@ const getGovernorateName = (govId) => {
 // COMPONENTS
 // ============================================
 
+/**
+ * StatCard - Responsive statistics card with touch-friendly design
+ */
 const StatCard = ({ icon, value, label, sublabel, color, onClick, badge }) => (
-  <div className={`stat-card ${color}`} onClick={onClick} style={{ cursor: onClick ? 'pointer' : 'default' }}>
+  <div 
+    className={`stat-card responsive ${color}`} 
+    onClick={onClick} 
+    style={{ cursor: onClick ? 'pointer' : 'default' }}
+    role={onClick ? 'button' : undefined}
+    tabIndex={onClick ? 0 : undefined}
+    onKeyDown={(e) => {
+      if (onClick && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        onClick();
+      }
+    }}
+  >
     <div className="stat-card-icon"><span>{icon}</span></div>
     <div className="stat-card-content">
       <h3 className="stat-value">{value}</h3>
       <p className="stat-label">{label}</p>
       {sublabel && <span className="stat-sublabel">{sublabel}</span>}
     </div>
-    {badge && <span className="stat-badge">{badge}</span>}
+    {badge && <span className="stat-badge pulse">{badge}</span>}
   </div>
 );
 

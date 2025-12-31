@@ -20,6 +20,7 @@ const patientRoutes = require('./routes/patient');
 const doctorRoutes = require('./routes/doctor');
 const adminRoutes = require('./routes/admin');
 const visitRoutes = require('./routes/visit');
+const ecgRoutes = require('./routes/ecg'); // ✅ NEW: ECG AI Routes
 
 // Initialize express app
 const app = express();
@@ -47,6 +48,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 console.log('📁 Static files served from /uploads');
 console.log('📂 Doctor requests: /uploads/doctor-requests/');
 console.log('📂 Visit attachments: /uploads/visits/');
+console.log('📂 ECG images: /uploads/ecg/'); // ✅ NEW
 
 // Rate limiting
 app.use('/api/', apiLimiter);
@@ -57,13 +59,14 @@ app.use('/api/patient', patientRoutes);
 app.use('/api/doctor', doctorRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/visits', visitRoutes);
+app.use('/api/ecg', ecgRoutes); // ✅ NEW: ECG AI Routes
 
 // Welcome route
 app.get('/', (req, res) => {
   res.json({
     success: true,
     message: 'Patient 360° API Server - Healthcare Management System',
-    version: '2.0.0',
+    version: '2.1.0', // ✅ Updated version
     status: 'Running ✅',
     features: [
       '👥 Patient Registration',
@@ -72,7 +75,8 @@ app.get('/', (req, res) => {
       '🏥 Visit Management',
       '📎 File Upload Support',
       '🔐 JWT Authentication',
-      '👑 Admin Dashboard'
+      '👑 Admin Dashboard',
+      '🤖 ECG AI Analysis' // ✅ NEW Feature
     ],
     endpoints: {
       // Authentication
@@ -99,6 +103,11 @@ app.get('/', (req, res) => {
       
       // Visits
       visits: '/api/visits',
+      
+      // ECG AI Analysis (NEW)
+      ecg: '/api/ecg',
+      analyzeEcg: 'POST /api/ecg/analyze',
+      testEcg: 'GET /api/ecg/test',
       
       // File Uploads
       uploads: '/uploads'
@@ -186,9 +195,14 @@ app.listen(PORT, () => {
   console.log('');
   console.log(`🏥  Visits:        http://localhost:${PORT}/api/visits`);
   console.log('');
+  console.log(`🤖  ECG AI:        http://localhost:${PORT}/api/ecg`); // ✅ NEW
+  console.log(`    └─ POST /analyze             - Analyze ECG Image`); // ✅ NEW
+  console.log(`    └─ GET  /test                - Test AI Service`); // ✅ NEW
+  console.log('');
   console.log(`📁  File Uploads:  http://localhost:${PORT}/uploads`);
   console.log(`    └─ Doctor Requests: /uploads/doctor-requests/`);
   console.log(`    └─ Visit Files:     /uploads/visits/`);
+  console.log(`    └─ ECG Images:      /uploads/ecg/`); // ✅ NEW
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('✅  FEATURES ENABLED:');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -197,6 +211,7 @@ app.listen(PORT, () => {
   console.log('    - http://localhost:3001');
   console.log('    - http://localhost:3002');
   console.log('✅  File Upload Support (PDF, Images)');
+  console.log('✅  ECG AI Analysis (VGG16 Model)'); // ✅ NEW
   console.log('✅  Rate Limiting Active');
   console.log('✅  Security Headers (Helmet)');
   console.log('✅  Static File Serving');
@@ -209,6 +224,7 @@ app.listen(PORT, () => {
   console.log('🔹  Health Check:  GET  http://localhost:5000/health');
   console.log('🔹  Patient Signup: POST http://localhost:5000/api/auth/signup');
   console.log('🔹  Doctor Request: POST http://localhost:5000/api/auth/register-doctor');
+  console.log('🔹  ECG Analysis:   POST http://localhost:5000/api/ecg/analyze'); // ✅ NEW
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('💡  Ready to accept requests!');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');

@@ -9,7 +9,7 @@ const Patient = require('../models/Patient');
 
 /**
  * @route   POST /api/doctor/patient/:nationalId/visit
- * @desc    Create a new visit for a patient
+ * @desc    Create a new visit for a patient (WITH FILE UPLOAD SUPPORT)
  * @access  Private (Doctor only)
  */
 exports.createVisit = async (req, res) => {
@@ -23,8 +23,28 @@ exports.createVisit = async (req, res) => {
       visitType
     } = req.body;
 
-    // Find patient by national ID
-    const person = await Person.findOne({ nationalId }).lean();
+    console.log('🔵 ========== CREATE VISIT REQUEST ==========');
+    console.log('📋 National ID:', nationalId);
+    console.log('📝 Chief Complaint:', chiefComplaint);
+    console.log('🔬 Diagnosis:', diagnosis);
+    console.log('📷 File uploaded:', req.file ? 'YES' : 'NO');
+    if (req.file) {
+      console.log('📁 File name:', req.file.filename);
+      console.log('📁 File size:', req.file.size, 'bytes');
+    }
+
+   // Find patient by national ID or child ID
+    console.log('🔍 Searching for person:', nationalId);
+    
+    const person = await Person.findOne({
+      $or: [
+        { nationalId: nationalId },
+        { childId: nationalId }
+      ]
+    }).lean();
+    
+    console.log('📥 Person found:', person ? '✅' : '❌');
+    
     if (!person) {
       return res.status(404).json({
         success: false,
@@ -41,8 +61,20 @@ exports.createVisit = async (req, res) => {
       });
     }
 
-    // Create visit
-    const visit = await Visit.create({
+    // Parse medications if it's a JSON string
+    let parsedMedications = [];
+    if (prescribedMedications) {
+      try {
+        parsedMedications = typeof prescribedMedications === 'string' 
+          ? JSON.parse(prescribedMedications) 
+          : prescribedMedications;
+      } catch (e) {
+        console.error('Error parsing medications:', e);
+      }
+    }
+
+    // Create visit object
+    const visitData = {
       patientId: person._id,
       doctorId: doctor._id,
       visitDate: new Date(),
@@ -50,15 +82,45 @@ exports.createVisit = async (req, res) => {
       status: 'completed',
       chiefComplaint,
       diagnosis,
-      prescribedMedications: prescribedMedications || [],
+      prescribedMedications: parsedMedications || [],
       doctorNotes: doctorNotes || ''
-    });
+    };
+
+    // ✅ ADD ATTACHMENT IF FILE WAS UPLOADED
+    if (req.file) {
+      // Get the account ID - try multiple possible fields
+      const accountId = req.user._id || req.user.accountId || req.user.id;
+      
+      console.log('👤 User ID for uploadedBy:', accountId);
+      console.log('👤 User object keys:', Object.keys(req.user));
+      
+      const attachment = {
+        fileName: req.file.originalname,
+        fileType: req.file.mimetype.startsWith('image/') ? 'image' : 'pdf',
+        mimeType: req.file.mimetype,
+        fileSize: req.file.size,
+        filePath: req.file.path,
+        fileUrl: `/uploads/visits/${req.file.filename}`,
+        description: 'Visit attachment',
+        uploadedBy: accountId,
+        uploadedAt: new Date()
+      };
+
+      visitData.attachments = [attachment];
+      console.log('✅ Attachment added to visit data');
+    }
+
+    // Create visit
+    const visit = await Visit.create(visitData);
 
     // Populate patient and doctor info
     await visit.populate([
       { path: 'patientId', select: 'firstName lastName nationalId' },
       { path: 'doctorId', select: 'specialization institution' }
     ]);
+
+    console.log('✅ Visit created successfully');
+    console.log('✅ ==========================================');
 
     res.status(201).json({
       success: true,
@@ -67,7 +129,7 @@ exports.createVisit = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error creating visit:', error);
+    console.error('❌ Error creating visit:', error);
     
     // Handle validation errors
     if (error.name === 'ValidationError') {
@@ -95,8 +157,19 @@ exports.getPatientVisitsByNationalId = async (req, res) => {
   try {
     const { nationalId } = req.params;
 
-    // Find patient
-    const person = await Person.findOne({ nationalId }).lean();
+    
+// Find patient by national ID or child ID
+    console.log('🔍 Searching for person visits:', nationalId);
+    
+    const person = await Person.findOne({
+      $or: [
+        { nationalId: nationalId },
+        { childId: nationalId }
+      ]
+    }).lean();
+    
+    console.log('📥 Person found:', person ? '✅' : '❌');
+    
     if (!person) {
       return res.status(404).json({
         success: false,

@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const path = require('path');
 
 // Import middleware
 const { protect, restrictTo } = require('../middleware/auth');
@@ -12,6 +14,44 @@ const Account = require('../models/Account');
 
 // Import visit controller
 const visitController = require('../controllers/visitController');
+
+// ==========================================
+// MULTER CONFIGURATION FOR VISIT ATTACHMENTS
+// ==========================================
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'uploads/visits/');
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'visit-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = [
+    'image/jpeg',
+    'image/jpg', 
+    'image/png',
+    'image/webp',
+    'application/pdf'
+  ];
+  
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('نوع الملف غير مدعوم. الرجاء رفع صورة أو PDF فقط'), false);
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  },
+  fileFilter: fileFilter
+});
 
 /**
  * ALL ROUTES REQUIRE:
@@ -38,8 +78,17 @@ router.get(
     try {
       const { nationalId } = req.params;
 
-      // Find person by nationalId
-      const person = await Person.findOne({ nationalId }).lean();
+console.log('🔍 Searching for:', nationalId);
+
+// ✅ Search by nationalId OR childId
+const person = await Person.findOne({
+  $or: [
+    { nationalId: nationalId },
+    { childId: nationalId }
+  ]
+}).lean();
+
+console.log('📥 Person found:', person ? '✅' : '❌');
 
       if (!person) {
         return res.status(404).json({
@@ -222,7 +271,7 @@ router.put(
 
 /**
  * @route   POST /api/doctor/patient/:nationalId/visit
- * @desc    Create a new visit for a patient
+ * @desc    Create a new visit for a patient (WITH FILE UPLOAD)
  * @access  Private (Doctor only)
  */
 router.post(
@@ -230,6 +279,7 @@ router.post(
   protect,
   restrictTo('doctor'),
   profileLimiter,
+  upload.single('visitPhoto'),  // ⬅️ ADDED: File upload middleware
   visitController.createVisit
 );
 

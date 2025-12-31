@@ -2174,3 +2174,1020 @@
     transition-duration: 0.01ms !important;
   }
 }
+/* ============================================
+   ============================================
+   ENHANCEMENTS ADDED - Photo Upload & ECG Cards
+   Patient 360° - Government Healthcare Platform
+   ============================================
+   ============================================ */
+
+/* ============================================
+   PHOTO UPLOAD SECTION
+   ============================================ */
+
+.photo-upload-section {
+  margin: 24px 0;
+}
+
+.form-section-hint {
+  font-size: 0.9rem;
+  color: #5a7a8a;
+  margin-bottom: 16px;
+  line-height: 1.6;
+}
+
+.photo-upload-area {
+  display: block;
+  border: 3px dashed #005080;
+  border-radius: 20px;
+  padding: 45px 25px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: linear-gradient(135deg, #f8fbfd 0%, #f0f7fc 100%);
+}
+
+.photo-upload-area:hover {
+  background: linear-gradient(135deg, #e8f4fc 0%, #d8eef9 100%);
+  border-color: #003d61;
+  transform: translateY(-3px);
+  box-shadow: 0 10px 30px rgba(0, 80, 128, 0.15);
+}
+
+.upload-icon-circle {
+  width: 85px;
+  height: 85px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #005080 0%, #00a0a0 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.5rem;
+  margin: 0 auto 18px;
+  box-shadow: 0 10px 30px rgba(0, 80, 128, 0.35);
+}
+
+.upload-content h4 {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #005080;
+  margin: 0 0 8px 0;
+}
+
+.upload-content > p {
+  font-size: 0.95rem;
+  color: #6b7280;
+  margin: 0;
+}
+
+/* Photo Preview Card */
+.photo-preview-card {
+  background: white;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+  border: 2px solid #e8f4fc;
+}
+
+.preview-image-wrapper {
+  position: relative;
+  display: inline-block;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.preview-image {
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: 14px;
+  object-fit: contain;
+  display: block;
+}
+
+.remove-photo-btn {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: linear-gradient(135deg, #ff5252 0%, #d32f2f 100%);
+  color: white;
+  border: none;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  font-weight: bold;
+  box-shadow: 0 6px 18px rgba(211, 47, 47, 0.45);
+  transition: all 0.25s ease;
+}
+
+.remove-photo-btn:hover {
+  transform: scale(1.15);
+  box-shadow: 0 8px 22px rgba(211, 47, 47, 0.55);
+}
+
+.preview-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 2px dashed #e0e0e0;
+  flex-wrap: wrap;
+}
+
+.file-icon {
+  font-size: 1.4rem;
+}
+
+.file-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #374151;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.file-size {
+  font-size: 0.85rem;
+  color: #6b7280;
+  flex-shrink: 0;
+}
+
+/* Visit Photo in History */
+.visit-photo-section {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 2px solid #e5e7eb;
+}
+
+.visit-photo-section > label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  color: #005080;
+  margin-bottom: 12px;
+  font-size: 1rem;
+}
+
+.visit-photo-wrapper {
+  display: inline-block;
+}
+
+.visit-photo-thumbnail {
+  max-width: 220px;
+  max-height: 160px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border: 3px solid #e0e0e0;
+  object-fit: cover;
+}
+
+.visit-photo-thumbnail:hover {
+  transform: scale(1.05);
+  border-color: #005080;
+  box-shadow: 0 8px 25px rgba(0, 80, 128, 0.25);
+}
+
+/* ============================================
+   ECG REDESIGNED OUTPUT - PROFESSIONAL CARDS
+   ============================================ */
+
+.ecg-result-modern {
+  background: white;
+  border-radius: 24px;
+  box-shadow: 0 12px 45px rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+  margin: 28px 0;
+  border: 1px solid #e8e8e8;
+}
+
+/* ECG Header with Severity Colors */
+.ecg-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 28px 30px;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.ecg-result-header.severity-critical {
+  background: linear-gradient(135deg, #ff5252 0%, #c62828 100%);
+  color: white;
+}
+
+.ecg-result-header.severity-warning {
+  background: linear-gradient(135deg, #ffb74d 0%, #ef6c00 100%);
+  color: white;
+}
+
+.ecg-result-header.severity-normal {
+  background: linear-gradient(135deg, #66bb6a 0%, #2e7d32 100%);
+  color: white;
+}
+
+.ecg-result-header.severity-info {
+  background: linear-gradient(135deg, #42a5f5 0%, #1565c2 100%);
+  color: white;
+}
+
+.result-header-icon {
+  width: 70px;
+  height: 70px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.22);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.2rem;
+  flex-shrink: 0;
+  backdrop-filter: blur(10px);
+}
+
+.result-header-content {
+  flex: 1;
+  min-width: 220px;
+}
+
+.result-header-label {
+  font-size: 0.85rem;
+  opacity: 0.92;
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.result-diagnosis-title {
+  font-size: 1.7rem;
+  font-weight: 800;
+  margin: 0 0 6px 0;
+  line-height: 1.3;
+}
+
+.result-diagnosis-en {
+  font-size: 0.95rem;
+  opacity: 0.88;
+  margin: 0;
+  font-style: italic;
+}
+
+/* Confidence Circle */
+.result-confidence-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.confidence-circle {
+  position: relative;
+  width: 88px;
+  height: 88px;
+}
+
+.confidence-circle svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.confidence-bg {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.28);
+  stroke-width: 5;
+}
+
+.confidence-progress {
+  fill: none;
+  stroke: white;
+  stroke-width: 5;
+  stroke-linecap: round;
+  transition: stroke-dasharray 1.2s ease;
+}
+
+.confidence-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.confidence-label {
+  font-size: 0.8rem;
+  opacity: 0.9;
+  font-weight: 600;
+}
+
+/* Description Card */
+.ecg-description-card {
+  display: flex;
+  gap: 18px;
+  padding: 24px 28px;
+  background: linear-gradient(135deg, #f8fbfd 0%, #f0f7fc 100%);
+  border-bottom: 1px solid #e0e0e0;
+  align-items: flex-start;
+}
+
+.description-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+.description-content h4 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #005080;
+  margin: 0 0 10px 0;
+}
+
+.description-content p {
+  font-size: 1rem;
+  color: #4b5563;
+  margin: 0;
+  line-height: 1.75;
+}
+
+/* Predictions Section */
+.ecg-predictions-section {
+  padding: 28px;
+  background: white;
+}
+
+.predictions-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.predictions-icon {
+  font-size: 1.6rem;
+}
+
+.predictions-header h3 {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0;
+}
+
+.predictions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 18px;
+}
+
+.prediction-card {
+  background: #f8f9fa;
+  border-radius: 14px;
+  padding: 18px 20px;
+  border-right: 5px solid #e0e0e0;
+  transition: all 0.3s ease;
+}
+
+.prediction-card.primary {
+  border-right-color: #005080;
+  background: linear-gradient(135deg, #f0f8ff 0%, #e8f4fc 100%);
+}
+
+.prediction-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+}
+
+.prediction-rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #005080 0%, #00a0a0 100%);
+  color: white;
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+
+.prediction-card.primary .prediction-rank {
+  background: linear-gradient(135deg, #005080 0%, #a23f97 100%);
+  box-shadow: 0 4px 12px rgba(162, 63, 151, 0.3);
+}
+
+.prediction-content h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0 0 12px 0;
+}
+
+.prediction-bar-container {
+  background: #e0e0e0;
+  height: 12px;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.prediction-bar {
+  background: linear-gradient(90deg, #005080 0%, #00a0a0 50%, #a23f97 100%);
+  height: 100%;
+  border-radius: 6px;
+  transition: width 1s ease;
+}
+
+.prediction-percentage {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #005080;
+}
+
+/* Recommendations Section */
+.ecg-recommendations-section {
+  padding: 28px;
+  background: linear-gradient(135deg, #e8f5e9 0%, #e3f2fd 100%);
+  border-top: 1px solid #c8e6c9;
+}
+
+.recommendations-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.recommendations-icon {
+  font-size: 1.6rem;
+}
+
+.recommendations-header h3 {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0;
+}
+
+.recommendations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.recommendation-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.06);
+  transition: all 0.25s ease;
+}
+
+.recommendation-item:hover {
+  transform: translateX(-5px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1);
+}
+
+.rec-number {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #005080 0%, #00a0a0 100%);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.rec-text {
+  font-size: 1rem;
+  color: #374151;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+/* Warning Banner */
+.ecg-warning-banner {
+  display: flex;
+  gap: 18px;
+  padding: 22px 26px;
+  background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
+  border: 3px solid #ffb74d;
+  border-radius: 14px;
+  margin: 22px 26px;
+  align-items: flex-start;
+}
+
+.warning-icon {
+  font-size: 2.2rem;
+  flex-shrink: 0;
+}
+
+.warning-content h4 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #e65100;
+  margin: 0 0 8px 0;
+}
+
+.warning-content p {
+  font-size: 0.95rem;
+  color: #bf360c;
+  margin: 0;
+  line-height: 1.6;
+}
+
+/* Disclaimer */
+.ecg-disclaimer {
+  display: flex;
+  gap: 14px;
+  padding: 18px 26px;
+  background: #fafafa;
+  border-top: 1px solid #e0e0e0;
+  align-items: flex-start;
+}
+
+.disclaimer-icon {
+  font-size: 1.3rem;
+  flex-shrink: 0;
+  color: #6b7280;
+}
+
+.ecg-disclaimer p {
+  font-size: 0.9rem;
+  color: #6b7280;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.ecg-disclaimer strong {
+  color: #374151;
+}
+
+/* ============================================
+   ECG PAGE HEADER - ENHANCED
+   ============================================ */
+
+.ecg-page-header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 28px 32px;
+  background: linear-gradient(135deg, #fce4ec 0%, #f8bbd9 100%);
+  border-radius: 24px;
+  margin-bottom: 28px;
+  flex-wrap: wrap;
+  box-shadow: 0 8px 30px rgba(136, 14, 79, 0.15);
+}
+
+.ecg-header-icon-wrapper {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ecg-heart-icon {
+  font-size: 3.2rem;
+  z-index: 2;
+  filter: drop-shadow(0 4px 8px rgba(136, 14, 79, 0.3));
+}
+
+.ecg-pulse-ring {
+  position: absolute;
+  width: 80px;
+  height: 80px;
+  border: 4px solid rgba(136, 14, 79, 0.35);
+  border-radius: 50%;
+  animation: ecgPulseRing 2s ease-out infinite;
+}
+
+.ecg-pulse-ring.delay-1 {
+  animation-delay: 0.6s;
+}
+
+@keyframes ecgPulseRing {
+  0% { transform: scale(1); opacity: 0.85; }
+  100% { transform: scale(1.7); opacity: 0; }
+}
+
+.ecg-header-content {
+  flex: 1;
+  min-width: 200px;
+}
+
+.ecg-header-content h1 {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #880e4f;
+  margin: 0 0 6px 0;
+}
+
+.ecg-header-content p {
+  font-size: 0.95rem;
+  color: #ad1457;
+  margin: 0;
+  font-weight: 500;
+}
+
+.ecg-ai-badge {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 22px;
+  background: linear-gradient(135deg, #880e4f 0%, #ad1457 100%);
+  color: white;
+  border-radius: 28px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  box-shadow: 0 6px 20px rgba(136, 14, 79, 0.35);
+}
+
+/* ECG Upload Card Enhanced */
+.ecg-upload-card {
+  background: white;
+  border-radius: 20px;
+  padding: 28px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+  margin-bottom: 28px;
+  border: 2px solid #fce4ec;
+}
+
+.ecg-upload-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.ecg-upload-header span {
+  font-size: 1.7rem;
+}
+
+.ecg-upload-header h3 {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0;
+}
+
+.ecg-upload-dropzone {
+  display: block;
+  border: 4px dashed #ad1457;
+  border-radius: 20px;
+  padding: 55px 28px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  background: linear-gradient(135deg, #fff5f8 0%, #fce4ec 100%);
+}
+
+.ecg-upload-dropzone:hover {
+  background: linear-gradient(135deg, #fce4ec 0%, #f8bbd9 100%);
+  transform: translateY(-3px);
+  box-shadow: 0 10px 30px rgba(136, 14, 79, 0.15);
+}
+
+.dropzone-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.dropzone-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #ad1457 0%, #880e4f 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.2rem;
+  box-shadow: 0 10px 30px rgba(136, 14, 79, 0.35);
+}
+
+.dropzone-content h4 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #880e4f;
+  margin: 0;
+}
+
+.dropzone-content > p {
+  font-size: 0.95rem;
+  color: #6b7280;
+  margin: 0;
+}
+
+.dropzone-formats {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.format-tag {
+  padding: 8px 16px;
+  background: white;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  color: #4b5563;
+  border: 2px solid #e0e0e0;
+  font-weight: 500;
+}
+
+/* ECG File Preview Enhanced */
+.ecg-file-preview-card {
+  background: #fafafa;
+  border-radius: 16px;
+  padding: 24px;
+  border: 2px solid #e0e0e0;
+}
+
+.ecg-image-preview {
+  margin-bottom: 18px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: white;
+  text-align: center;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.ecg-image-preview img {
+  max-width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+}
+
+.ecg-pdf-preview {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 24px;
+  background: white;
+  border-radius: 12px;
+  margin-bottom: 18px;
+  border: 2px dashed #e0e0e0;
+}
+
+.pdf-icon {
+  font-size: 3rem;
+}
+
+.pdf-name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.ecg-file-info {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.ecg-file-info .file-name,
+.ecg-file-info .file-size {
+  font-size: 0.95rem;
+}
+
+.remove-ecg-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: #ffebee;
+  color: #c62828;
+  border: 2px solid #ffcdd2;
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  font-weight: 600;
+  transition: all 0.25s;
+  margin-right: auto;
+  font-family: 'Cairo', sans-serif;
+}
+
+.remove-ecg-btn:hover {
+  background: #c62828;
+  color: white;
+  border-color: #c62828;
+}
+
+/* Analyze Button Enhanced */
+.ecg-analyze-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  width: 100%;
+  padding: 20px 28px;
+  margin-top: 24px;
+  background: linear-gradient(135deg, #880e4f 0%, #ad1457 100%);
+  color: white;
+  border: none;
+  border-radius: 16px;
+  font-size: 1.2rem;
+  font-weight: 800;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Cairo', sans-serif;
+  box-shadow: 0 8px 28px rgba(136, 14, 79, 0.35);
+}
+
+.ecg-analyze-btn:hover:not(:disabled) {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 35px rgba(136, 14, 79, 0.45);
+}
+
+.ecg-analyze-btn:disabled,
+.ecg-analyze-btn.disabled {
+  background: #d1d5db;
+  color: #9ca3af;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.ecg-analyze-btn.analyzing {
+  background: linear-gradient(135deg, #f48fb1 0%, #f8bbd9 100%);
+  color: #880e4f;
+}
+
+.analyze-spinner {
+  width: 26px;
+  height: 26px;
+  border: 4px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.analyze-icon {
+  font-size: 1.6rem;
+}
+
+/* ECG Info Notice Enhanced */
+.ecg-info-notice {
+  display: flex;
+  gap: 18px;
+  padding: 24px;
+  background: linear-gradient(135deg, #e3f2fd 0%, #e1f5fe 100%);
+  border-radius: 16px;
+  border: 2px solid #90caf9;
+  align-items: flex-start;
+  margin-top: 28px;
+}
+
+.notice-icon {
+  font-size: 2rem;
+  flex-shrink: 0;
+}
+
+.notice-content h4 {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #0d47a1;
+  margin: 0 0 14px 0;
+}
+
+.notice-content ol {
+  margin: 0;
+  padding-right: 22px;
+}
+
+.notice-content li {
+  font-size: 0.95rem;
+  color: #1565c0;
+  margin-bottom: 8px;
+  line-height: 1.6;
+}
+
+/* ============================================
+   RESPONSIVE ENHANCEMENTS
+   ============================================ */
+
+@media (max-width: 768px) {
+  .ecg-result-header {
+    flex-direction: column;
+    text-align: center;
+    padding: 24px 20px;
+  }
+  
+  .result-header-content {
+    order: 2;
+  }
+  
+  .result-confidence-badge {
+    order: 1;
+  }
+  
+  .result-diagnosis-title {
+    font-size: 1.4rem;
+  }
+  
+  .predictions-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .ecg-page-header {
+    flex-direction: column;
+    text-align: center;
+    padding: 24px 20px;
+  }
+  
+  .ecg-ai-badge {
+    margin: 0;
+  }
+  
+  .ecg-warning-banner {
+    flex-direction: column;
+    text-align: center;
+    margin: 18px;
+  }
+  
+  .ecg-description-card {
+    flex-direction: column;
+    text-align: center;
+  }
+  
+  .photo-upload-area {
+    padding: 35px 20px;
+  }
+  
+  .upload-icon-circle {
+    width: 70px;
+    height: 70px;
+    font-size: 2rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .recommendation-item {
+    flex-direction: column;
+    text-align: center;
+  }
+  
+  .recommendation-item:hover {
+    transform: translateY(-3px);
+  }
+  
+  .ecg-result-modern {
+    margin: 20px 0;
+    border-radius: 16px;
+  }
+  
+  .ecg-page-header {
+    border-radius: 16px;
+  }
+  
+  .prediction-card {
+    border-right: none;
+    border-top: 5px solid #e0e0e0;
+  }
+  
+  .prediction-card.primary {
+    border-top-color: #005080;
+  }
+}
+
+/* ============================================
+   RTL SUPPORT ENHANCEMENTS
+   ============================================ */
+
+[dir="rtl"] .recommendation-item:hover {
+  transform: translateX(5px);
+}
+
+[dir="rtl"] .prediction-card {
+  border-right: none;
+  border-left: 5px solid #e0e0e0;
+}
+
+[dir="rtl"] .prediction-card.primary {
+  border-left-color: #005080;
+}
+
+[dir="rtl"] .remove-ecg-btn {
+  margin-right: 0;
+  margin-left: auto;
+}

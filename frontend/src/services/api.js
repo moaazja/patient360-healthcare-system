@@ -30,11 +30,17 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // ✅ FIXED: Only redirect to login if user is already logged in and gets 401
+    // Don't redirect during login attempt itself
     if (error.response?.status === 401) {
-      // Unauthorized - clear token and redirect to login
-      localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      window.location.href = '/login';
+      const isLoginAttempt = error.config?.url?.includes('/auth/login');
+      
+      if (!isLoginAttempt && localStorage.getItem('token')) {
+        // Only redirect if it's NOT a login attempt and user has a token
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
+      }
     }
     return Promise.reject(error);
   }
@@ -50,7 +56,9 @@ export const authAPI = {
       const response = await api.post('/auth/register', patientData);
       return response.data;
     } catch (error) {
-      throw error.response?.data || error;
+      // ✅ Properly format error for frontend
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في التسجيل';
+      throw { message: errorMessage, ...error.response?.data };
     }
   },
 
@@ -65,7 +73,9 @@ export const authAPI = {
       }
       return response.data;
     } catch (error) {
-      throw error.response?.data || error;
+      // ✅ Properly format error for frontend
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تسجيل الدخول';
+      throw { message: errorMessage, ...error.response?.data };
     }
   },
 

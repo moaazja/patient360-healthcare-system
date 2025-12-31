@@ -173,12 +173,12 @@ const Login = () => {
   
   // Validation
   if (!email.trim()) {
-    openModal('error', 'خطأ', 'الرجاء إدخال البريد الإلكتروني');
+    openModal('error', 'خطأ', 'الرجاء إدخال البريد الإلكتروني', null);
     return;
   }
   
   if (!password.trim()) {
-    openModal('error', 'خطأ', 'الرجاء إدخال كلمة المرور');
+    openModal('error', 'خطأ', 'الرجاء إدخال كلمة المرور', null);
     return;
   }
   
@@ -241,7 +241,8 @@ const Login = () => {
     openModal(
       'error',
       'خطأ في تسجيل الدخول',
-      errorMessage
+      errorMessage,
+      null
     );
   }
 };
@@ -263,7 +264,14 @@ const Login = () => {
 
       {/* Modal Component */}
       {modal.isOpen && (
-        <div className="modal-overlay" onClick={closeModal}>
+        <div 
+          className="modal-overlay" 
+          onClick={(e) => {
+            if (e.target.className === 'modal-overlay') {
+              closeModal();
+            }
+          }}
+        >
           <div className="modal-container" onClick={(e) => e.stopPropagation()}>
             <div className={`modal-header ${modal.type}`}>
               {modal.type === 'success' && <div className="modal-icon success-icon">✓</div>}
@@ -274,7 +282,11 @@ const Login = () => {
               <p className="modal-message">{modal.message}</p>
             </div>
             <div className="modal-footer">
-              <button className="modal-button primary" onClick={modal.onClose || closeModal}>
+              <button 
+                className="modal-button primary" 
+                onClick={closeModal}
+                autoFocus
+              >
                 حسناً
               </button>
             </div>

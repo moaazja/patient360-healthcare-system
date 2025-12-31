@@ -238,7 +238,7 @@ router.post(
       console.log('🤖 Calling AI service...');
       
       // Call AI service (FastAPI running on port 8000)
-      const aiResponse = await axios.post('http://localhost:8000/predict', {
+      const aiResponse = await axios.post('http://localhost:8001/predict', {
         symptoms: symptoms
       }, {
         timeout: 30000 // 30 second timeout
