@@ -1,10 +1,12 @@
 // src/pages/DoctorDashboard.jsx
-// ✅ ENHANCED PROFESSIONAL REDESIGN v2.0
+// ✅ REDESIGNED v3.0 - Matching PatientDashboard Design System
 // Patient 360° - Government Healthcare Platform
 // Features:
+// - Professional profile header card with logout button
 // - Photo upload in visit logs
 // - Redesigned ECG AI output with professional cards
 // - Tab-based navigation with patient history
+// - Purple accent color (#a23f97) theme
 // - Full responsive design
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
@@ -285,9 +287,7 @@ const DoctorDashboard = () => {
   const [aiDiagnosis, setAiDiagnosis] = useState(null);
   const [ecgAnalyzing, setEcgAnalyzing] = useState(false);
   
-  // ═══════════════════════════════════════════════════════════════
-  // NEW: VISIT PHOTO STATE
-  // ═══════════════════════════════════════════════════════════════
+  // Visit Photo State
   const [visitPhoto, setVisitPhoto] = useState(null);
   const [visitPhotoPreview, setVisitPhotoPreview] = useState(null);
   const photoInputRef = useRef(null);
@@ -500,24 +500,16 @@ const DoctorDashboard = () => {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       
-      console.log('📥 History response status:', historyResponse.status);
-      
       if (historyResponse.ok) {
         const historyData = await historyResponse.json();
-        console.log('📥 History data:', historyData);
+        console.log('📥 History response:', historyData);
         
         if (historyData.success) {
           setPatientHistory(historyData.visits || []);
-        } else {
-          setPatientHistory([]);
         }
-      } else {
-        console.error('Failed to load history');
-        setPatientHistory([]);
       }
     } catch (error) {
-      console.error('Error loading patient history:', error);
-      setPatientHistory([]);
+      console.error('❌ Error loading patient history:', error);
     }
     
     setActiveSection('overview');
@@ -534,6 +526,9 @@ const DoctorDashboard = () => {
    * Reset form fields
    */
   const resetFormFields = () => {
+    setChiefComplaint('');
+    setDiagnosis('');
+    setDoctorNotes('');
     setVitalSigns({
       bloodPressureSystolic: '',
       bloodPressureDiastolic: '',
@@ -545,44 +540,7 @@ const DoctorDashboard = () => {
       height: '',
       respiratoryRate: ''
     });
-    setChiefComplaint('');
-    setDiagnosis('');
-    setDoctorNotes('');
     setMedications([]);
-    setEcgFile(null);
-    setEcgPreview(null);
-    setAiDiagnosis(null);
-    setVisitPhoto(null);
-    setVisitPhotoPreview(null);
-  };
-
-  /**
-   * Go back to search
-   */
-  const handleBackToSearch = () => {
-    setSelectedPatient(null);
-    setPatientHistory([]);
-    setSearchId('');
-    setActiveSection('search');
-    resetFormFields();
-  };
-
-  // ═══════════════════════════════════════════════════════════════
-  // MEDICATIONS MANAGEMENT
-  // ═══════════════════════════════════════════════════════════════
-
-  const handleAddMedication = () => {
-    if (!newMedication.medicationName || !newMedication.dosage || !newMedication.frequency) {
-      openModal('error', 'خطأ', 'الرجاء ملء حقول الدواء المطلوبة (الاسم، الجرعة، التكرار)');
-      return;
-    }
-
-    setMedications([...medications, { 
-      ...newMedication,
-      prescribedDate: new Date().toISOString(),
-      prescribedBy: `${user.firstName} ${user.lastName}`
-    }]);
-    
     setNewMedication({
       medicationName: '',
       dosage: '',
@@ -590,43 +548,48 @@ const DoctorDashboard = () => {
       duration: '',
       instructions: ''
     });
+    setVisitPhoto(null);
+    setVisitPhotoPreview(null);
+    setEcgFile(null);
+    setEcgPreview(null);
+    setAiDiagnosis(null);
   };
 
-  const handleRemoveMedication = (index) => {
-    openModal('confirm', 'تأكيد الحذف', 'هل أنت متأكد من حذف هذا الدواء؟', () => {
-      setMedications(medications.filter((_, i) => i !== index));
-    });
+  /**
+   * Go back to patient search
+   */
+  const handleBackToSearch = () => {
+    setSelectedPatient(null);
+    setPatientHistory([]);
+    setSearchId('');
+    setSearchError(null);
+    resetFormFields();
+    setActiveSection('search');
   };
 
   // ═══════════════════════════════════════════════════════════════
-  // VISIT PHOTO HANDLING
+  // PHOTO UPLOAD HANDLERS
   // ═══════════════════════════════════════════════════════════════
 
   const handlePhotoUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
-      const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
-      if (validTypes.includes(file.type)) {
-        if (file.size > 10 * 1024 * 1024) { // 10MB limit
-          openModal('error', 'خطأ', 'حجم الصورة يجب أن لا يتجاوز 10 ميغابايت');
-          e.target.value = '';
-          return;
-        }
-        setVisitPhoto(file);
-        const url = URL.createObjectURL(file);
-        setVisitPhotoPreview(url);
-      } else {
-        openModal('error', 'خطأ', 'الرجاء اختيار صورة (PNG, JPG, WEBP)');
-        e.target.value = '';
+      if (file.size > 10 * 1024 * 1024) {
+        openModal('error', 'خطأ', 'حجم الصورة يجب أن يكون أقل من 10 ميجابايت');
+        return;
       }
+      
+      setVisitPhoto(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setVisitPhotoPreview(reader.result);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
   const handleRemovePhoto = () => {
     setVisitPhoto(null);
-    if (visitPhotoPreview) {
-      URL.revokeObjectURL(visitPhotoPreview);
-    }
     setVisitPhotoPreview(null);
     if (photoInputRef.current) {
       photoInputRef.current.value = '';
@@ -634,27 +597,23 @@ const DoctorDashboard = () => {
   };
 
   // ═══════════════════════════════════════════════════════════════
-  // ECG HANDLING (CARDIOLOGISTS ONLY)
+  // ECG HANDLERS (Cardiologists Only)
   // ═══════════════════════════════════════════════════════════════
 
   const handleEcgUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
-      const validTypes = ['application/pdf', 'image/png', 'image/jpeg', 'image/jpg'];
-      if (validTypes.includes(file.type)) {
-        setEcgFile(file);
-        setAiDiagnosis(null);
-        
-        // Create preview for images
-        if (file.type.startsWith('image/')) {
-          const url = URL.createObjectURL(file);
-          setEcgPreview(url);
-        } else {
-          setEcgPreview(null);
-        }
+      setEcgFile(file);
+      setAiDiagnosis(null);
+      
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setEcgPreview(reader.result);
+        };
+        reader.readAsDataURL(file);
       } else {
-        openModal('error', 'خطأ', 'الرجاء اختيار ملف PDF أو صورة (PNG, JPG)');
-        e.target.value = '';
+        setEcgPreview(null);
       }
     }
   };
@@ -669,23 +628,16 @@ const DoctorDashboard = () => {
   };
 
   const handleAiDiagnosis = async () => {
-    if (!ecgFile) {
-      openModal('error', 'خطأ', 'الرجاء رفع ملف ECG أولاً');
-      return;
-    }
+    if (!ecgFile) return;
     
     setEcgAnalyzing(true);
-    setAiDiagnosis(null);
     
     try {
-      console.log('🤖 Starting ECG AI analysis...');
-      
       const formData = new FormData();
-      formData.append('ecg_image', ecgFile);
+      formData.append('ecgFile', ecgFile);
       
       const token = localStorage.getItem('token');
-      
-      const response = await fetch('http://localhost:5000/api/ecg/analyze', {
+      const response = await fetch('http://localhost:5000/api/doctor/ecg/analyze', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -695,56 +647,53 @@ const DoctorDashboard = () => {
       
       const data = await response.json();
       
-      console.log('📥 AI Response:', data);
-      
-      if (!response.ok || !data.success) {
-        throw new Error(data.message || 'فشل تحليل ECG');
+      if (response.ok && data.success) {
+        setAiDiagnosis(data.analysis);
+        setTimeout(() => {
+          resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
+      } else {
+        openModal('error', 'خطأ', data.message || 'حدث خطأ في تحليل تخطيط القلب');
       }
-      
-      // Set the structured result for the new card design
-      setAiDiagnosis({
-        prediction: data.prediction,
-        confidence_percentage: data.confidence_percentage,
-        top_predictions: data.top_predictions,
-        warning: data.warning,
-        probabilities: data.probabilities,
-        timestamp: new Date().toISOString()
-      });
-      
-      // Scroll to results
-      setTimeout(() => {
-        if (resultRef.current) {
-          resultRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-      }, 100);
-      
-      console.log('✅ ECG analysis completed successfully');
-      
     } catch (error) {
-      console.error('❌ ECG Analysis Error:', error);
-      openModal('error', 'خطأ في التحليل', error.message || 'حدث خطأ أثناء تحليل تخطيط القلب');
+      console.error('ECG analysis error:', error);
+      openModal('error', 'خطأ', 'حدث خطأ في الاتصال بخدمة التحليل');
     } finally {
       setEcgAnalyzing(false);
     }
   };
 
   // ═══════════════════════════════════════════════════════════════
-  // SAVE VISIT DATA WITH PHOTO
+  // MEDICATION HANDLERS
+  // ═══════════════════════════════════════════════════════════════
+
+  const handleAddMedication = () => {
+    if (!newMedication.medicationName.trim()) {
+      openModal('error', 'خطأ', 'الرجاء إدخال اسم الدواء');
+      return;
+    }
+    
+    setMedications([...medications, { ...newMedication, id: Date.now() }]);
+    setNewMedication({
+      medicationName: '',
+      dosage: '',
+      frequency: '',
+      duration: '',
+      instructions: ''
+    });
+  };
+
+  const handleRemoveMedication = (id) => {
+    setMedications(medications.filter(med => med.id !== id));
+  };
+
+  // ═══════════════════════════════════════════════════════════════
+  // SAVE VISIT
   // ═══════════════════════════════════════════════════════════════
 
   const handleSaveVisit = async () => {
-    if (!selectedPatient) {
-      openModal('error', 'خطأ', 'يجب اختيار مريض أولاً');
-      return;
-    }
-    
     if (!chiefComplaint.trim()) {
-      openModal('error', 'خطأ', 'يرجى إدخال الشكوى الرئيسية للمريض');
-      return;
-    }
-    
-    if (!diagnosis.trim()) {
-      openModal('error', 'خطأ', 'يرجى إدخال التشخيص');
+      openModal('error', 'خطأ', 'الرجاء إدخال الشكوى الرئيسية');
       return;
     }
     
@@ -754,21 +703,17 @@ const DoctorDashboard = () => {
       const token = localStorage.getItem('token');
       const nationalId = selectedPatient.nationalId || selectedPatient.childId;
       
-      // Use FormData to support file upload
       const formData = new FormData();
-      formData.append('chiefComplaint', chiefComplaint.trim());
-      formData.append('diagnosis', diagnosis.trim());
-      formData.append('prescribedMedications', JSON.stringify(medications));
-      formData.append('doctorNotes', doctorNotes.trim() || '');
-      formData.append('visitType', 'regular');
+      formData.append('chiefComplaint', chiefComplaint);
+      formData.append('diagnosis', diagnosis);
+      formData.append('doctorNotes', doctorNotes);
       formData.append('vitalSigns', JSON.stringify(vitalSigns));
+      formData.append('prescribedMedications', JSON.stringify(medications));
       
-      // Add photo if exists
       if (visitPhoto) {
         formData.append('visitPhoto', visitPhoto);
       }
       
-      // Add ECG data if exists (for cardiologists)
       if (aiDiagnosis && isCardiologist()) {
         formData.append('ecgAnalysis', JSON.stringify(aiDiagnosis));
       }
@@ -792,7 +737,6 @@ const DoctorDashboard = () => {
       if (response.ok && data.success) {
         openModal('success', 'تم الحفظ', 'تم حفظ بيانات الزيارة بنجاح ✅');
         
-        // Refresh patient history
         try {
           const historyResponse = await fetch(`http://localhost:5000/api/doctor/patient/${nationalId}/visits`, {
             headers: { 'Authorization': `Bearer ${token}` }
@@ -808,7 +752,6 @@ const DoctorDashboard = () => {
           console.error('Error refreshing history:', err);
         }
         
-        // Reset form
         resetFormFields();
         setActiveSection('history');
         
@@ -875,33 +818,62 @@ const DoctorDashboard = () => {
       )}
 
       <div className="dashboard-container">
-        {/* Doctor Header */}
-        <div className="doctor-header-section">
-          <div className="doctor-header-content">
-            <div className="doctor-avatar">
-              <span>👨‍⚕️</span>
+        {/* ═══════════════════════════════════════════════════════════════
+            PROFILE HEADER CARD - Matching PatientDashboard Design
+            ═══════════════════════════════════════════════════════════════ */}
+        <div className="profile-header-card">
+          {/* Logout Button */}
+          <button className="logout-btn-profile" onClick={handleLogout}>
+            <span>🚪</span>
+            <span>تسجيل الخروج</span>
+          </button>
+          
+          <div className="profile-main-content">
+            <div className="profile-avatar">
+              <div className="avatar-circle">
+                <span>👨‍⚕️</span>
+              </div>
+              <div className="avatar-badge">
+                <span>✓</span>
+              </div>
+              {isCardiologist() && (
+                <div className="cardio-badge">
+                  <span>❤️</span>
+                </div>
+              )}
             </div>
-            <div className="doctor-header-info">
+            <div className="profile-header-info">
+              <p className="welcome-greeting">مرحباً بك 👋</p>
               <h1>د. {user.firstName} {user.lastName}</h1>
-              <div className="doctor-meta">
+              <p className="profile-role">طبيب - Patient 360°</p>
+              <div className="profile-meta-info">
                 {user.roleData?.doctor?.specialization && (
-                  <span className="specialization-badge">
-                    {user.roleData.doctor.specialization === 'Cardiologist' ? '❤️' : '🩺'}
-                    {user.roleData.doctor.specialization}
-                  </span>
+                  <div className="meta-item specialization">
+                    <span>{user.roleData.doctor.specialization === 'Cardiologist' ? '❤️' : '🩺'}</span>
+                    <span>{user.roleData.doctor.specialization}</span>
+                  </div>
                 )}
                 {user.roleData?.doctor?.hospitalAffiliation && (
-                  <span className="hospital-badge">
-                    🏥 {user.roleData.doctor.hospitalAffiliation}
-                  </span>
+                  <div className="meta-item hospital">
+                    <span>🏥</span>
+                    <span>{user.roleData.doctor.hospitalAffiliation}</span>
+                  </div>
+                )}
+                {user.roleData?.doctor?.yearsOfExperience && (
+                  <div className="meta-item experience">
+                    <span>📅</span>
+                    <span>{user.roleData.doctor.yearsOfExperience} سنة خبرة</span>
+                  </div>
+                )}
+                {isCardiologist() && (
+                  <div className="meta-item ai-badge">
+                    <span>🤖</span>
+                    <span>AI ECG Analysis</span>
+                  </div>
                 )}
               </div>
             </div>
           </div>
-          <button className="logout-btn" onClick={handleLogout}>
-            <span>🚪</span>
-            <span>تسجيل الخروج</span>
-          </button>
         </div>
 
         {/* Patient Search Section */}
@@ -998,21 +970,21 @@ const DoctorDashboard = () => {
                 className={`tab-btn ${activeSection === 'overview' ? 'active' : ''}`}
                 onClick={() => setActiveSection('overview')}
               >
-                <span>📋</span>
+                <span className="tab-icon">📋</span>
                 <span>الملف الطبي</span>
               </button>
               <button
                 className={`tab-btn ${activeSection === 'history' ? 'active' : ''}`}
                 onClick={() => setActiveSection('history')}
               >
-                <span>📜</span>
+                <span className="tab-icon">📜</span>
                 <span>سجل الزيارات</span>
               </button>
               <button
                 className={`tab-btn ${activeSection === 'newVisit' ? 'active' : ''}`}
                 onClick={() => setActiveSection('newVisit')}
               >
-                <span>➕</span>
+                <span className="tab-icon">➕</span>
                 <span>زيارة جديدة</span>
               </button>
               {isCardiologist() && (
@@ -1020,7 +992,7 @@ const DoctorDashboard = () => {
                   className={`tab-btn ecg-tab ${activeSection === 'ecg' ? 'active' : ''}`}
                   onClick={() => setActiveSection('ecg')}
                 >
-                  <span>❤️</span>
+                  <span className="tab-icon">❤️</span>
                   <span>تحليل ECG</span>
                 </button>
               )}
@@ -1198,32 +1170,12 @@ const DoctorDashboard = () => {
                                 <label>الأدوية الموصوفة:</label>
                                 <div className="meds-list">
                                   {visit.prescribedMedications.map((med, i) => (
-                                    <span key={i} className="med-tag">
-                                      💊 {med.medicationName} - {med.dosage}
-                                    </span>
+                                    <div key={i} className="med-item">
+                                      <span className="med-icon">💊</span>
+                                      <span className="med-name">{med.medicationName}</span>
+                                      {med.dosage && <span className="med-dosage">{med.dosage}</span>}
+                                    </div>
                                   ))}
-                                </div>
-                              </div>
-                            )}
-                            
-                            {visit.doctorNotes && (
-                              <div className="visit-field notes">
-                                <label>ملاحظات الطبيب:</label>
-                                <p>{visit.doctorNotes}</p>
-                              </div>
-                            )}
-
-                            {/* Display visit photo if exists */}
-                            {visit.photoUrl && (
-                              <div className="visit-photo-section">
-                                <label>📷 صورة مرفقة:</label>
-                                <div className="visit-photo-wrapper">
-                                  <img 
-                                    src={visit.photoUrl} 
-                                    alt="Visit attachment" 
-                                    className="visit-photo-thumbnail"
-                                    onClick={() => window.open(visit.photoUrl, '_blank')}
-                                  />
                                 </div>
                               </div>
                             )}
@@ -1239,20 +1191,12 @@ const DoctorDashboard = () => {
                   NEW VISIT TAB
                   ═══════════════════════════════════════════════════════════════ */}
               {activeSection === 'newVisit' && (
-                <div className="tab-content-container">
-                  <div className="new-visit-header">
-                    <span>➕</span>
-                    <div>
-                      <h2>تسجيل زيارة جديدة</h2>
-                      <p>أدخل بيانات الكشف الطبي</p>
-                    </div>
-                  </div>
-
+                <div className="tab-content-container new-visit-section">
                   {/* Chief Complaint */}
                   <div className="form-section">
                     <div className="form-section-header">
-                      <span>📝</span>
-                      <h3>الشكوى الرئيسية *</h3>
+                      <span>💬</span>
+                      <h3>الشكوى الرئيسية <span className="required">*</span></h3>
                     </div>
                     <textarea
                       value={chiefComplaint}
@@ -1266,13 +1210,13 @@ const DoctorDashboard = () => {
                   {/* Vital Signs */}
                   <div className="form-section">
                     <div className="form-section-header">
-                      <span>🩺</span>
+                      <span>📊</span>
                       <h3>العلامات الحيوية</h3>
                     </div>
                     <div className="vitals-grid">
                       <VitalInput
                         icon="🩺"
-                        label="ضغط الدم (انقباضي)"
+                        label="ضغط الدم الانقباضي"
                         value={vitalSigns.bloodPressureSystolic}
                         onChange={(e) => setVitalSigns({...vitalSigns, bloodPressureSystolic: e.target.value})}
                         unit="mmHg"
@@ -1280,7 +1224,7 @@ const DoctorDashboard = () => {
                       />
                       <VitalInput
                         icon="🩺"
-                        label="ضغط الدم (انبساطي)"
+                        label="ضغط الدم الانبساطي"
                         value={vitalSigns.bloodPressureDiastolic}
                         onChange={(e) => setVitalSigns({...vitalSigns, bloodPressureDiastolic: e.target.value})}
                         unit="mmHg"
@@ -1288,27 +1232,19 @@ const DoctorDashboard = () => {
                       />
                       <VitalInput
                         icon="💓"
-                        label="معدل ضربات القلب"
+                        label="نبض القلب"
                         value={vitalSigns.heartRate}
                         onChange={(e) => setVitalSigns({...vitalSigns, heartRate: e.target.value})}
                         unit="BPM"
-                        placeholder="72"
+                        placeholder="75"
                       />
                       <VitalInput
                         icon="🫁"
-                        label="نسبة الأكسجين"
+                        label="تشبع الأكسجين"
                         value={vitalSigns.spo2}
                         onChange={(e) => setVitalSigns({...vitalSigns, spo2: e.target.value})}
                         unit="%"
                         placeholder="98"
-                      />
-                      <VitalInput
-                        icon="🩸"
-                        label="مستوى السكر"
-                        value={vitalSigns.bloodGlucose}
-                        onChange={(e) => setVitalSigns({...vitalSigns, bloodGlucose: e.target.value})}
-                        unit="mg/dL"
-                        placeholder="100"
                       />
                       <VitalInput
                         icon="🌡️"
@@ -1319,29 +1255,55 @@ const DoctorDashboard = () => {
                         placeholder="37"
                       />
                       <VitalInput
-                        icon="⚖️"
-                        label="الوزن"
-                        value={vitalSigns.weight}
-                        onChange={(e) => setVitalSigns({...vitalSigns, weight: e.target.value})}
-                        unit="kg"
-                        placeholder="70"
-                      />
-                      <VitalInput
-                        icon="📏"
-                        label="الطول"
-                        value={vitalSigns.height}
-                        onChange={(e) => setVitalSigns({...vitalSigns, height: e.target.value})}
-                        unit="cm"
-                        placeholder="170"
+                        icon="🩸"
+                        label="سكر الدم"
+                        value={vitalSigns.bloodGlucose}
+                        onChange={(e) => setVitalSigns({...vitalSigns, bloodGlucose: e.target.value})}
+                        unit="mg/dL"
+                        placeholder="100"
                       />
                     </div>
+                  </div>
+
+                  {/* Photo Upload Section */}
+                  <div className="form-section">
+                    <div className="form-section-header">
+                      <span>📷</span>
+                      <h3>إرفاق صورة (اختياري)</h3>
+                    </div>
+                    
+                    {!visitPhoto ? (
+                      <label className="photo-upload-area">
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handlePhotoUpload}
+                          ref={photoInputRef}
+                          className="hidden-input"
+                        />
+                        <div className="upload-content">
+                          <div className="upload-icon-circle">
+                            <span>📷</span>
+                          </div>
+                          <h4>اضغط لإرفاق صورة</h4>
+                          <p>صورة أشعة، تحاليل، أو أي صورة طبية</p>
+                          <div className="upload-formats">
+                            <span>JPG</span>
+                            <span>PNG</span>
+                            <span>حتى 10MB</span>
+                          </div>
+                        </div>
+                      </label>
+                    ) : (
+                      <PhotoPreview photo={visitPhoto} onRemove={handleRemovePhoto} />
+                    )}
                   </div>
 
                   {/* Diagnosis */}
                   <div className="form-section">
                     <div className="form-section-header">
                       <span>🔬</span>
-                      <h3>التشخيص *</h3>
+                      <h3>التشخيص</h3>
                     </div>
                     <textarea
                       value={diagnosis}
@@ -1352,119 +1314,76 @@ const DoctorDashboard = () => {
                     />
                   </div>
 
-                  {/* ═══════════════════════════════════════════════════════════════
-                      NEW: PHOTO UPLOAD SECTION
-                      ═══════════════════════════════════════════════════════════════ */}
-                  <div className="form-section photo-upload-section">
-                    <div className="form-section-header">
-                      <span>📷</span>
-                      <h3>إرفاق صورة (اختياري)</h3>
-                    </div>
-                    <p className="form-section-hint">يمكنك إرفاق صورة للتقارير أو الفحوصات أو أي وثيقة متعلقة بالزيارة</p>
-                    
-                    {!visitPhoto ? (
-                      <label className="photo-upload-area">
-                        <input
-                          type="file"
-                          accept="image/png,image/jpeg,image/jpg,image/webp"
-                          onChange={handlePhotoUpload}
-                          ref={photoInputRef}
-                          className="hidden-input"
-                        />
-                        <div className="upload-content">
-                          <div className="upload-icon-circle">
-                            <span>📷</span>
-                          </div>
-                          <h4>اضغط لرفع صورة</h4>
-                          <p>PNG, JPG, WEBP - الحد الأقصى 10MB</p>
-                        </div>
-                      </label>
-                    ) : (
-                      <div className="photo-preview-card">
-                        <div className="preview-image-wrapper">
-                          <img src={visitPhotoPreview} alt="Preview" className="preview-image" />
-                          <button 
-                            className="remove-photo-btn" 
-                            onClick={handleRemovePhoto}
-                            type="button"
-                          >
-                            <span>✕</span>
-                          </button>
-                        </div>
-                        <div className="preview-info">
-                          <span className="file-icon">📎</span>
-                          <span className="file-name">{visitPhoto.name}</span>
-                          <span className="file-size">
-                            ({(visitPhoto.size / 1024 / 1024).toFixed(2)} MB)
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
                   {/* Medications */}
                   <div className="form-section">
                     <div className="form-section-header">
                       <span>💊</span>
                       <h3>الأدوية الموصوفة</h3>
-                      <span className="meds-count">{medications.length}</span>
                     </div>
                     
                     {/* Add Medication Form */}
-                    <div className="add-med-form">
-                      <div className="med-inputs-row">
+                    <div className="add-medication-form">
+                      <div className="med-inputs-grid">
                         <input
                           type="text"
+                          placeholder="اسم الدواء"
                           value={newMedication.medicationName}
                           onChange={(e) => setNewMedication({...newMedication, medicationName: e.target.value})}
-                          placeholder="اسم الدواء *"
                           className="med-input"
                         />
                         <input
                           type="text"
+                          placeholder="الجرعة"
                           value={newMedication.dosage}
                           onChange={(e) => setNewMedication({...newMedication, dosage: e.target.value})}
-                          placeholder="الجرعة *"
                           className="med-input"
                         />
                         <input
                           type="text"
+                          placeholder="التكرار"
                           value={newMedication.frequency}
                           onChange={(e) => setNewMedication({...newMedication, frequency: e.target.value})}
-                          placeholder="التكرار *"
                           className="med-input"
                         />
                         <input
                           type="text"
+                          placeholder="المدة"
                           value={newMedication.duration}
                           onChange={(e) => setNewMedication({...newMedication, duration: e.target.value})}
-                          placeholder="المدة"
                           className="med-input"
                         />
                       </div>
+                      <input
+                        type="text"
+                        placeholder="تعليمات خاصة"
+                        value={newMedication.instructions}
+                        onChange={(e) => setNewMedication({...newMedication, instructions: e.target.value})}
+                        className="med-input full-width"
+                      />
                       <button className="add-med-btn" onClick={handleAddMedication}>
                         <span>➕</span>
-                        إضافة
+                        <span>إضافة الدواء</span>
                       </button>
                     </div>
 
                     {/* Medications List */}
                     {medications.length > 0 && (
-                      <div className="meds-list-container">
-                        {medications.map((med, index) => (
-                          <div key={index} className="med-item">
-                            <div className="med-item-info">
-                              <span className="med-name">💊 {med.medicationName}</span>
-                              <span className="med-details">
-                                {med.dosage} • {med.frequency}
-                                {med.duration && ` • ${med.duration}`}
-                              </span>
+                      <div className="medications-list">
+                        {medications.map((med) => (
+                          <div key={med.id} className="medication-item">
+                            <div className="med-item-content">
+                              <span className="med-icon">💊</span>
+                              <div className="med-details">
+                                <strong>{med.medicationName}</strong>
+                                <span>{med.dosage} - {med.frequency} - {med.duration}</span>
+                                {med.instructions && <small>{med.instructions}</small>}
+                              </div>
                             </div>
                             <button 
                               className="remove-med-btn"
-                              onClick={() => handleRemoveMedication(index)}
+                              onClick={() => handleRemoveMedication(med.id)}
                             >
-                              🗑️
+                              ✕
                             </button>
                           </div>
                         ))}

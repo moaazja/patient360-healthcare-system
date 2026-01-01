@@ -18,11 +18,33 @@ const visitSchema = new mongoose.Schema({
     index: true
   },
   
+  // ✅ UPDATED: Visit Date with range validation
   visitDate: {
     type: Date,
     required: [true, 'تاريخ الزيارة مطلوب'],
     default: Date.now,
-    index: true
+    index: true,
+    validate: {
+      validator: function(v) {
+        if (!v) return false;
+        
+        const visitDate = new Date(v);
+        const today = new Date();
+        
+        // ✅ Calculate date ranges
+        const oneYearFromNow = new Date();
+        oneYearFromNow.setFullYear(today.getFullYear() + 1);
+        
+        const tenYearsAgo = new Date();
+        tenYearsAgo.setFullYear(today.getFullYear() - 10);
+        
+        // ✅ Visit date must be within reasonable range:
+        // - Not more than 1 year in the future
+        // - Not more than 10 years in the past
+        return visitDate <= oneYearFromNow && visitDate >= tenYearsAgo;
+      },
+      message: 'تاريخ الزيارة يجب أن يكون خلال السنة القادمة أو خلال الـ 10 سنوات الماضية'
+    }
   },
   
   visitType: {
@@ -102,7 +124,7 @@ const visitSchema = new mongoose.Schema({
   },
   
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // NEW: Attachments (Images/PDFs)
+  // Attachments (Images/PDFs)
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   attachments: [{
     fileName: {

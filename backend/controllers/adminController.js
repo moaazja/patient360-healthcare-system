@@ -366,6 +366,29 @@ exports.deactivateDoctor = async (req, res) => {
     const { id } = req.params;
     const { reason, notes } = req.body;
 
+    console.log('🔵 ========== DEACTIVATE DOCTOR REQUEST ==========');
+    console.log('📋 Doctor ID:', id);
+    console.log('📝 Reason:', reason);
+    console.log('📝 Notes:', notes);
+    console.log('👤 Admin:', req.user._id);
+
+    // ✅ VALIDATE: Reason is REQUIRED
+    if (!reason) {
+      return res.status(400).json({
+        success: false,
+        message: 'سبب إلغاء التفعيل مطلوب'
+      });
+    }
+
+    // ✅ VALIDATE: Reason must be one of the allowed values
+    const allowedReasons = ['death', 'license_revoked', 'user_request', 'fraud', 'retirement', 'transfer', 'other'];
+    if (!allowedReasons.includes(reason)) {
+      return res.status(400).json({
+        success: false,
+        message: 'سبب إلغاء التفعيل غير صالح'
+      });
+    }
+
     const doctor = await Doctor.findById(id);
     if (!doctor) {
       return res.status(404).json({
@@ -385,12 +408,15 @@ exports.deactivateDoctor = async (req, res) => {
       }
     );
 
+    console.log('✅ Doctor deactivated successfully');
+    console.log('✅ ==========================================');
+
     res.json({
       success: true,
       message: 'تم إلغاء تفعيل الطبيب بنجاح'
     });
   } catch (error) {
-    console.error('Deactivate doctor error:', error);
+    console.error('❌ Deactivate doctor error:', error);
     res.status(500).json({
       success: false,
       message: 'حدث خطأ في إلغاء التفعيل'
@@ -404,6 +430,10 @@ exports.activateDoctor = async (req, res) => {
   try {
     const { id } = req.params;
 
+    console.log('🔵 ========== REACTIVATE DOCTOR REQUEST ==========');
+    console.log('📋 Doctor ID:', id);
+    console.log('👤 Admin:', req.user._id);
+
     const doctor = await Doctor.findById(id);
     if (!doctor) {
       return res.status(404).json({
@@ -415,20 +445,29 @@ exports.activateDoctor = async (req, res) => {
     await Account.findOneAndUpdate(
       { personId: doctor.personId },
       {
-        isActive: true,
-        deactivationReason: null,
-        deactivationNotes: null,
-        reactivatedAt: new Date(),
-        reactivatedBy: req.user._id
+        $set: {
+          isActive: true,
+          reactivatedAt: new Date(),
+          reactivatedBy: req.user._id
+        },
+        $unset: {
+          deactivationReason: '',
+          deactivationNotes: '',
+          deactivatedAt: '',
+          deactivatedBy: ''
+        }
       }
     );
+
+    console.log('✅ Doctor reactivated successfully');
+    console.log('✅ ==========================================');
 
     res.json({
       success: true,
       message: 'تم تفعيل الطبيب بنجاح'
     });
   } catch (error) {
-    console.error('Activate doctor error:', error);
+    console.error('❌ Activate doctor error:', error);
     res.status(500).json({
       success: false,
       message: 'حدث خطأ في التفعيل'
@@ -482,6 +521,7 @@ exports.getAllPatients = async (req, res) => {
             phoneNumber: person.phoneNumber || '',
             email: account?.email || '',
             isActive: account?.isActive ?? true,
+            gender: person.gender || '',  // ✅ FIXED: Added gender field
             bloodType: patient.bloodType || '',
             lastLogin: account?.lastLogin || null,
             createdAt: patient.createdAt || new Date()
@@ -566,6 +606,29 @@ exports.deactivatePatient = async (req, res) => {
     const { id } = req.params;
     const { reason, notes } = req.body;
 
+    console.log('🔵 ========== DEACTIVATE PATIENT REQUEST ==========');
+    console.log('📋 Patient ID:', id);
+    console.log('📝 Reason:', reason);
+    console.log('📝 Notes:', notes);
+    console.log('👤 Admin:', req.user._id);
+
+    // ✅ VALIDATE: Reason is REQUIRED
+    if (!reason) {
+      return res.status(400).json({
+        success: false,
+        message: 'سبب إلغاء التفعيل مطلوب'
+      });
+    }
+
+    // ✅ VALIDATE: Reason must be one of the allowed values
+    const allowedReasons = ['death', 'license_revoked', 'user_request', 'fraud', 'retirement', 'transfer', 'other'];
+    if (!allowedReasons.includes(reason)) {
+      return res.status(400).json({
+        success: false,
+        message: 'سبب إلغاء التفعيل غير صالح'
+      });
+    }
+
     const patient = await Patient.findById(id);
     if (!patient) {
       return res.status(404).json({
@@ -585,12 +648,15 @@ exports.deactivatePatient = async (req, res) => {
       }
     );
 
+    console.log('✅ Patient deactivated successfully');
+    console.log('✅ ==========================================');
+
     res.json({
       success: true,
       message: 'تم إلغاء تفعيل المريض بنجاح'
     });
   } catch (error) {
-    console.error('Deactivate patient error:', error);
+    console.error('❌ Deactivate patient error:', error);
     res.status(500).json({
       success: false,
       message: 'حدث خطأ في إلغاء التفعيل'
@@ -604,6 +670,10 @@ exports.activatePatient = async (req, res) => {
   try {
     const { id } = req.params;
 
+    console.log('🔵 ========== REACTIVATE PATIENT REQUEST ==========');
+    console.log('📋 Patient ID:', id);
+    console.log('👤 Admin:', req.user._id);
+
     const patient = await Patient.findById(id);
     if (!patient) {
       return res.status(404).json({
@@ -615,20 +685,29 @@ exports.activatePatient = async (req, res) => {
     await Account.findOneAndUpdate(
       { personId: patient.personId },
       {
-        isActive: true,
-        deactivationReason: null,
-        deactivationNotes: null,
-        reactivatedAt: new Date(),
-        reactivatedBy: req.user._id
+        $set: {
+          isActive: true,
+          reactivatedAt: new Date(),
+          reactivatedBy: req.user._id
+        },
+        $unset: {
+          deactivationReason: '',
+          deactivationNotes: '',
+          deactivatedAt: '',
+          deactivatedBy: ''
+        }
       }
     );
+
+    console.log('✅ Patient reactivated successfully');
+    console.log('✅ ==========================================');
 
     res.json({
       success: true,
       message: 'تم تفعيل المريض بنجاح'
     });
   } catch (error) {
-    console.error('Activate patient error:', error);
+    console.error('❌ Activate patient error:', error);
     res.status(500).json({
       success: false,
       message: 'حدث خطأ في التفعيل'

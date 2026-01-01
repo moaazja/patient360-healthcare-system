@@ -397,93 +397,113 @@ const SignUp = () => {
   // DOCTOR VALIDATION
   // ═══════════════════════════════════════════════════════════════
   
-  const validateDoctorStep = () => {
-    const newErrors = {};
-    
-    if (currentStep === 1) {
-      // Personal Information
-      if (!doctorFormData.firstName.trim()) {
-        newErrors.firstName = 'الاسم الأول مطلوب';
-      } else if (!isValidName(doctorFormData.firstName)) {
-        newErrors.firstName = 'الاسم يجب أن يحتوي على أحرف فقط';
-      }
-      
-      if (!doctorFormData.lastName.trim()) {
-        newErrors.lastName = 'الكنية مطلوبة';
-      } else if (!isValidName(doctorFormData.lastName)) {
-        newErrors.lastName = 'الاسم يجب أن يحتوي على أحرف فقط';
-      }
-      
-      if (!doctorFormData.nationalId.trim()) {
-        newErrors.nationalId = 'الرقم الوطني مطلوب';
-      } else if (!validateNationalId(doctorFormData.nationalId)) {
-        newErrors.nationalId = 'الرقم الوطني يجب أن يكون 11 رقم';
-      }
-      
-      if (!doctorFormData.dateOfBirth) {
-        newErrors.dateOfBirth = 'تاريخ الميلاد مطلوب';
-      }
-      
-      if (!doctorFormData.phoneNumber.trim()) {
-        newErrors.phoneNumber = 'رقم الهاتف مطلوب';
-      } else if (!validateSyrianPhone(doctorFormData.phoneNumber)) {
-        newErrors.phoneNumber = 'رقم الهاتف غير صحيح';
-      }
-      
-      if (!doctorFormData.email.trim()) {
-        newErrors.email = 'البريد الإلكتروني مطلوب';
-      } else if (!isValidEmail(doctorFormData.email)) {
-        newErrors.email = 'البريد الإلكتروني غير صحيح';
-      }
-      
-      if (!doctorFormData.governorate) {
-        newErrors.governorate = 'المحافظة مطلوبة';
-      }
+const validateDoctorStep = () => {
+  const newErrors = {};
+  
+  if (currentStep === 1) {
+    // Personal Information
+    if (!doctorFormData.firstName.trim()) {
+      newErrors.firstName = 'الاسم الأول مطلوب';
+    } else if (!isValidName(doctorFormData.firstName)) {
+      newErrors.firstName = 'الاسم يجب أن يحتوي على أحرف فقط';
     }
     
-    if (currentStep === 2) {
-      // Professional Information
-      if (!doctorFormData.medicalLicenseNumber.trim()) {
-        newErrors.medicalLicenseNumber = 'رقم الترخيص الطبي مطلوب';
-      } else if (!/^[A-Z0-9]{8,20}$/i.test(doctorFormData.medicalLicenseNumber.trim())) {
-        newErrors.medicalLicenseNumber = 'رقم الترخيص يجب أن يكون 8-20 حرف/رقم';
-      }
-      
-      if (!doctorFormData.specialization) {
-        newErrors.specialization = 'التخصص مطلوب';
-      }
-      
-      if (!doctorFormData.hospitalAffiliation.trim()) {
-        newErrors.hospitalAffiliation = 'مكان العمل مطلوب';
-      }
-      
-      if (doctorFormData.availableDays.length === 0) {
-        newErrors.availableDays = 'يجب اختيار يوم عمل واحد على الأقل';
-      }
-      
-      const years = parseInt(doctorFormData.yearsOfExperience);
-      if (isNaN(years) || years < 0 || years > 60) {
-        newErrors.yearsOfExperience = 'سنوات الخبرة يجب أن تكون بين 0-60';
-      }
+    if (!doctorFormData.lastName.trim()) {
+      newErrors.lastName = 'الكنية مطلوبة';
+    } else if (!isValidName(doctorFormData.lastName)) {
+      newErrors.lastName = 'الاسم يجب أن يحتوي على أحرف فقط';
     }
     
-    if (currentStep === 3) {
-      // Documents
-      if (!doctorFormData.licenseDocument) {
-        newErrors.licenseDocument = 'صورة الترخيص الطبي مطلوبة';
-      }
-      if (!doctorFormData.medicalCertificate) {
-        newErrors.medicalCertificate = 'صورة شهادة الطب مطلوبة';
-      }
+    if (!doctorFormData.nationalId.trim()) {
+      newErrors.nationalId = 'الرقم الوطني مطلوب';
+    } else if (!validateNationalId(doctorFormData.nationalId)) {
+      newErrors.nationalId = 'الرقم الوطني يجب أن يكون 11 رقم';
     }
     
-    if (currentStep === 4) {
-      // Review - No validation needed
+    if (!doctorFormData.dateOfBirth) {
+      newErrors.dateOfBirth = 'تاريخ الميلاد مطلوب';
     }
     
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
+    if (!doctorFormData.phoneNumber.trim()) {
+      newErrors.phoneNumber = 'رقم الهاتف مطلوب';
+    } else if (!validateSyrianPhone(doctorFormData.phoneNumber)) {
+      newErrors.phoneNumber = 'رقم الهاتف غير صحيح';
+    }
+    
+    if (!doctorFormData.email.trim()) {
+      newErrors.email = 'البريد الإلكتروني مطلوب';
+    } else if (!isValidEmail(doctorFormData.email)) {
+      newErrors.email = 'البريد الإلكتروني غير صحيح';
+    }
+    
+    if (!doctorFormData.governorate) {
+      newErrors.governorate = 'المحافظة مطلوبة';
+    }
+    
+    // ✅ NEW: Password strength validation (same as Patient)
+    if (!doctorFormData.password) {
+      newErrors.password = 'كلمة المرور مطلوبة';
+    } else if (doctorFormData.password.length < 8) {
+      newErrors.password = 'كلمة المرور يجب أن تكون 8 أحرف على الأقل';
+    } else if (!/[A-Z]/.test(doctorFormData.password)) {
+      newErrors.password = 'كلمة المرور يجب أن تحتوي على حرف كبير واحد على الأقل';
+    } else if (!/[0-9]/.test(doctorFormData.password)) {
+      newErrors.password = 'كلمة المرور يجب أن تحتوي على رقم واحد على الأقل';
+    } else if (!/[!@#$%^&*]/.test(doctorFormData.password)) {
+      newErrors.password = 'كلمة المرور يجب أن تحتوي على رمز خاص واحد على الأقل';
+    }
+    
+    if (!doctorFormData.confirmPassword) {
+      newErrors.confirmPassword = 'تأكيد كلمة المرور مطلوب';
+    } else if (doctorFormData.password !== doctorFormData.confirmPassword) {
+      newErrors.confirmPassword = 'كلمات المرور غير متطابقة';
+    }
+  }
+  
+  if (currentStep === 2) {
+    // Professional Information
+    if (!doctorFormData.medicalLicenseNumber.trim()) {
+      newErrors.medicalLicenseNumber = 'رقم الترخيص الطبي مطلوب';
+    } else if (!/^[A-Z0-9]{8,20}$/i.test(doctorFormData.medicalLicenseNumber.trim())) {
+      newErrors.medicalLicenseNumber = 'رقم الترخيص يجب أن يكون 8-20 حرف/رقم';
+    }
+    
+    if (!doctorFormData.specialization) {
+      newErrors.specialization = 'التخصص مطلوب';
+    }
+    
+    if (!doctorFormData.hospitalAffiliation.trim()) {
+      newErrors.hospitalAffiliation = 'مكان العمل مطلوب';
+    }
+    
+    if (doctorFormData.availableDays.length === 0) {
+      newErrors.availableDays = 'يجب اختيار يوم عمل واحد على الأقل';
+    }
+    
+    const years = parseInt(doctorFormData.yearsOfExperience);
+    if (isNaN(years) || years < 0 || years > 60) {
+      newErrors.yearsOfExperience = 'سنوات الخبرة يجب أن تكون بين 0-60';
+    }
+  }
+  
+  if (currentStep === 3) {
+    // Documents
+    if (!doctorFormData.licenseDocument) {
+      newErrors.licenseDocument = 'صورة الترخيص الطبي مطلوبة';
+    }
+    if (!doctorFormData.medicalCertificate) {
+      newErrors.medicalCertificate = 'صورة شهادة الطب مطلوبة';
+    }
+  }
+  
+  if (currentStep === 4) {
+    // Review - No validation needed
+  }
+  
+  setErrors(newErrors);
+  return Object.keys(newErrors).length === 0;
+};
+
   
   // ═══════════════════════════════════════════════════════════════
   // NAVIGATION

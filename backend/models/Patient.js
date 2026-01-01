@@ -54,7 +54,7 @@ const patientSchema = new mongoose.Schema({
     }
   },
   
-  // NEW: Current Medications
+  // ✅ UPDATED: Current Medications with date validation
   currentMedications: [{
     medicationName: {
       type: String,
@@ -71,10 +71,29 @@ const patientSchema = new mongoose.Schema({
     },
     startDate: {
       type: Date,
-      required: [true, 'تاريخ البدء مطلوب']
+      required: [true, 'تاريخ البدء مطلوب'],
+      // ✅ NEW: startDate validation
+      validate: {
+        validator: function(v) {
+          if (!v) return false;
+          const today = new Date();
+          // startDate cannot be in the future
+          return v <= today;
+        },
+        message: 'تاريخ البدء لا يمكن أن يكون في المستقبل'
+      }
     },
     endDate: {
-      type: Date
+      type: Date,
+      // ✅ NEW: endDate validation
+      validate: {
+        validator: function(v) {
+          if (!v) return true; // endDate is optional
+          // If endDate exists, it must be after startDate
+          return v > this.startDate;
+        },
+        message: 'تاريخ الانتهاء يجب أن يكون بعد تاريخ البدء'
+      }
     },
     prescribedBy: {
       type: mongoose.Schema.Types.ObjectId,
@@ -94,7 +113,7 @@ const patientSchema = new mongoose.Schema({
     }
   }],
   
-  // NEW: Children (for parents)
+  // Children (for parents)
   children: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Patient'

@@ -1,6 +1,3 @@
-// backend/models/Doctor.js
-// COMPLETE Doctor Model with File Upload Support
-
 const mongoose = require('mongoose');
 
 const doctorSchema = new mongoose.Schema({
@@ -97,14 +94,37 @@ const doctorSchema = new mongoose.Schema({
     max: [1000000, 'رسوم الاستشارة يجب ألا تتجاوز 1,000,000']
   },
   
+  // ✅ UPDATED: Available Times with validation
   availableTimes: {
-    start: { type: String, default: '09:00' },
-    end: { type: String, default: '17:00' }
+    start: { 
+      type: String, 
+      default: '09:00',
+      // ✅ NEW: Format validation for start time
+      validate: {
+        validator: function(v) {
+          if (!v) return true;
+          // HH:mm format (e.g., 09:00, 14:30)
+          return /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/.test(v);
+        },
+        message: 'وقت البدء يجب أن يكون بالصيغة HH:mm (مثال: 09:00)'
+      }
+    },
+    end: { 
+      type: String, 
+      default: '17:00',
+      // ✅ NEW: Format validation for end time
+      validate: {
+        validator: function(v) {
+          if (!v) return true;
+          // HH:mm format
+          return /^([0-1][0-9]|2[0-3]):[0-5][0-9]$/.test(v);
+        },
+        message: 'وقت الانتهاء يجب أن يكون بالصيغة HH:mm (مثال: 17:00)'
+      }
+    }
   },
   
-  // ==================== FILE UPLOADS (NEW) ====================
-  // These files are copied from DoctorRequest when admin approves
-  
+  // ==================== FILE UPLOADS ====================
   // Medical Certificate (شهادة الطب)
   medicalCertificate: {
     fileName: { type: String },
@@ -137,6 +157,27 @@ const doctorSchema = new mongoose.Schema({
 }, {
   timestamps: true,
   collection: 'doctors'
+});
+
+// ============================================
+// PRE-VALIDATE MIDDLEWARE
+// ============================================
+
+// ✅ NEW: Validate that end time is after start time
+doctorSchema.pre('validate', function(next) {
+  if (this.availableTimes && this.availableTimes.start && this.availableTimes.end) {
+    const start = this.availableTimes.start;
+    const end = this.availableTimes.end;
+    
+    // Convert HH:mm to minutes for comparison
+    const startMinutes = parseInt(start.split(':')[0]) * 60 + parseInt(start.split(':')[1]);
+    const endMinutes = parseInt(end.split(':')[0]) * 60 + parseInt(end.split(':')[1]);
+    
+    if (endMinutes <= startMinutes) {
+      this.invalidate('availableTimes.end', 'وقت الانتهاء يجب أن يكون بعد وقت البدء');
+    }
+  }
+  next();
 });
 
 // Indexes

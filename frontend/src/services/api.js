@@ -95,6 +95,49 @@ export const authAPI = {
   // Check if user is authenticated
   isAuthenticated: () => {
     return !!localStorage.getItem('token');
+  },
+
+  // ==========================================
+  // ✅ FORGET PASSWORD FUNCTIONS
+  // ==========================================
+
+  /**
+   * Send OTP to email for password reset
+   */
+  forgotPassword: async (data) => {
+    try {
+      const response = await api.post('/auth/forgot-password', data);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في إرسال رمز التحقق';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /**
+   * Verify OTP code
+   */
+  verifyOTP: async (data) => {
+    try {
+      const response = await api.post('/auth/verify-otp', data);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في التحقق من الرمز';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /**
+   * Reset password with OTP
+   */
+  resetPassword: async (data) => {
+    try {
+      const response = await api.post('/auth/reset-password', data);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تغيير كلمة المرور';
+      throw { message: errorMessage, ...error.response?.data };
+    }
   }
 };
 

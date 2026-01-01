@@ -2,6 +2,7 @@
 // 🏛️ Health Ministry Admin Dashboard - Government Healthcare Platform
 // Patient 360° - وزارة الصحة - الجمهورية العربية السورية
 // Database Schema Compliant Version with Doctor Requests Management
+// REDESIGNED VERSION - Professional Government-Grade UI
 
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -983,8 +984,8 @@ const handleRejectRequest = async () => {
     try {
       const token = localStorage.getItem('token');
       const endpoint = deactivateType === 'doctor' 
-        ? `http://localhost:5000/api/admin/doctors/${deactivateTarget._id}/deactivate`
-        : `http://localhost:5000/api/admin/patients/${deactivateTarget._id}/deactivate`;
+        ? `http://localhost:5000/api/admin/doctors/${deactivateTarget.id}/deactivate`
+        : `http://localhost:5000/api/admin/patients/${deactivateTarget.id}/deactivate`;
       
       const res = await fetch(endpoint, {
         method: 'PUT',
@@ -1028,8 +1029,8 @@ const handleRejectRequest = async () => {
     try {
       const token = localStorage.getItem('token');
       const endpoint = type === 'doctor' 
-        ? `http://localhost:5000/api/admin/doctors/${target._id}/reactivate`
-        : `http://localhost:5000/api/admin/patients/${target._id}/reactivate`;
+        ? `http://localhost:5000/api/admin/doctors/${target.id}/reactivate`
+        : `http://localhost:5000/api/admin/patients/${target.id}/reactivate`;
       
       const res = await fetch(endpoint, {
         method: 'PUT',
@@ -1252,33 +1253,42 @@ const handleRejectRequest = async () => {
                 />
               </div>
               
-              {/* Quick Actions */}
+              {/* Quick Actions - REDESIGNED */}
               <div className="quick-actions-section">
-                <h3>الإجراءات السريعة</h3>
+                <h3 className="section-title">الإجراءات السريعة</h3>
                 <div className="quick-actions-grid">
                   <button 
-                    className="quick-action-btn"
+                    className="quick-action-btn primary-action"
                     onClick={() => { setShowAddDoctorForm(true); handleTabChange('doctors'); }}
                   >
-                    <span className="action-icon">➕</span>
+                    <div className="action-icon-wrapper">
+                      <span className="action-icon">➕</span>
+                    </div>
                     <span className="action-text">إضافة طبيب جديد</span>
+                    <span className="action-arrow">←</span>
                   </button>
                   <button 
-                    className="quick-action-btn orange"
+                    className="quick-action-btn secondary-action"
                     onClick={() => handleTabChange('doctor_requests')}
                   >
-                    <span className="action-icon">📋</span>
+                    <div className="action-icon-wrapper orange">
+                      <span className="action-icon">📋</span>
+                    </div>
                     <span className="action-text">مراجعة الطلبات</span>
                     {statistics.pendingRequests > 0 && (
-                      <span className="action-badge">{statistics.pendingRequests}</span>
+                      <span className="action-badge-inline">{statistics.pendingRequests}</span>
                     )}
+                    <span className="action-arrow">←</span>
                   </button>
                   <button 
-                    className="quick-action-btn purple"
+                    className="quick-action-btn tertiary-action"
                     onClick={() => handleTabChange('audit')}
                   >
-                    <span className="action-icon">📜</span>
+                    <div className="action-icon-wrapper teal">
+                      <span className="action-icon">📜</span>
+                    </div>
                     <span className="action-text">سجل النظام</span>
+                    <span className="action-arrow">←</span>
                   </button>
                 </div>
               </div>
@@ -1286,71 +1296,86 @@ const handleRejectRequest = async () => {
           )}
 
           {/* ═══════════════════════════════════════════════════════════════
-              NEW: DOCTOR REQUESTS TAB
+              DOCTOR REQUESTS TAB - REDESIGNED
               ═══════════════════════════════════════════════════════════════ */}
           {activeTab === 'doctor_requests' && (
             <div className="requests-section">
-              <div className="section-header">
-                <h3>
-                  <span>📋</span> طلبات تسجيل الأطباء
-                </h3>
-                <p>مراجعة وإدارة طلبات تسجيل الأطباء الجدد</p>
+              <div className="section-header-pro">
+                <div className="section-header-content">
+                  <div className="section-icon">📋</div>
+                  <div className="section-text">
+                    <h3>طلبات تسجيل الأطباء</h3>
+                    <p>مراجعة وإدارة طلبات تسجيل الأطباء الجدد</p>
+                  </div>
+                </div>
               </div>
 
-              {/* Search and Filter */}
-              <div className="search-filter-bar">
-                <div className="search-box">
-                  <span className="search-icon">🔍</span>
+              {/* Search and Filter - REDESIGNED */}
+              <div className="search-filter-container">
+                <div className="search-box-pro">
+                  <span className="search-icon-pro">🔍</span>
                   <input
                     type="text"
                     placeholder="البحث بالاسم أو رقم الترخيص أو الرقم الوطني..."
                     value={requestSearchTerm}
                     onChange={(e) => setRequestSearchTerm(e.target.value)}
                   />
+                  {requestSearchTerm && (
+                    <button className="clear-btn" onClick={() => setRequestSearchTerm('')}>✕</button>
+                  )}
                 </div>
-                <div className="filter-buttons">
+                <div className="filter-chips">
                   <button 
-                    className={`filter-btn ${requestFilter === 'all' ? 'active' : ''}`}
+                    className={`filter-chip ${requestFilter === 'all' ? 'active' : ''}`}
                     onClick={() => setRequestFilter('all')}
                   >
-                    الكل ({doctorRequests.length})
+                    <span className="chip-text">الكل</span>
+                    <span className="chip-count">{doctorRequests.length}</span>
                   </button>
                   <button 
-                    className={`filter-btn pending ${requestFilter === 'pending' ? 'active' : ''}`}
+                    className={`filter-chip pending ${requestFilter === 'pending' ? 'active' : ''}`}
                     onClick={() => setRequestFilter('pending')}
                   >
-                    ⏳ معلق ({doctorRequests.filter(r => r.requestInfo?.status === 'pending').length})
+                    <span className="chip-icon">⏳</span>
+                    <span className="chip-text">معلق</span>
+                    <span className="chip-count">{doctorRequests.filter(r => r.requestInfo?.status === 'pending').length}</span>
                   </button>
                   <button 
-                    className={`filter-btn accepted ${requestFilter === 'accepted' ? 'active' : ''}`}
+                    className={`filter-chip accepted ${requestFilter === 'accepted' ? 'active' : ''}`}
                     onClick={() => setRequestFilter('accepted')}
                   >
-                    ✅ مقبول ({doctorRequests.filter(r => r.requestInfo?.status === 'accepted').length})
+                    <span className="chip-icon">✅</span>
+                    <span className="chip-text">مقبول</span>
+                    <span className="chip-count">{doctorRequests.filter(r => r.requestInfo?.status === 'accepted').length}</span>
                   </button>
                   <button 
-                    className={`filter-btn rejected ${requestFilter === 'rejected' ? 'active' : ''}`}
+                    className={`filter-chip rejected ${requestFilter === 'rejected' ? 'active' : ''}`}
                     onClick={() => setRequestFilter('rejected')}
                   >
-                    ❌ مرفوض ({doctorRequests.filter(r => r.requestInfo?.status === 'rejected').length})
+                    <span className="chip-icon">❌</span>
+                    <span className="chip-text">مرفوض</span>
+                    <span className="chip-count">{doctorRequests.filter(r => r.requestInfo?.status === 'rejected').length}</span>
                   </button>
                 </div>
               </div>
 
-              {/* Requests List */}
+              {/* Requests List - REDESIGNED */}
               {requestsLoading ? (
-                <div className="loading-state">
-                  <div className="loading-spinner"></div>
+                <div className="loading-state-pro">
+                  <div className="loading-spinner-pro"></div>
                   <p>جاري تحميل الطلبات...</p>
                 </div>
               ) : filteredRequests.length === 0 ? (
-                <div className="empty-state">
-                  <span className="empty-icon">📭</span>
+                <div className="empty-state-pro">
+                  <div className="empty-icon-wrapper">
+                    <span className="empty-icon">📭</span>
+                  </div>
                   <h4>لا توجد طلبات</h4>
                   <p>لا توجد طلبات تسجيل مطابقة للبحث</p>
                 </div>
               ) : (
-                <div className="requests-table-container">
-                  <table className="admin-table requests-table">
+                <div className="data-table-container">
+                  <table className="data-table-pro">
                     <thead>
                       <tr>
                         <th>رقم الطلب</th>
@@ -1362,85 +1387,98 @@ const handleRejectRequest = async () => {
                         <th>الإجراءات</th>
                       </tr>
                     </thead>
-                   
+                    <tbody>
                       {filteredRequests.map((request) => {
                         const specInfo = getSpecializationInfo(request.doctorInfo?.specialization);
                         return (
-                          <tr key={request._id} className={`status-${request.requestInfo?.status}`}>
-                            <td className="request-id">{request.requestId || request._id.slice(-8)}</td>
-                            <td className="name-cell">
-                              <div className="name-info">
-                                <span className="full-name">{request.personalInfo?.firstName} {request.personalInfo?.lastName}</span>
-                                <span className="national-id">{request.personalInfo?.nationalId}</span>
+                          <tr key={request._id} className={`status-row-${request.requestInfo?.status}`}>
+                            <td>
+                              <span className="request-id-cell">{request.requestId || request._id.slice(-8)}</span>
+                            </td>
+                            <td>
+                              <div className="name-cell-pro">
+                                <span className="full-name-pro">{request.personalInfo?.firstName} {request.personalInfo?.lastName}</span>
+                                <span className="national-id-pro">{request.personalInfo?.nationalId}</span>
                               </div>
                             </td>
                             <td>
-                              <span className="specialization-badge">
-                                <span className="spec-icon">{specInfo.icon}</span>
-                                {specInfo.nameAr}
-                                {specInfo.hasECG && <span className="ecg-badge">ECG AI</span>}
-                              </span>
+                              <div className="specialization-cell">
+                                <span className="spec-icon-cell">{specInfo.icon}</span>
+                                <span className="spec-name-cell">{specInfo.nameAr}</span>
+                                {specInfo.hasECG && <span className="ecg-tag">ECG AI</span>}
+                              </div>
                             </td>
-                            <td className="license-cell">{request.doctorInfo?.medicalLicenseNumber}</td>
-                            <td className="date-cell">{formatDate(request.requestInfo?.submittedAt)}</td>
                             <td>
-                              <span className={`status-badge status-${request.requestInfo?.status}`}>
+                              <span className="license-cell-pro">{request.doctorInfo?.medicalLicenseNumber}</span>
+                            </td>
+                            <td>
+                              <span className="date-cell-pro">{formatDate(request.requestInfo?.submittedAt)}</span>
+                            </td>
+                            <td>
+                              <span className={`status-pill status-${request.requestInfo?.status}`}>
                                 {request.requestInfo?.status === 'pending' && '⏳ قيد المراجعة'}
                                 {request.requestInfo?.status === 'accepted' && '✅ مقبول'}
                                 {request.requestInfo?.status === 'rejected' && '❌ مرفوض'}
                               </span>
                             </td>
-                            <td className="actions-cell">
-                              <button 
-                                className="action-btn view"
-                                onClick={() => handleViewRequest(request)}
-                                title="عرض التفاصيل"
-                              >
-                                👁️
-                              </button>
-                              {request.requestInfo?.status === 'pending' && (
-                                <>
-                                  <button 
-                                    className="action-btn accept"
-                                    onClick={() => {
-                                      setSelectedRequest(request);
-                                      setShowAcceptConfirm(true);
-                                    }}
-                                    title="قبول الطلب"
-                                  >
-                                    ✅
-                                  </button>
-                                  <button 
-                                    className="action-btn reject"
-                                    onClick={() => {
-                                      setSelectedRequest(request);
-                                      setShowRejectModal(true);
-                                    }}
-                                    title="رفض الطلب"
-                                  >
-                                    ❌
-                                  </button>
-                                </>
-                              )}
+                            <td>
+                              <div className="actions-cell-pro">
+                                <button 
+                                  className="action-btn-pro view"
+                                  onClick={() => handleViewRequest(request)}
+                                  title="عرض التفاصيل"
+                                >
+                                  <span>👁️</span>
+                                </button>
+                                {request.requestInfo?.status === 'pending' && (
+                                  <>
+                                    <button 
+                                      className="action-btn-pro accept"
+                                      onClick={() => {
+                                        setSelectedRequest(request);
+                                        setShowAcceptConfirm(true);
+                                      }}
+                                      title="قبول الطلب"
+                                    >
+                                      <span>✅</span>
+                                    </button>
+                                    <button 
+                                      className="action-btn-pro reject"
+                                      onClick={() => {
+                                        setSelectedRequest(request);
+                                        setShowRejectModal(true);
+                                      }}
+                                      title="رفض الطلب"
+                                    >
+                                      <span>❌</span>
+                                    </button>
+                                  </>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         );
                       })}
+                    </tbody>
                   </table>
                 </div>
               )}
             </div>
           )}
 
-          {/* Doctors Tab */}
+          {/* Doctors Tab - REDESIGNED */}
           {activeTab === 'doctors' && (
             <div className="doctors-section">
-              <div className="section-header">
-                <h3>
-                  <span>👨‍⚕️</span> إدارة الأطباء
-                </h3>
+              <div className="section-header-pro">
+                <div className="section-header-content">
+                  <div className="section-icon">👨‍⚕️</div>
+                  <div className="section-text">
+                    <h3>إدارة الأطباء</h3>
+                    <p>عرض وإدارة حسابات الأطباء المسجلين</p>
+                  </div>
+                </div>
                 <button 
-                  className="add-btn"
+                  className="add-btn-pro"
                   onClick={() => setShowAddDoctorForm(true)}
                 >
                   <span>➕</span> إضافة طبيب جديد
@@ -1448,31 +1486,34 @@ const handleRejectRequest = async () => {
               </div>
 
               {/* Search and Filter */}
-              <div className="search-filter-bar">
-                <div className="search-box">
-                  <span className="search-icon">🔍</span>
+              <div className="search-filter-container">
+                <div className="search-box-pro">
+                  <span className="search-icon-pro">🔍</span>
                   <input
                     type="text"
                     placeholder="البحث بالاسم أو رقم الترخيص أو الرقم الوطني..."
                     value={doctorSearchTerm}
                     onChange={(e) => setDoctorSearchTerm(e.target.value)}
                   />
+                  {doctorSearchTerm && (
+                    <button className="clear-btn" onClick={() => setDoctorSearchTerm('')}>✕</button>
+                  )}
                 </div>
-                <div className="filter-buttons">
+                <div className="filter-chips">
                   <button 
-                    className={`filter-btn ${doctorFilter === 'all' ? 'active' : ''}`}
+                    className={`filter-chip ${doctorFilter === 'all' ? 'active' : ''}`}
                     onClick={() => setDoctorFilter('all')}
                   >
                     الكل
                   </button>
                   <button 
-                    className={`filter-btn ${doctorFilter === 'active' ? 'active' : ''}`}
+                    className={`filter-chip active-filter ${doctorFilter === 'active' ? 'active' : ''}`}
                     onClick={() => setDoctorFilter('active')}
                   >
                     نشط
                   </button>
                   <button 
-                    className={`filter-btn ${doctorFilter === 'inactive' ? 'active' : ''}`}
+                    className={`filter-chip inactive-filter ${doctorFilter === 'inactive' ? 'active' : ''}`}
                     onClick={() => setDoctorFilter('inactive')}
                   >
                     غير نشط
@@ -1482,19 +1523,21 @@ const handleRejectRequest = async () => {
 
               {/* Doctors List */}
               {doctorsLoading ? (
-                <div className="loading-state">
-                  <div className="loading-spinner"></div>
+                <div className="loading-state-pro">
+                  <div className="loading-spinner-pro"></div>
                   <p>جاري تحميل الأطباء...</p>
                 </div>
               ) : filteredDoctors.length === 0 ? (
-                <div className="empty-state">
-                  <span className="empty-icon">👨‍⚕️</span>
+                <div className="empty-state-pro">
+                  <div className="empty-icon-wrapper">
+                    <span className="empty-icon">👨‍⚕️</span>
+                  </div>
                   <h4>لا يوجد أطباء</h4>
                   <p>لا يوجد أطباء مطابقين للبحث</p>
                 </div>
               ) : (
-                <div className="table-container">
-                  <table className="admin-table">
+                <div className="data-table-container">
+                  <table className="data-table-pro">
                     <thead>
                       <tr>
                         <th>الاسم</th>
@@ -1509,48 +1552,57 @@ const handleRejectRequest = async () => {
                       {filteredDoctors.map((doctor) => {
                         const specInfo = getSpecializationInfo(doctor.specialization);
                         return (
-                          <tr key={doctor._id}>
-                            <td className="name-cell">
-                              <div className="name-info">
-                                <span className="full-name">{doctor.firstName} {doctor.lastName}</span>
-                                <span className="national-id">{doctor.nationalId}</span>
+                          <tr key={doctor.id} className={doctor.isActive === false ? 'inactive-row' : ''}>
+                            <td>
+                              <div className="name-cell-pro">
+                                <span className="full-name-pro">{doctor.firstName} {doctor.lastName}</span>
+                                <span className="national-id-pro">{doctor.nationalId}</span>
                               </div>
                             </td>
                             <td>
-                              <span className="specialization-badge">
-                                <span className="spec-icon">{specInfo.icon}</span>
-                                {specInfo.nameAr}
-                              </span>
+                              <div className="specialization-cell">
+                                <span className="spec-icon-cell">{specInfo.icon}</span>
+                                <span className="spec-name-cell">{specInfo.nameAr}</span>
+                              </div>
                             </td>
-                            <td>{doctor.medicalLicenseNumber}</td>
-                            <td>{doctor.hospitalAffiliation}</td>
                             <td>
-                              <span className={`status-badge ${doctor.isActive !== false ? 'active' : 'inactive'}`}>
+                              <span className="license-cell-pro">{doctor.medicalLicenseNumber}</span>
+                            </td>
+                            <td>
+                              <span className="hospital-cell">{doctor.hospitalAffiliation}</span>
+                            </td>
+                            <td>
+                              <span className={`status-pill ${doctor.isActive !== false ? 'status-active' : 'status-inactive'}`}>
                                 {doctor.isActive !== false ? '✅ نشط' : '❌ غير نشط'}
                               </span>
                             </td>
-                            <td className="actions-cell">
-                              <button 
-                                className="action-btn view"
-                                onClick={() => { setSelectedDoctor(doctor); setShowDoctorDetails(true); }}
-                              >
-                                👁️
-                              </button>
-                              {doctor.isActive !== false ? (
+                            <td>
+                              <div className="actions-cell-pro">
                                 <button 
-                                  className="action-btn deactivate"
-                                  onClick={() => handleDeactivate(doctor, 'doctor')}
+                                  className="action-btn-pro view"
+                                  onClick={() => { setSelectedDoctor(doctor); setShowDoctorDetails(true); }}
+                                  title="عرض التفاصيل"
                                 >
-                                  🚫
+                                  <span>👁️</span>
                                 </button>
-                              ) : (
-                                <button 
-                                  className="action-btn reactivate"
-                                  onClick={() => handleReactivate(doctor, 'doctor')}
-                                >
-                                  ✅
-                                </button>
-                              )}
+                                {doctor.isActive !== false ? (
+                                  <button 
+                                    className="action-btn-pro deactivate"
+                                    onClick={() => handleDeactivate(doctor, 'doctor')}
+                                    title="إلغاء التفعيل"
+                                  >
+                                    <span>🚫</span>
+                                  </button>
+                                ) : (
+                                  <button 
+                                    className="action-btn-pro reactivate"
+                                    onClick={() => handleReactivate(doctor, 'doctor')}
+                                    title="إعادة التفعيل"
+                                  >
+                                    <span>✅</span>
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         );
@@ -1562,41 +1614,48 @@ const handleRejectRequest = async () => {
             </div>
           )}
 
-          {/* Patients Tab */}
+          {/* Patients Tab - REDESIGNED */}
           {activeTab === 'patients' && (
             <div className="patients-section">
-              <div className="section-header">
-                <h3>
-                  <span>👥</span> إدارة المرضى
-                </h3>
+              <div className="section-header-pro">
+                <div className="section-header-content">
+                  <div className="section-icon">👥</div>
+                  <div className="section-text">
+                    <h3>إدارة المرضى</h3>
+                    <p>عرض وإدارة حسابات المرضى المسجلين</p>
+                  </div>
+                </div>
               </div>
 
               {/* Search and Filter */}
-              <div className="search-filter-bar">
-                <div className="search-box">
-                  <span className="search-icon">🔍</span>
+              <div className="search-filter-container">
+                <div className="search-box-pro">
+                  <span className="search-icon-pro">🔍</span>
                   <input
                     type="text"
                     placeholder="البحث بالاسم أو الرقم الوطني..."
                     value={patientSearchTerm}
                     onChange={(e) => setPatientSearchTerm(e.target.value)}
                   />
+                  {patientSearchTerm && (
+                    <button className="clear-btn" onClick={() => setPatientSearchTerm('')}>✕</button>
+                  )}
                 </div>
-                <div className="filter-buttons">
+                <div className="filter-chips">
                   <button 
-                    className={`filter-btn ${patientFilter === 'all' ? 'active' : ''}`}
+                    className={`filter-chip ${patientFilter === 'all' ? 'active' : ''}`}
                     onClick={() => setPatientFilter('all')}
                   >
                     الكل
                   </button>
                   <button 
-                    className={`filter-btn ${patientFilter === 'active' ? 'active' : ''}`}
+                    className={`filter-chip active-filter ${patientFilter === 'active' ? 'active' : ''}`}
                     onClick={() => setPatientFilter('active')}
                   >
                     نشط
                   </button>
                   <button 
-                    className={`filter-btn ${patientFilter === 'inactive' ? 'active' : ''}`}
+                    className={`filter-chip inactive-filter ${patientFilter === 'inactive' ? 'active' : ''}`}
                     onClick={() => setPatientFilter('inactive')}
                   >
                     غير نشط
@@ -1606,19 +1665,21 @@ const handleRejectRequest = async () => {
 
               {/* Patients List */}
               {patientsLoading ? (
-                <div className="loading-state">
-                  <div className="loading-spinner"></div>
+                <div className="loading-state-pro">
+                  <div className="loading-spinner-pro"></div>
                   <p>جاري تحميل المرضى...</p>
                 </div>
               ) : filteredPatients.length === 0 ? (
-                <div className="empty-state">
-                  <span className="empty-icon">👥</span>
+                <div className="empty-state-pro">
+                  <div className="empty-icon-wrapper">
+                    <span className="empty-icon">👥</span>
+                  </div>
                   <h4>لا يوجد مرضى</h4>
                   <p>لا يوجد مرضى مطابقين للبحث</p>
                 </div>
               ) : (
-                <div className="table-container">
-                  <table className="admin-table">
+                <div className="data-table-container">
+                  <table className="data-table-pro">
                     <thead>
                       <tr>
                         <th>الاسم</th>
@@ -1631,40 +1692,55 @@ const handleRejectRequest = async () => {
                     </thead>
                     <tbody>
                       {filteredPatients.map((patient) => (
-                        <tr key={patient._id}>
-                          <td className="name-cell">
-                            <span className="full-name">{patient.firstName} {patient.lastName}</span>
-                          </td>
-                          <td>{patient.nationalId || patient.childId || '-'}</td>
-                          <td>{patient.gender === 'male' ? 'ذكر' : 'أنثى'}</td>
-                          <td>{patient.phoneNumber || '-'}</td>
+                        <tr key={patient.id} className={patient.isActive === false ? 'inactive-row' : ''}>
                           <td>
-                            <span className={`status-badge ${patient.isActive !== false ? 'active' : 'inactive'}`}>
+                            <div className="name-cell-pro">
+                              <span className="full-name-pro">{patient.firstName} {patient.lastName}</span>
+                            </div>
+                          </td>
+                          <td>
+                            <span className="national-id-cell">{patient.nationalId || patient.childId || '-'}</span>
+                          </td>
+                          <td>
+                            <span className={`gender-pill ${patient.gender}`}>
+                              {patient.gender === 'male' ? '♂ ذكر' : '♀ أنثى'}
+                            </span>
+                          </td>
+                          <td>
+                            <span className="phone-cell">{patient.phoneNumber || '-'}</span>
+                          </td>
+                          <td>
+                            <span className={`status-pill ${patient.isActive !== false ? 'status-active' : 'status-inactive'}`}>
                               {patient.isActive !== false ? '✅ نشط' : '❌ غير نشط'}
                             </span>
                           </td>
-                          <td className="actions-cell">
-                            <button 
-                              className="action-btn view"
-                              onClick={() => { setSelectedPatient(patient); setShowPatientDetails(true); }}
-                            >
-                              👁️
-                            </button>
-                            {patient.isActive !== false ? (
+                          <td>
+                            <div className="actions-cell-pro">
                               <button 
-                                className="action-btn deactivate"
-                                onClick={() => handleDeactivate(patient, 'patient')}
+                                className="action-btn-pro view"
+                                onClick={() => { setSelectedPatient(patient); setShowPatientDetails(true); }}
+                                title="عرض التفاصيل"
                               >
-                                🚫
+                                <span>👁️</span>
                               </button>
-                            ) : (
-                              <button 
-                                className="action-btn reactivate"
-                                onClick={() => handleReactivate(patient, 'patient')}
-                              >
-                                ✅
-                              </button>
-                            )}
+                              {patient.isActive !== false ? (
+                                <button 
+                                  className="action-btn-pro deactivate"
+                                  onClick={() => handleDeactivate(patient, 'patient')}
+                                  title="إلغاء التفعيل"
+                                >
+                                  <span>🚫</span>
+                                </button>
+                              ) : (
+                                <button 
+                                  className="action-btn-pro reactivate"
+                                  onClick={() => handleReactivate(patient, 'patient')}
+                                  title="إعادة التفعيل"
+                                >
+                                  <span>✅</span>
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -1675,45 +1751,51 @@ const handleRejectRequest = async () => {
             </div>
           )}
 
-          {/* Audit Log Tab */}
+          {/* Audit Log Tab - REDESIGNED */}
           {activeTab === 'audit' && (
             <div className="audit-section">
-              <div className="section-header">
-                <h3>
-                  <span>📜</span> سجل النظام
-                </h3>
-                <button className="refresh-btn" onClick={loadAuditLogs}>
+              <div className="section-header-pro">
+                <div className="section-header-content">
+                  <div className="section-icon">📜</div>
+                  <div className="section-text">
+                    <h3>سجل النظام</h3>
+                    <p>سجل جميع العمليات والإجراءات في النظام</p>
+                  </div>
+                </div>
+                <button className="refresh-btn-pro" onClick={loadAuditLogs}>
                   <span>🔄</span> تحديث
                 </button>
               </div>
 
               {auditLoading ? (
-                <div className="loading-state">
-                  <div className="loading-spinner"></div>
+                <div className="loading-state-pro">
+                  <div className="loading-spinner-pro"></div>
                   <p>جاري تحميل السجلات...</p>
                 </div>
               ) : auditLogs.length === 0 ? (
-                <div className="empty-state">
-                  <span className="empty-icon">📜</span>
+                <div className="empty-state-pro">
+                  <div className="empty-icon-wrapper">
+                    <span className="empty-icon">📜</span>
+                  </div>
                   <h4>لا توجد سجلات</h4>
                   <p>لم يتم تسجيل أي إجراءات بعد</p>
                 </div>
               ) : (
-                <div className="audit-logs-container">
+                <div className="audit-logs-container-pro">
                   {auditLogs.map((log, index) => (
-                    <div key={index} className="audit-log-item">
-                      <div className="log-icon">
-                        {log.action?.includes('ADD') && '➕'}
-                        {log.action?.includes('DEACTIVATE') && '🚫'}
-                        {log.action?.includes('REACTIVATE') && '✅'}
-                        {log.action?.includes('ACCEPT') && '✅'}
-                        {log.action?.includes('REJECT') && '❌'}
-                        {log.action?.includes('LOGOUT') && '🚪'}
-                        {!log.action?.match(/ADD|DEACTIVATE|REACTIVATE|ACCEPT|REJECT|LOGOUT/) && '📋'}
+                    <div key={index} className="audit-log-card">
+                      <div className="log-icon-wrapper">
+                        {log.action?.includes('ADD') && <span className="log-icon add">➕</span>}
+                        {log.action?.includes('DEACTIVATE') && <span className="log-icon deactivate">🚫</span>}
+                        {log.action?.includes('REACTIVATE') && <span className="log-icon reactivate">✅</span>}
+                        {log.action?.includes('ACCEPT') && <span className="log-icon accept">✅</span>}
+                        {log.action?.includes('REJECT') && <span className="log-icon reject">❌</span>}
+                        {log.action?.includes('LOGOUT') && <span className="log-icon logout">🚪</span>}
+                        {!log.action?.match(/ADD|DEACTIVATE|REACTIVATE|ACCEPT|REJECT|LOGOUT/) && <span className="log-icon default">📋</span>}
                       </div>
-                      <div className="log-content">
-                        <p className="log-details">{log.details}</p>
-                        <span className="log-time">{formatDateTime(log.timestamp)}</span>
+                      <div className="log-content-pro">
+                        <p className="log-details-pro">{log.details}</p>
+                        <span className="log-time-pro">{formatDateTime(log.timestamp)}</span>
                       </div>
                     </div>
                   ))}
@@ -1725,336 +1807,78 @@ const handleRejectRequest = async () => {
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════
-          MODALS
+          MODALS - WITH FIXED Z-INDEX
           ═══════════════════════════════════════════════════════════════ */}
 
       {/* General Modal */}
       {modal.isOpen && (
-        <div className="modal-overlay" onClick={closeModal}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className={`modal-icon ${modal.type}`}>
+        <div className="modal-overlay-pro" onClick={closeModal}>
+          <div className="modal-content-pro" onClick={(e) => e.stopPropagation()}>
+            <div className={`modal-icon-pro ${modal.type}`}>
               {modal.type === 'success' && '✅'}
               {modal.type === 'error' && '❌'}
               {modal.type === 'info' && 'ℹ️'}
               {modal.type === 'warning' && '⚠️'}
             </div>
-            <h3 className="modal-title">{modal.title}</h3>
-            <p className="modal-message">{modal.message}</p>
-            <button className="modal-button primary" onClick={closeModal}>
+            <h3 className="modal-title-pro">{modal.title}</h3>
+            <p className="modal-message-pro">{modal.message}</p>
+            <button className="modal-button-pro primary" onClick={closeModal}>
               حسناً
             </button>
           </div>
         </div>
       )}
 
-      {/* Request Details Modal */}
-      {showRequestDetails && selectedRequest && (
-        <div className="modal-overlay" onClick={() => setShowRequestDetails(false)}>
-          <div className="modal-content large" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowRequestDetails(false)}>✕</button>
-            
-            <div className="request-details-header">
-              <div className="request-info-main">
-                <h2>تفاصيل طلب التسجيل</h2>
-                <span className={`status-badge large status-${selectedRequest.requestInfo?.status}`}>
-                  {selectedRequest.requestInfo?.status === 'pending' && '⏳ قيد المراجعة'}
-                  {selectedRequest.requestInfo?.status === 'accepted' && '✅ تم القبول'}
-                  {selectedRequest.requestInfo?.status === 'rejected' && '❌ مرفوض'}
-                </span>
-              </div>
-              <p className="request-id-display">رقم الطلب: {selectedRequest.requestId || selectedRequest._id}</p>
-            </div>
-
-            <div className="request-details-grid">
-              {/* Personal Info */}
-              <div className="details-section">
-                <h4><span>👤</span> المعلومات الشخصية</h4>
-                <div className="details-row">
-                  <span className="label">الاسم الكامل:</span>
-                  <span className="value">{selectedRequest.personalInfo?.firstName} {selectedRequest.personalInfo?.lastName}</span>
-                </div>
-                <div className="details-row">
-                  <span className="label">الرقم الوطني:</span>
-                  <span className="value">{selectedRequest.personalInfo?.nationalId}</span>
-                </div>
-                <div className="details-row">
-                  <span className="label">تاريخ الميلاد:</span>
-                  <span className="value">{formatDate(selectedRequest.personalInfo?.dateOfBirth)}</span>
-                </div>
-                <div className="details-row">
-                  <span className="label">الجنس:</span>
-                  <span className="value">{selectedRequest.personalInfo?.gender === 'male' ? 'ذكر' : 'أنثى'}</span>
-                </div>
-                <div className="details-row">
-                  <span className="label">رقم الهاتف:</span>
-                  <span className="value">{selectedRequest.personalInfo?.phoneNumber}</span>
-                </div>
-                <div className="details-row">
-                  <span className="label">البريد الإلكتروني:</span>
-                  <span className="value">{selectedRequest.accountInfo?.email}</span>
-                </div>
-                <div className="details-row">
-                  <span className="label">المحافظة:</span>
-                  <span className="value">{getGovernorateName(selectedRequest.personalInfo?.governorate)}</span>
-                </div>
-                <div className="details-row">
-                  <span className="label">العنوان:</span>
-                  <span className="value">{selectedRequest.personalInfo?.address}</span>
-                </div>
-              </div>
-
-              {/* Professional Info */}
-              <div className="details-section">
-                <h4><span>🏥</span> المعلومات المهنية</h4>
-                <div className="details-row">
-                  <span className="label">رقم الترخيص الطبي:</span>
-                  <span className="value license">{selectedRequest.doctorInfo?.medicalLicenseNumber}</span>
-                </div>
-                <div className="details-row">
-                  <span className="label">التخصص:</span>
-                  <span className="value">
-                    {(() => {
-                      const spec = getSpecializationInfo(selectedRequest.doctorInfo?.specialization);
-                      return (
-                        <span className="specialization-display">
-                          <span>{spec.icon}</span> {spec.nameAr}
-                          {spec.hasECG && <span className="ecg-badge">ECG AI</span>}
-                        </span>
-                      );
-                    })()}
-                  </span>
-                </div>
-                {selectedRequest.subSpecialization && (
-                  <div className="details-row">
-                    <span className="label">التخصص الفرعي:</span>
-                    <span className="value">{selectedRequest.subSpecialization}</span>
-                  </div>
-                )}
-                <div className="details-row">
-                  <span className="label">سنوات الخبرة:</span>
-                  <span className="value">{selectedRequest.doctorInfo?.yearsOfExperience} سنة</span>
-                </div>
-                <div className="details-row">
-                  <span className="label">المستشفى / المركز الصحي:</span>
-                  <span className="value">{selectedRequest.doctorInfo?.hospitalAffiliation}</span>
-                </div>
-                <div className="details-row">
-                  <span className="label">أيام العمل:</span>
-                  <span className="value days-list">
-                    {selectedRequest.availableDays?.map(day => {
-                      const dayInfo = WEEKDAYS.find(d => d.id === day);
-                      return <span key={day} className="day-tag">{dayInfo?.nameAr || day}</span>;
-                    })}
-                  </span>
-                </div>
-                <div className="details-row">
-                  <span className="label">رسوم الكشف:</span>
-                  <span className="value">{selectedRequest.doctorInfo?.consultationFee?.toLocaleString()} ل.س</span>
-                </div>
-              </div>
-
-              {/* Documents */}
-              <div className="details-section full-width">
-                <h4><span>📄</span> الوثائق المرفقة</h4>
-                <div className="documents-grid">
-                  <div className="document-item">
-                    <span className="doc-icon">📜</span>
-                    <span className="doc-name">صورة الترخيص الطبي</span>
-                    {selectedRequest.licenseDocumentUrl ? (
-                      <a href={selectedRequest.licenseDocumentUrl} target="_blank" rel="noopener noreferrer" className="view-doc-btn">
-                        عرض
-                      </a>
-                    ) : (
-                      <span className="no-doc">غير مرفق</span>
-                    )}
-                  </div>
-                  <div className="document-item">
-                    <span className="doc-icon">🎓</span>
-                    <span className="doc-name">شهادة الطب</span>
-                    {selectedRequest.medicalCertificateUrl ? (
-                      <a href={selectedRequest.medicalCertificateUrl} target="_blank" rel="noopener noreferrer" className="view-doc-btn">
-                        عرض
-                      </a>
-                    ) : (
-                      <span className="no-doc">غير مرفق</span>
-                    )}
-                  </div>
-                  <div className="document-item">
-                    <span className="doc-icon">📷</span>
-                    <span className="doc-name">الصورة الشخصية</span>
-                    {selectedRequest.profilePhotoUrl ? (
-                      <a href={selectedRequest.profilePhotoUrl} target="_blank" rel="noopener noreferrer" className="view-doc-btn">
-                        عرض
-                      </a>
-                    ) : (
-                      <span className="no-doc">غير مرفقة</span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Request Timeline */}
-              <div className="details-section full-width">
-                <h4><span>📅</span> تفاصيل الطلب</h4>
-                <div className="details-row">
-                  <span className="label">تاريخ تقديم الطلب:</span>
-                  <span className="value">{formatDateTime(selectedRequest.requestInfo?.submittedAt)}</span>
-                </div>
-                {selectedRequest.reviewedAt && (
-                  <div className="details-row">
-                    <span className="label">تاريخ المراجعة:</span>
-                    <span className="value">{formatDateTime(selectedRequest.reviewedAt)}</span>
-                  </div>
-                )}
-                {selectedRequest.rejectionReason && (
-                  <div className="details-row rejection">
-                    <span className="label">سبب الرفض:</span>
-                    <span className="value">{selectedRequest.rejectionReason}</span>
-                  </div>
-                )}
-                {selectedRequest.additionalNotes && (
-                  <div className="details-row">
-                    <span className="label">ملاحظات إضافية:</span>
-                    <span className="value">{selectedRequest.additionalNotes}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Actions */}
-            {selectedRequest.requestInfo?.status === 'pending' && (
-              <div className="request-actions">
-                <button 
-                  className="action-button accept"
-                  onClick={() => setShowAcceptConfirm(true)}
-                >
-                  <span>✅</span> قبول الطلب
-                </button>
-                <button 
-                  className="action-button reject"
-                  onClick={() => setShowRejectModal(true)}
-                >
-                  <span>❌</span> رفض الطلب
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* Accept Confirmation Modal */}
       {showAcceptConfirm && selectedRequest && (
-        <div className="modal-overlay" onClick={() => setShowAcceptConfirm(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-icon success">✅</div>
-            <h3 className="modal-title">تأكيد قبول الطلب</h3>
-            <p className="modal-message">
-              هل أنت متأكد من قبول طلب تسجيل الطبيب:<br />
+        <div className="modal-overlay-pro" onClick={() => setShowAcceptConfirm(false)}>
+          <div className="modal-content-pro" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon-pro success">✅</div>
+            <h3 className="modal-title-pro">تأكيد قبول الطلب</h3>
+            <p className="modal-message-pro">
+              هل تريد قبول طلب تسجيل الطبيب:<br/>
               <strong>{selectedRequest.personalInfo?.firstName} {selectedRequest.personalInfo?.lastName}</strong>
             </p>
-            <p className="modal-note">
-              سيتم إنشاء حساب للطبيب وإرسال بيانات الدخول إلى بريده الإلكتروني.
-            </p>
-            <div className="modal-buttons">
+            <div className="modal-buttons-pro">
               <button 
-                className="modal-button secondary" 
+                className="modal-button-pro secondary" 
                 onClick={() => setShowAcceptConfirm(false)}
-                disabled={processingRequest}
               >
                 إلغاء
               </button>
               <button 
-                className="modal-button primary"
+                className="modal-button-pro success"
                 onClick={handleAcceptRequest}
                 disabled={processingRequest}
               >
-                {processingRequest ? 'جاري المعالجة...' : 'تأكيد القبول'}
+                {processingRequest ? (
+                  <>
+                    <span className="spinner-small"></span>
+                    جاري المعالجة...
+                  </>
+                ) : 'تأكيد القبول'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Reject Modal */}
-      {showRejectModal && selectedRequest && (
-        <div className="modal-overlay" onClick={() => setShowRejectModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-icon error">❌</div>
-            <h3 className="modal-title">رفض طلب التسجيل</h3>
-            <p className="modal-message">
-              رفض طلب تسجيل الطبيب:<br />
-              <strong>{selectedRequest.personalInfo?.firstName} {selectedRequest.personalInfo?.lastName}</strong>
-            </p>
-            
-            <div className="form-group">
-              <label>سبب الرفض *</label>
-              <select 
-                value={rejectReason} 
-                onChange={(e) => setRejectReason(e.target.value)}
-                className="form-select"
-              >
-                <option value="">اختر سبب الرفض...</option>
-                {REJECTION_REASONS.map(reason => (
-                  <option key={reason.id} value={reason.id}>
-                    {reason.icon} {reason.nameAr}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="form-group">
-              <label>ملاحظات إضافية</label>
-              <textarea
-                value={rejectNotes}
-                onChange={(e) => setRejectNotes(e.target.value)}
-                placeholder="أدخل أي ملاحظات إضافية..."
-                rows={3}
-                className="form-textarea"
-              />
-            </div>
-
-            <div className="modal-buttons">
-              <button 
-                className="modal-button secondary" 
-                onClick={() => {
-                  setShowRejectModal(false);
-                  setRejectReason('');
-                  setRejectNotes('');
-                }}
-                disabled={processingRequest}
-              >
-                إلغاء
-              </button>
-              <button 
-                className="modal-button danger"
-                onClick={handleRejectRequest}
-                disabled={processingRequest || !rejectReason}
-              >
-                {processingRequest ? 'جاري المعالجة...' : 'تأكيد الرفض'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Generated Credentials Modal */}
+      {/* Credentials Modal */}
       {generatedCredentials && (
-        <div className="modal-overlay">
-          <div className="modal-content credentials-modal">
-            <div className="modal-icon success">✅</div>
-            <h3 className="modal-title">تم قبول الطلب بنجاح!</h3>
-            <p className="modal-subtitle">
-              تم إنشاء حساب للطبيب: <strong>{generatedCredentials.doctorName}</strong>
-            </p>
+        <div className="modal-overlay-pro">
+          <div className="modal-content-pro credentials-modal">
+            <div className="modal-icon-pro success">🎉</div>
+            <h3 className="modal-title-pro">تم قبول الطلب بنجاح</h3>
+            <p className="modal-subtitle">بيانات دخول الطبيب {generatedCredentials.doctorName}</p>
             
             <div className="credentials-box">
-              <h4>بيانات الدخول:</h4>
               <div className="credential-row">
                 <span className="credential-label">البريد الإلكتروني:</span>
                 <span className="credential-value">{generatedCredentials.email}</span>
                 <button 
-                  className="copy-btn"
+                  className="copy-btn-pro"
                   onClick={() => navigator.clipboard.writeText(generatedCredentials.email)}
+                  title="نسخ"
                 >
                   📋
                 </button>
@@ -2063,21 +1887,22 @@ const handleRejectRequest = async () => {
                 <span className="credential-label">كلمة المرور:</span>
                 <span className="credential-value password">{generatedCredentials.password}</span>
                 <button 
-                  className="copy-btn"
+                  className="copy-btn-pro"
                   onClick={() => navigator.clipboard.writeText(generatedCredentials.password)}
+                  title="نسخ"
                 >
                   📋
                 </button>
               </div>
             </div>
 
-            <div className="credentials-note">
-              <span>⚠️</span>
+            <div className="credentials-warning">
+              <span className="warning-icon">⚠️</span>
               <p>يرجى نسخ هذه البيانات وإرسالها للطبيب. لن تظهر مرة أخرى.</p>
             </div>
 
             <button 
-              className="modal-button primary"
+              className="modal-button-pro primary"
               onClick={() => setGeneratedCredentials(null)}
             >
               تم، إغلاق
@@ -2086,141 +1911,188 @@ const handleRejectRequest = async () => {
         </div>
       )}
 
+      {/* Reject Modal */}
+      {showRejectModal && selectedRequest && (
+        <div className="modal-overlay-pro" onClick={() => setShowRejectModal(false)}>
+          <div className="modal-content-pro" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close-pro" onClick={() => setShowRejectModal(false)}>✕</button>
+            <div className="modal-icon-pro warning">❌</div>
+            <h3 className="modal-title-pro">رفض طلب التسجيل</h3>
+            <p className="modal-message-pro">
+              رفض طلب تسجيل الطبيب:<br/>
+              <strong>{selectedRequest.personalInfo?.firstName} {selectedRequest.personalInfo?.lastName}</strong>
+            </p>
+            
+            <div className="form-group-pro">
+              <label>سبب الرفض *</label>
+              <select 
+                value={rejectReason} 
+                onChange={(e) => setRejectReason(e.target.value)}
+                className="form-select-pro"
+              >
+                <option value="">اختر السبب...</option>
+                {REJECTION_REASONS.map(reason => (
+                  <option key={reason.id} value={reason.id}>
+                    {reason.icon} {reason.nameAr}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group-pro">
+              <label>ملاحظات إضافية</label>
+              <textarea
+                value={rejectNotes}
+                onChange={(e) => setRejectNotes(e.target.value)}
+                placeholder="أدخل أي ملاحظات إضافية..."
+                rows={3}
+                className="form-textarea-pro"
+              />
+            </div>
+
+            <div className="modal-buttons-pro">
+              <button 
+                className="modal-button-pro secondary" 
+                onClick={() => setShowRejectModal(false)}
+              >
+                إلغاء
+              </button>
+              <button 
+                className="modal-button-pro danger"
+                onClick={handleRejectRequest}
+                disabled={!rejectReason || processingRequest}
+              >
+                {processingRequest ? (
+                  <>
+                    <span className="spinner-small"></span>
+                    جاري المعالجة...
+                  </>
+                ) : 'تأكيد الرفض'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add Doctor Form Modal */}
       {showAddDoctorForm && (
-        <div className="modal-overlay" onClick={() => setShowAddDoctorForm(false)}>
-          <div className="modal-content large add-doctor-form" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowAddDoctorForm(false)}>✕</button>
-            <h3 className="modal-title">
-              <span>➕</span> إضافة طبيب جديد
-            </h3>
+        <div className="modal-overlay-pro" onClick={() => setShowAddDoctorForm(false)}>
+          <div className="modal-content-pro large" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close-pro" onClick={() => setShowAddDoctorForm(false)}>✕</button>
+            
+            <div className="form-header-pro">
+              <div className="form-icon">👨‍⚕️</div>
+              <div className="form-title">
+                <h3>إضافة طبيب جديد</h3>
+                <p>أدخل بيانات الطبيب لإنشاء حساب جديد</p>
+              </div>
+            </div>
 
-            <div className="form-grid">
-              {/* Personal Info Section */}
-              <div className="form-section">
-                <h4>المعلومات الشخصية</h4>
-                
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>الاسم الأول *</label>
+            <div className="form-body-pro">
+              {/* Personal Information Section */}
+              <div className="form-section-pro">
+                <h4><span>👤</span> المعلومات الشخصية</h4>
+                <div className="form-grid-pro">
+                  <div className="form-group-pro">
+                    <label>الاسم الأول <span className="required">*</span></label>
                     <input
                       type="text"
                       value={newDoctor.firstName}
-                      onChange={(e) => setNewDoctor(prev => ({ ...prev, firstName: e.target.value }))}
+                      onChange={(e) => setNewDoctor({...newDoctor, firstName: e.target.value})}
                       placeholder="أدخل الاسم الأول"
                     />
                   </div>
-                  <div className="form-group">
-                    <label>الكنية *</label>
+                  <div className="form-group-pro">
+                    <label>الكنية <span className="required">*</span></label>
                     <input
                       type="text"
                       value={newDoctor.lastName}
-                      onChange={(e) => setNewDoctor(prev => ({ ...prev, lastName: e.target.value }))}
+                      onChange={(e) => setNewDoctor({...newDoctor, lastName: e.target.value})}
                       placeholder="أدخل الكنية"
                     />
                   </div>
-                </div>
-
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>الرقم الوطني * (11 رقم)</label>
+                  <div className="form-group-pro">
+                    <label>الرقم الوطني <span className="required">*</span></label>
                     <input
                       type="text"
                       value={newDoctor.nationalId}
-                      onChange={(e) => setNewDoctor(prev => ({ ...prev, nationalId: e.target.value.replace(/\D/g, '').slice(0, 11) }))}
-                      placeholder="أدخل الرقم الوطني"
+                      onChange={(e) => setNewDoctor({...newDoctor, nationalId: e.target.value.replace(/\D/g, '').slice(0, 11)})}
+                      placeholder="11 رقم"
                       maxLength={11}
                     />
                   </div>
-                  <div className="form-group">
-                    <label>رقم الهاتف *</label>
+                  <div className="form-group-pro">
+                    <label>رقم الهاتف <span className="required">*</span></label>
                     <input
                       type="text"
                       value={newDoctor.phoneNumber}
-                      onChange={(e) => setNewDoctor(prev => ({ ...prev, phoneNumber: e.target.value }))}
-                      placeholder="مثال: 0999123456"
+                      onChange={(e) => setNewDoctor({...newDoctor, phoneNumber: e.target.value})}
+                      placeholder="مثال: 0912345678"
                     />
                   </div>
-                </div>
-
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>الجنس</label>
+                  <div className="form-group-pro">
+                    <label>الجنس <span className="required">*</span></label>
                     <select
                       value={newDoctor.gender}
-                      onChange={(e) => setNewDoctor(prev => ({ ...prev, gender: e.target.value }))}
+                      onChange={(e) => setNewDoctor({...newDoctor, gender: e.target.value})}
                     >
                       <option value="male">ذكر</option>
                       <option value="female">أنثى</option>
                     </select>
                   </div>
-                  <div className="form-group">
+                  <div className="form-group-pro">
                     <label>تاريخ الميلاد</label>
                     <input
                       type="date"
                       value={newDoctor.dateOfBirth}
-                      onChange={(e) => setNewDoctor(prev => ({ ...prev, dateOfBirth: e.target.value }))}
+                      onChange={(e) => setNewDoctor({...newDoctor, dateOfBirth: e.target.value})}
                     />
                   </div>
-                </div>
-
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>المحافظة *</label>
+                  <div className="form-group-pro">
+                    <label>المحافظة <span className="required">*</span></label>
                     <select
                       value={newDoctor.governorate}
-                      onChange={(e) => setNewDoctor(prev => ({ ...prev, governorate: e.target.value }))}
+                      onChange={(e) => setNewDoctor({...newDoctor, governorate: e.target.value})}
                     >
-                      <option value="">اختر المحافظة...</option>
+                      <option value="">اختر المحافظة</option>
                       {SYRIAN_GOVERNORATES.map(gov => (
                         <option key={gov.id} value={gov.id}>{gov.nameAr}</option>
                       ))}
                     </select>
                   </div>
-                  <div className="form-group">
+                  <div className="form-group-pro">
                     <label>المدينة</label>
                     <input
                       type="text"
                       value={newDoctor.city}
-                      onChange={(e) => setNewDoctor(prev => ({ ...prev, city: e.target.value }))}
+                      onChange={(e) => setNewDoctor({...newDoctor, city: e.target.value})}
                       placeholder="أدخل اسم المدينة"
                     />
                   </div>
                 </div>
-
-                <div className="form-group full-width">
-                  <label>عنوان العيادة *</label>
-                  <input
-                    type="text"
-                    value={newDoctor.address}
-                    onChange={(e) => setNewDoctor(prev => ({ ...prev, address: e.target.value }))}
-                    placeholder="أدخل عنوان العيادة بالتفصيل"
-                  />
-                </div>
               </div>
 
-              {/* Professional Info Section */}
-              <div className="form-section">
-                <h4>المعلومات المهنية</h4>
-                
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>رقم الترخيص الطبي * (8-20 حرف/رقم)</label>
+              {/* Professional Information Section */}
+              <div className="form-section-pro">
+                <h4><span>🏥</span> المعلومات المهنية</h4>
+                <div className="form-grid-pro">
+                  <div className="form-group-pro">
+                    <label>رقم الترخيص الطبي <span className="required">*</span></label>
                     <input
                       type="text"
                       value={newDoctor.medicalLicenseNumber}
-                      onChange={(e) => setNewDoctor(prev => ({ ...prev, medicalLicenseNumber: e.target.value.toUpperCase() }))}
+                      onChange={(e) => setNewDoctor({...newDoctor, medicalLicenseNumber: e.target.value.toUpperCase()})}
                       placeholder="مثال: SY12345678"
-                      maxLength={20}
                     />
+                    <span className="field-hint">8-20 حرف/رقم (A-Z, 0-9)</span>
                   </div>
-                  <div className="form-group">
-                    <label>التخصص *</label>
+                  <div className="form-group-pro">
+                    <label>التخصص <span className="required">*</span></label>
                     <select
                       value={newDoctor.specialization}
-                      onChange={(e) => setNewDoctor(prev => ({ ...prev, specialization: e.target.value }))}
+                      onChange={(e) => setNewDoctor({...newDoctor, specialization: e.target.value})}
                     >
-                      <option value="">اختر التخصص...</option>
+                      <option value="">اختر التخصص</option>
                       {MEDICAL_SPECIALIZATIONS.map(spec => (
                         <option key={spec.id} value={spec.id}>
                           {spec.icon} {spec.nameAr}
@@ -2228,85 +2100,107 @@ const handleRejectRequest = async () => {
                       ))}
                     </select>
                   </div>
-                </div>
-
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>التخصص الفرعي (اختياري)</label>
+                  <div className="form-group-pro">
+                    <label>التخصص الفرعي</label>
                     <input
                       type="text"
                       value={newDoctor.subSpecialization}
-                      onChange={(e) => setNewDoctor(prev => ({ ...prev, subSpecialization: e.target.value }))}
-                      placeholder="مثال: جراحة القلب المفتوح"
+                      onChange={(e) => setNewDoctor({...newDoctor, subSpecialization: e.target.value})}
+                      placeholder="اختياري"
                     />
                   </div>
-                  <div className="form-group">
+                  <div className="form-group-pro">
                     <label>سنوات الخبرة</label>
                     <input
                       type="number"
                       value={newDoctor.yearsOfExperience}
-                      onChange={(e) => setNewDoctor(prev => ({ ...prev, yearsOfExperience: e.target.value }))}
+                      onChange={(e) => setNewDoctor({...newDoctor, yearsOfExperience: e.target.value})}
                       min="0"
                       max="60"
-                      placeholder="0"
+                      placeholder="0-60"
                     />
                   </div>
-                </div>
-
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>المستشفى / المركز الصحي *</label>
+                  <div className="form-group-pro span-2">
+                    <label>المستشفى / المركز الصحي <span className="required">*</span></label>
                     <input
                       type="text"
                       value={newDoctor.hospitalAffiliation}
-                      onChange={(e) => setNewDoctor(prev => ({ ...prev, hospitalAffiliation: e.target.value }))}
+                      onChange={(e) => setNewDoctor({...newDoctor, hospitalAffiliation: e.target.value})}
                       placeholder="أدخل اسم المستشفى أو المركز الصحي"
                     />
                   </div>
-                  <div className="form-group">
+                  <div className="form-group-pro span-2">
+                    <label>عنوان العيادة <span className="required">*</span></label>
+                    <textarea
+                      value={newDoctor.address}
+                      onChange={(e) => setNewDoctor({...newDoctor, address: e.target.value})}
+                      placeholder="أدخل عنوان العيادة بالتفصيل"
+                      rows={2}
+                    />
+                  </div>
+                  <div className="form-group-pro">
                     <label>رسوم الكشف (ل.س)</label>
                     <input
                       type="number"
                       value={newDoctor.consultationFee}
-                      onChange={(e) => setNewDoctor(prev => ({ ...prev, consultationFee: e.target.value }))}
+                      onChange={(e) => setNewDoctor({...newDoctor, consultationFee: e.target.value})}
                       min="0"
                       placeholder="0"
                     />
                   </div>
                 </div>
+              </div>
 
-                <div className="form-group full-width">
-                  <label>أيام العمل * (اختر يوم واحد على الأقل)</label>
-                  <div className="weekdays-grid">
-                    {WEEKDAYS.map(day => (
-                      <button
-                        key={day.id}
-                        type="button"
-                        className={`weekday-btn ${newDoctor.availableDays.includes(day.id) ? 'selected' : ''}`}
-                        onClick={() => handleDayToggle(day.id)}
-                      >
-                        {day.nameAr}
-                      </button>
-                    ))}
-                  </div>
+              {/* Working Days Section */}
+              <div className="form-section-pro">
+                <h4><span>📅</span> أيام العمل <span className="required">*</span></h4>
+                <div className="days-grid-pro">
+                  {WEEKDAYS.map(day => (
+                    <button
+                      key={day.id}
+                      type="button"
+                      className={`day-btn ${newDoctor.availableDays.includes(day.id) ? 'selected' : ''}`}
+                      onClick={() => handleDayToggle(day.id)}
+                    >
+                      <span className="day-name">{day.nameAr}</span>
+                      <span className="day-check">{newDoctor.availableDays.includes(day.id) ? '✓' : ''}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
+
+              {/* Email Preview */}
+              {newDoctor.firstName && newDoctor.lastName && newDoctor.medicalLicenseNumber && (
+                <div className="email-preview-pro">
+                  <span className="preview-label">البريد الإلكتروني المقترح:</span>
+                  <code>{generateDoctorEmail(newDoctor.firstName, newDoctor.lastName, newDoctor.medicalLicenseNumber)}</code>
+                </div>
+              )}
             </div>
 
-            <div className="form-actions">
+            <div className="form-footer-pro">
               <button 
-                className="cancel-btn"
+                className="btn-secondary-pro" 
                 onClick={() => setShowAddDoctorForm(false)}
-                disabled={addDoctorLoading}
               >
                 إلغاء
               </button>
               <button 
-                className="submit-btn"
+                className="btn-primary-pro"
                 onClick={handleAddDoctor}
                 disabled={addDoctorLoading}
               >
-                {addDoctorLoading ? 'جاري الإضافة...' : '➕ إضافة الطبيب'}
+                {addDoctorLoading ? (
+                  <>
+                    <span className="spinner-small"></span>
+                    جاري الإضافة...
+                  </>
+                ) : (
+                  <>
+                    <span>➕</span>
+                    إضافة الطبيب
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -2315,22 +2209,20 @@ const handleRejectRequest = async () => {
 
       {/* New Doctor Credentials Modal */}
       {newDoctorCredentials && (
-        <div className="modal-overlay">
-          <div className="modal-content credentials-modal">
-            <div className="modal-icon success">✅</div>
-            <h3 className="modal-title">تمت إضافة الطبيب بنجاح!</h3>
-            <p className="modal-subtitle">
-              تم إنشاء حساب للطبيب: <strong>{newDoctorCredentials.doctorName}</strong>
-            </p>
+        <div className="modal-overlay-pro">
+          <div className="modal-content-pro credentials-modal">
+            <div className="modal-icon-pro success">🎉</div>
+            <h3 className="modal-title-pro">تم إضافة الطبيب بنجاح</h3>
+            <p className="modal-subtitle">بيانات دخول الطبيب {newDoctorCredentials.doctorName}</p>
             
             <div className="credentials-box">
-              <h4>بيانات الدخول:</h4>
               <div className="credential-row">
                 <span className="credential-label">البريد الإلكتروني:</span>
                 <span className="credential-value">{newDoctorCredentials.email}</span>
                 <button 
-                  className="copy-btn"
+                  className="copy-btn-pro"
                   onClick={() => navigator.clipboard.writeText(newDoctorCredentials.email)}
+                  title="نسخ"
                 >
                   📋
                 </button>
@@ -2339,21 +2231,22 @@ const handleRejectRequest = async () => {
                 <span className="credential-label">كلمة المرور:</span>
                 <span className="credential-value password">{newDoctorCredentials.password}</span>
                 <button 
-                  className="copy-btn"
+                  className="copy-btn-pro"
                   onClick={() => navigator.clipboard.writeText(newDoctorCredentials.password)}
+                  title="نسخ"
                 >
                   📋
                 </button>
               </div>
             </div>
 
-            <div className="credentials-note">
-              <span>⚠️</span>
+            <div className="credentials-warning">
+              <span className="warning-icon">⚠️</span>
               <p>يرجى نسخ هذه البيانات وإرسالها للطبيب. لن تظهر مرة أخرى.</p>
             </div>
 
             <button 
-              className="modal-button primary"
+              className="modal-button-pro primary"
               onClick={() => {
                 setNewDoctorCredentials(null);
                 setShowAddDoctorForm(false);
@@ -2367,21 +2260,21 @@ const handleRejectRequest = async () => {
 
       {/* Deactivate Modal */}
       {showDeactivateModal && deactivateTarget && (
-        <div className="modal-overlay" onClick={() => setShowDeactivateModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-icon warning">🚫</div>
-            <h3 className="modal-title">إلغاء تفعيل الحساب</h3>
-            <p className="modal-message">
+        <div className="modal-overlay-pro" onClick={() => setShowDeactivateModal(false)}>
+          <div className="modal-content-pro" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-icon-pro warning">🚫</div>
+            <h3 className="modal-title-pro">إلغاء تفعيل الحساب</h3>
+            <p className="modal-message-pro">
               إلغاء تفعيل حساب {deactivateType === 'doctor' ? 'الطبيب' : 'المريض'}:<br />
               <strong>{deactivateTarget.firstName} {deactivateTarget.lastName}</strong>
             </p>
             
-            <div className="form-group">
+            <div className="form-group-pro">
               <label>سبب إلغاء التفعيل *</label>
               <select 
                 value={deactivateReason} 
                 onChange={(e) => setDeactivateReason(e.target.value)}
-                className="form-select"
+                className="form-select-pro"
               >
                 <option value="">اختر السبب...</option>
                 {DEACTIVATION_REASONS.map(reason => (
@@ -2392,26 +2285,26 @@ const handleRejectRequest = async () => {
               </select>
             </div>
 
-            <div className="form-group">
+            <div className="form-group-pro">
               <label>ملاحظات إضافية</label>
               <textarea
                 value={deactivateNotes}
                 onChange={(e) => setDeactivateNotes(e.target.value)}
                 placeholder="أدخل أي ملاحظات إضافية..."
                 rows={3}
-                className="form-textarea"
+                className="form-textarea-pro"
               />
             </div>
 
-            <div className="modal-buttons">
+            <div className="modal-buttons-pro">
               <button 
-                className="modal-button secondary" 
+                className="modal-button-pro secondary" 
                 onClick={() => setShowDeactivateModal(false)}
               >
                 إلغاء
               </button>
               <button 
-                className="modal-button danger"
+                className="modal-button-pro danger"
                 onClick={confirmDeactivation}
                 disabled={!deactivateReason}
               >
@@ -2424,43 +2317,43 @@ const handleRejectRequest = async () => {
 
       {/* Doctor Details Modal */}
       {showDoctorDetails && selectedDoctor && (
-        <div className="modal-overlay" onClick={() => setShowDoctorDetails(false)}>
-          <div className="modal-content large" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowDoctorDetails(false)}>✕</button>
-            <h3 className="modal-title">تفاصيل الطبيب</h3>
+        <div className="modal-overlay-pro" onClick={() => setShowDoctorDetails(false)}>
+          <div className="modal-content-pro large" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close-pro" onClick={() => setShowDoctorDetails(false)}>✕</button>
+            <h3 className="modal-title-pro">تفاصيل الطبيب</h3>
             
-            <div className="details-grid">
-              <div className="details-section">
+            <div className="details-grid-pro">
+              <div className="details-section-pro">
                 <h4><span>👤</span> المعلومات الشخصية</h4>
-                <div className="details-row">
+                <div className="details-row-pro">
                   <span className="label">الاسم:</span>
                   <span className="value">{selectedDoctor.firstName} {selectedDoctor.lastName}</span>
                 </div>
-                <div className="details-row">
+                <div className="details-row-pro">
                   <span className="label">الرقم الوطني:</span>
                   <span className="value">{selectedDoctor.nationalId}</span>
                 </div>
-                <div className="details-row">
+                <div className="details-row-pro">
                   <span className="label">الجنس:</span>
                   <span className="value">{selectedDoctor.gender === 'male' ? 'ذكر' : 'أنثى'}</span>
                 </div>
-                <div className="details-row">
+                <div className="details-row-pro">
                   <span className="label">رقم الهاتف:</span>
                   <span className="value">{selectedDoctor.phoneNumber}</span>
                 </div>
-                <div className="details-row">
+                <div className="details-row-pro">
                   <span className="label">البريد الإلكتروني:</span>
                   <span className="value">{selectedDoctor.email}</span>
                 </div>
               </div>
 
-              <div className="details-section">
+              <div className="details-section-pro">
                 <h4><span>🏥</span> المعلومات المهنية</h4>
-                <div className="details-row">
+                <div className="details-row-pro">
                   <span className="label">رقم الترخيص:</span>
                   <span className="value">{selectedDoctor.medicalLicenseNumber}</span>
                 </div>
-                <div className="details-row">
+                <div className="details-row-pro">
                   <span className="label">التخصص:</span>
                   <span className="value">
                     {(() => {
@@ -2469,19 +2362,19 @@ const handleRejectRequest = async () => {
                     })()}
                   </span>
                 </div>
-                <div className="details-row">
+                <div className="details-row-pro">
                   <span className="label">المستشفى:</span>
                   <span className="value">{selectedDoctor.hospitalAffiliation}</span>
                 </div>
-                <div className="details-row">
+                <div className="details-row-pro">
                   <span className="label">سنوات الخبرة:</span>
                   <span className="value">{selectedDoctor.yearsOfExperience} سنة</span>
                 </div>
               </div>
             </div>
 
-            <div className="modal-footer">
-              <span className={`status-badge ${selectedDoctor.isActive !== false ? 'active' : 'inactive'}`}>
+            <div className="modal-footer-pro">
+              <span className={`status-badge-large ${selectedDoctor.isActive !== false ? 'active' : 'inactive'}`}>
                 {selectedDoctor.isActive !== false ? '✅ نشط' : '❌ غير نشط'}
               </span>
             </div>
@@ -2491,58 +2384,166 @@ const handleRejectRequest = async () => {
 
       {/* Patient Details Modal */}
       {showPatientDetails && selectedPatient && (
-        <div className="modal-overlay" onClick={() => setShowPatientDetails(false)}>
-          <div className="modal-content large" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close" onClick={() => setShowPatientDetails(false)}>✕</button>
-            <h3 className="modal-title">تفاصيل المريض</h3>
+        <div className="modal-overlay-pro" onClick={() => setShowPatientDetails(false)}>
+          <div className="modal-content-pro large" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close-pro" onClick={() => setShowPatientDetails(false)}>✕</button>
+            <h3 className="modal-title-pro">تفاصيل المريض</h3>
             
-            <div className="details-grid">
-              <div className="details-section">
+            <div className="details-grid-pro">
+              <div className="details-section-pro">
                 <h4><span>👤</span> المعلومات الشخصية</h4>
-                <div className="details-row">
+                <div className="details-row-pro">
                   <span className="label">الاسم:</span>
                   <span className="value">{selectedPatient.firstName} {selectedPatient.lastName}</span>
                 </div>
-                <div className="details-row">
+                <div className="details-row-pro">
                   <span className="label">الرقم الوطني:</span>
                   <span className="value">{selectedPatient.nationalId || selectedPatient.childId || '-'}</span>
                 </div>
-                <div className="details-row">
+                <div className="details-row-pro">
                   <span className="label">الجنس:</span>
                   <span className="value">{selectedPatient.gender === 'male' ? 'ذكر' : 'أنثى'}</span>
                 </div>
-                <div className="details-row">
+                <div className="details-row-pro">
                   <span className="label">تاريخ الميلاد:</span>
                   <span className="value">{formatDate(selectedPatient.dateOfBirth)}</span>
                 </div>
-                <div className="details-row">
+                <div className="details-row-pro">
                   <span className="label">رقم الهاتف:</span>
                   <span className="value">{selectedPatient.phoneNumber || '-'}</span>
                 </div>
               </div>
 
-              <div className="details-section">
+              <div className="details-section-pro">
                 <h4><span>🏥</span> المعلومات الصحية</h4>
-                <div className="details-row">
+                <div className="details-row-pro">
                   <span className="label">فصيلة الدم:</span>
                   <span className="value">{selectedPatient.bloodType || '-'}</span>
                 </div>
-                <div className="details-row">
+                <div className="details-row-pro">
                   <span className="label">الطول:</span>
                   <span className="value">{selectedPatient.height ? `${selectedPatient.height} سم` : '-'}</span>
                 </div>
-                <div className="details-row">
+                <div className="details-row-pro">
                   <span className="label">الوزن:</span>
                   <span className="value">{selectedPatient.weight ? `${selectedPatient.weight} كغ` : '-'}</span>
                 </div>
               </div>
             </div>
 
-            <div className="modal-footer">
-              <span className={`status-badge ${selectedPatient.isActive !== false ? 'active' : 'inactive'}`}>
+            <div className="modal-footer-pro">
+              <span className={`status-badge-large ${selectedPatient.isActive !== false ? 'active' : 'inactive'}`}>
                 {selectedPatient.isActive !== false ? '✅ نشط' : '❌ غير نشط'}
               </span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Request Details Modal */}
+      {showRequestDetails && selectedRequest && (
+        <div className="modal-overlay-pro" onClick={() => setShowRequestDetails(false)}>
+          <div className="modal-content-pro large" onClick={(e) => e.stopPropagation()}>
+            <button className="modal-close-pro" onClick={() => setShowRequestDetails(false)}>✕</button>
+            
+            <div className="request-details-header-pro">
+              <div className="request-header-main">
+                <h2>تفاصيل طلب التسجيل</h2>
+                <span className={`status-pill large status-${selectedRequest.requestInfo?.status}`}>
+                  {selectedRequest.requestInfo?.status === 'pending' && '⏳ قيد المراجعة'}
+                  {selectedRequest.requestInfo?.status === 'accepted' && '✅ تم القبول'}
+                  {selectedRequest.requestInfo?.status === 'rejected' && '❌ مرفوض'}
+                </span>
+              </div>
+              <p className="request-id-pro">رقم الطلب: {selectedRequest.requestId || selectedRequest._id}</p>
+            </div>
+
+            <div className="details-grid-pro">
+              {/* Personal Info */}
+              <div className="details-section-pro">
+                <h4><span>👤</span> المعلومات الشخصية</h4>
+                <div className="details-row-pro">
+                  <span className="label">الاسم الكامل:</span>
+                  <span className="value">{selectedRequest.personalInfo?.firstName} {selectedRequest.personalInfo?.lastName}</span>
+                </div>
+                <div className="details-row-pro">
+                  <span className="label">الرقم الوطني:</span>
+                  <span className="value">{selectedRequest.personalInfo?.nationalId}</span>
+                </div>
+                <div className="details-row-pro">
+                  <span className="label">تاريخ الميلاد:</span>
+                  <span className="value">{formatDate(selectedRequest.personalInfo?.dateOfBirth)}</span>
+                </div>
+                <div className="details-row-pro">
+                  <span className="label">الجنس:</span>
+                  <span className="value">{selectedRequest.personalInfo?.gender === 'male' ? 'ذكر' : 'أنثى'}</span>
+                </div>
+                <div className="details-row-pro">
+                  <span className="label">رقم الهاتف:</span>
+                  <span className="value">{selectedRequest.personalInfo?.phoneNumber}</span>
+                </div>
+                <div className="details-row-pro">
+                  <span className="label">البريد الإلكتروني:</span>
+                  <span className="value">{selectedRequest.accountInfo?.email}</span>
+                </div>
+                <div className="details-row-pro">
+                  <span className="label">المحافظة:</span>
+                  <span className="value">{getGovernorateName(selectedRequest.personalInfo?.governorate)}</span>
+                </div>
+              </div>
+
+              {/* Professional Info */}
+              <div className="details-section-pro">
+                <h4><span>🏥</span> المعلومات المهنية</h4>
+                <div className="details-row-pro">
+                  <span className="label">رقم الترخيص:</span>
+                  <span className="value">{selectedRequest.doctorInfo?.medicalLicenseNumber}</span>
+                </div>
+                <div className="details-row-pro">
+                  <span className="label">التخصص:</span>
+                  <span className="value">
+                    {(() => {
+                      const spec = getSpecializationInfo(selectedRequest.doctorInfo?.specialization);
+                      return `${spec.icon} ${spec.nameAr}`;
+                    })()}
+                  </span>
+                </div>
+                <div className="details-row-pro">
+                  <span className="label">المستشفى:</span>
+                  <span className="value">{selectedRequest.doctorInfo?.hospitalAffiliation}</span>
+                </div>
+                <div className="details-row-pro">
+                  <span className="label">سنوات الخبرة:</span>
+                  <span className="value">{selectedRequest.doctorInfo?.yearsOfExperience} سنة</span>
+                </div>
+                <div className="details-row-pro">
+                  <span className="label">تاريخ الطلب:</span>
+                  <span className="value">{formatDateTime(selectedRequest.requestInfo?.submittedAt)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons for Pending Requests */}
+            {selectedRequest.requestInfo?.status === 'pending' && (
+              <div className="request-actions-pro">
+                <button 
+                  className="btn-success-pro"
+                  onClick={() => {
+                    setShowAcceptConfirm(true);
+                  }}
+                >
+                  <span>✅</span> قبول الطلب
+                </button>
+                <button 
+                  className="btn-danger-pro"
+                  onClick={() => {
+                    setShowRejectModal(true);
+                  }}
+                >
+                  <span>❌</span> رفض الطلب
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

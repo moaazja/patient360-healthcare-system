@@ -31,6 +31,38 @@ router.post('/register-doctor',
 // Login
 router.post('/login', security.loginLimiter, authController.login);
 
+// ==================== FORGET PASSWORD ROUTES ====================
+
+/**
+ * @route   POST /api/auth/forgot-password
+ * @desc    Send OTP to email
+ * @access  Public
+ */
+router.post('/forgot-password', 
+  security.loginLimiter,
+  authController.forgotPassword
+);
+
+/**
+ * @route   POST /api/auth/verify-otp
+ * @desc    Verify OTP code
+ * @access  Public
+ */
+router.post('/verify-otp', 
+  security.loginLimiter,
+  authController.verifyOTP
+);
+
+/**
+ * @route   POST /api/auth/reset-password
+ * @desc    Reset password with OTP
+ * @access  Public
+ */
+router.post('/reset-password', 
+  security.loginLimiter,
+  authController.resetPassword
+);
+
 // ==================== PROTECTED ROUTES ====================
 
 // Verify token

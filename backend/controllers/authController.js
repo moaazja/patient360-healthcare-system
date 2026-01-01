@@ -5,6 +5,9 @@ const Patient = require('../models/Patient');
 const Doctor = require('../models/Doctor');
 const Admin = require('../models/Admin');
 
+// ✅ FORGET PASSWORD: Import email utilities
+const { sendEmail, generateOTP, createOTPEmailTemplate } = require('../utils/sendEmail');
+
 // Generate JWT Token
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
@@ -869,6 +872,312 @@ const doctorRequest = await DoctorRequest.create({
     res.status(500).json({
       success: false,
       message: 'حدث خطأ أثناء إرسال طلب التسجيل'
+    });
+  }
+};
+// ==========================================
+// FORGET PASSWORD FUNCTIONS
+// ==========================================
+
+/**
+ * @route   POST /api/auth/forgot-password
+ * @desc    Send OTP to user's email
+ * @access  Public
+ */
+exports.forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    console.log('🔵 ========== FORGOT PASSWORD REQUEST ==========');
+    console.log('📧 Email:', email);
+
+    // Validate email
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'البريد الإلكتروني مطلوب'
+      });
+    }
+
+    // Find account
+    const account = await Account.findOne({ email: email.toLowerCase() });
+    
+    if (!account) {
+      // ⚠️ Security: Don't reveal if email exists
+      return res.json({
+        success: true,
+        message: 'إذا كان البريد الإلكتروني مسجلاً، سيتم إرسال رمز التحقق'
+      });
+    }
+
+    // Check if account is active
+    if (!account.isActive) {
+      return res.status(403).json({
+        success: false,
+        message: 'الحساب غير نشط. يرجى التواصل مع الإدارة'
+      });
+    }
+
+    // Generate 6-digit OTP
+    const otp = generateOTP();
+    console.log('🔢 Generated OTP:', otp);
+
+    // Save OTP and expiry time (10 minutes)
+    account.resetPasswordOTP = otp;
+    account.resetPasswordExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+    await account.save();
+
+    // Create email template
+    const emailHTML = createOTPEmailTemplate(otp, email);
+
+    // Send email
+    try {
+      await sendEmail({
+        email: account.email,
+        subject: 'رمز استعادة كلمة المرور - Patient 360°',
+        message: emailHTML
+      });
+
+      console.log('✅ OTP email sent successfully');
+      console.log('✅ ==========================================');
+
+      res.json({
+        success: true,
+        message: 'تم إرسال رمز التحقق إلى بريدك الإلكتروني'
+      });
+
+    } catch (emailError) {
+      console.error('❌ Failed to send email:', emailError);
+      
+      // Clear OTP if email fails
+      account.resetPasswordOTP = null;
+      account.resetPasswordExpires = null;
+      await account.save();
+
+      return res.status(500).json({
+        success: false,
+        message: 'فشل إرسال البريد الإلكتروني. يرجى المحاولة لاحقاً'
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Forgot password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في النظام'
+    });
+  }
+};
+
+/**
+ * @route   POST /api/auth/verify-otp
+ * @desc    Verify OTP code
+ * @access  Public
+ */
+exports.verifyOTP = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+
+    console.log('🔵 ========== VERIFY OTP REQUEST ==========');
+    console.log('📧 Email:', email);
+    console.log('🔢 OTP received:', otp);
+    console.log('🔢 OTP type:', typeof otp);
+
+    // Validate inputs
+    if (!email || !otp) {
+      return res.status(400).json({
+        success: false,
+        message: 'البريد الإلكتروني ورمز التحقق مطلوبان'
+      });
+    }
+
+    // Convert OTP to string and trim
+    const otpString = String(otp).trim();
+    console.log('🔢 OTP after trim:', otpString);
+
+    // Find account
+    const account = await Account.findOne({ 
+      email: email.toLowerCase()
+    });
+
+    if (!account) {
+      console.log('❌ Account not found');
+      return res.status(400).json({
+        success: false,
+        message: 'البريد الإلكتروني غير صحيح'
+      });
+    }
+
+    console.log('🔢 OTP in database:', account.resetPasswordOTP);
+    console.log('⏰ OTP expires at:', account.resetPasswordExpires);
+    console.log('⏰ Current time:', new Date());
+
+    // Check if OTP exists
+    if (!account.resetPasswordOTP) {
+      console.log('❌ No OTP found in database');
+      return res.status(400).json({
+        success: false,
+        message: 'لم يتم طلب رمز تحقق. يرجى طلب رمز جديد'
+      });
+    }
+
+    // Check if OTP expired
+    if (account.resetPasswordExpires < Date.now()) {
+      console.log('❌ OTP expired');
+      // Clear expired OTP
+      account.resetPasswordOTP = null;
+      account.resetPasswordExpires = null;
+      await account.save();
+
+      return res.status(400).json({
+        success: false,
+        message: 'انتهت صلاحية رمز التحقق. يرجى طلب رمز جديد'
+      });
+    }
+
+    // Compare OTPs
+    const isMatch = account.resetPasswordOTP === otpString;
+    console.log('🔐 OTP Match:', isMatch);
+
+    if (!isMatch) {
+      console.log('❌ OTP does not match');
+      return res.status(400).json({
+        success: false,
+        message: 'رمز التحقق غير صحيح'
+      });
+    }
+
+    console.log('✅ OTP verified successfully');
+    console.log('✅ ==========================================');
+
+    res.json({
+      success: true,
+      message: 'تم التحقق من الرمز بنجاح'
+    });
+
+  } catch (error) {
+    console.error('❌ Verify OTP error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في التحقق'
+    });
+  }
+};
+
+/**
+ * @route   POST /api/auth/reset-password
+ * @desc    Reset password with verified OTP
+ * @access  Public
+ */
+exports.resetPassword = async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+
+    console.log('🔵 ========== RESET PASSWORD REQUEST ==========');
+    console.log('📧 Email:', email);
+    console.log('🔢 OTP received:', otp);
+
+    // Validate inputs
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'جميع الحقول مطلوبة'
+      });
+    }
+
+    // Validate password length
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: 'كلمة المرور يجب أن تكون 8 أحرف على الأقل'
+      });
+    }
+
+    // Convert OTP to string and trim
+    const otpString = String(otp).trim();
+
+    // Find account
+    const account = await Account.findOne({ 
+      email: email.toLowerCase()
+    });
+
+    if (!account) {
+      console.log('❌ Account not found');
+      return res.status(400).json({
+        success: false,
+        message: 'البريد الإلكتروني غير صحيح'
+      });
+    }
+
+    console.log('🔢 OTP in database:', account.resetPasswordOTP);
+    console.log('🔢 OTP provided:', otpString);
+
+    // Check if OTP exists
+    if (!account.resetPasswordOTP) {
+      console.log('❌ No OTP in database');
+      return res.status(400).json({
+        success: false,
+        message: 'لم يتم التحقق من رمز التحقق. يرجى المحاولة مرة أخرى'
+      });
+    }
+
+    // Check if OTP expired
+    if (account.resetPasswordExpires < Date.now()) {
+      console.log('❌ OTP expired');
+      // Clear expired OTP
+      account.resetPasswordOTP = null;
+      account.resetPasswordExpires = null;
+      await account.save();
+
+      return res.status(400).json({
+        success: false,
+        message: 'انتهت صلاحية رمز التحقق'
+      });
+    }
+
+    // Compare OTPs
+    const isMatch = account.resetPasswordOTP === otpString;
+    console.log('🔐 OTP Match:', isMatch);
+
+    if (!isMatch) {
+      console.log('❌ OTP does not match');
+      return res.status(400).json({
+        success: false,
+        message: 'رمز التحقق غير صحيح'
+      });
+    }
+
+    // Update password (will be hashed by pre-save middleware)
+    account.password = newPassword;
+    
+    // Clear OTP fields
+    account.resetPasswordOTP = null;
+    account.resetPasswordExpires = null;
+    
+    await account.save();
+
+    console.log('✅ Password reset successfully');
+    console.log('✅ ==========================================');
+
+    res.json({
+      success: true,
+      message: 'تم تغيير كلمة المرور بنجاح'
+    });
+
+  } catch (error) {
+    console.error('❌ Reset password error:', error);
+    
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: errors[0] || 'خطأ في البيانات المدخلة'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في تغيير كلمة المرور'
     });
   }
 };

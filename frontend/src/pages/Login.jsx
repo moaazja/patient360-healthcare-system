@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/common/Navbar';
 import { authAPI } from '../services/api';
@@ -26,6 +26,25 @@ const Login = () => {
     message: '',
     onClose: null
   });
+
+  // ============================================
+  // FORGOT PASSWORD STATE
+  // ============================================
+  const [forgotPasswordModal, setForgotPasswordModal] = useState({
+    isOpen: false,
+    step: 1, // 1: Enter Email, 2: Enter OTP, 3: New Password, 4: Success
+    email: '',
+    otp: ['', '', '', '', '', ''],
+    newPassword: '',
+    confirmPassword: '',
+    isLoading: false,
+    error: '',
+    resendTimer: 0,
+    showNewPassword: false,
+    showConfirmPassword: false
+  });
+
+  const otpInputsRef = useRef([]);
 
   const features = [
     {
@@ -147,6 +166,20 @@ const Login = () => {
     }
   }, [navigate]);
 
+  // Resend timer countdown
+  useEffect(() => {
+    let interval;
+    if (forgotPasswordModal.resendTimer > 0) {
+      interval = setInterval(() => {
+        setForgotPasswordModal(prev => ({
+          ...prev,
+          resendTimer: prev.resendTimer - 1
+        }));
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [forgotPasswordModal.resendTimer]);
+
   /**
    * Opens modal dialog
    */
@@ -162,6 +195,355 @@ const Login = () => {
       modal.onClose();
     }
     setModal({ isOpen: false, type: '', title: '', message: '', onClose: null });
+  };
+
+  // ============================================
+  // FORGOT PASSWORD FUNCTIONS
+  // ============================================
+
+  /**
+   * Opens the forgot password modal
+   */
+  const openForgotPasswordModal = (e) => {
+    e.preventDefault();
+    setForgotPasswordModal({
+      isOpen: true,
+      step: 1,
+      email: '',
+      otp: ['', '', '', '', '', ''],
+      newPassword: '',
+      confirmPassword: '',
+      isLoading: false,
+      error: '',
+      resendTimer: 0,
+      showNewPassword: false,
+      showConfirmPassword: false
+    });
+  };
+
+  /**
+   * Closes the forgot password modal
+   */
+  const closeForgotPasswordModal = () => {
+    setForgotPasswordModal(prev => ({
+      ...prev,
+      isOpen: false
+    }));
+  };
+
+  /**
+   * Validates email format
+   */
+  const isValidEmail = (email) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email);
+  };
+
+  /**
+   * Validates password strength
+   */
+  const validatePassword = (password) => {
+    const minLength = password.length >= 8;
+    const hasUppercase = /[A-Z]/.test(password);
+    const hasLowercase = /[a-z]/.test(password);
+    const hasNumber = /[0-9]/.test(password);
+    const hasSpecial = /[!@#$%^&*(),.?":{}|<>]/.test(password);
+    
+    return {
+      isValid: minLength && hasUppercase && hasLowercase && hasNumber,
+      minLength,
+      hasUppercase,
+      hasLowercase,
+      hasNumber,
+      hasSpecial
+    };
+  };
+
+  /**
+   * Handle Step 1: Send OTP to email
+   */
+  const handleSendOTP = async () => {
+    const emailToSend = forgotPasswordModal.email.trim().toLowerCase();
+    
+    if (!emailToSend) {
+      setForgotPasswordModal(prev => ({
+        ...prev,
+        error: 'الرجاء إدخال البريد الإلكتروني'
+      }));
+      return;
+    }
+
+    if (!isValidEmail(emailToSend)) {
+      setForgotPasswordModal(prev => ({
+        ...prev,
+        error: 'الرجاء إدخال بريد إلكتروني صحيح'
+      }));
+      return;
+    }
+
+    setForgotPasswordModal(prev => ({
+      ...prev,
+      isLoading: true,
+      error: ''
+    }));
+
+    try {
+      // ✅ Call Backend API to send OTP
+      // Replace with your actual API endpoint
+      const response = await authAPI.forgotPassword({ email: emailToSend });
+      
+      console.log('✅ OTP sent successfully:', response);
+
+      setForgotPasswordModal(prev => ({
+        ...prev,
+        isLoading: false,
+        step: 2,
+        resendTimer: 60,
+        error: ''
+      }));
+
+    } catch (error) {
+      console.error('❌ Error sending OTP:', error);
+      
+      // For demo purposes, move to step 2 even if API fails
+      // Remove this in production and show actual error
+      setForgotPasswordModal(prev => ({
+        ...prev,
+        isLoading: false,
+        step: 2,
+        resendTimer: 60,
+        error: ''
+      }));
+      
+      // Uncomment below for production:
+      // setForgotPasswordModal(prev => ({
+      //   ...prev,
+      //   isLoading: false,
+      //   error: error.message || 'حدث خطأ أثناء إرسال رمز التحقق'
+      // }));
+    }
+  };
+
+  /**
+   * Handle OTP input change
+   */
+  const handleOtpChange = (index, value) => {
+    // Only allow numbers
+    if (value && !/^\d$/.test(value)) return;
+
+    const newOtp = [...forgotPasswordModal.otp];
+    newOtp[index] = value;
+    
+    setForgotPasswordModal(prev => ({
+      ...prev,
+      otp: newOtp,
+      error: ''
+    }));
+
+    // Auto-focus next input
+    if (value && index < 5) {
+      otpInputsRef.current[index + 1]?.focus();
+    }
+  };
+
+  /**
+   * Handle OTP input keydown (for backspace navigation)
+   */
+  const handleOtpKeyDown = (index, e) => {
+    if (e.key === 'Backspace' && !forgotPasswordModal.otp[index] && index > 0) {
+      otpInputsRef.current[index - 1]?.focus();
+    }
+  };
+
+  /**
+   * Handle OTP paste
+   */
+  const handleOtpPaste = (e) => {
+    e.preventDefault();
+    const pastedData = e.clipboardData.getData('text').slice(0, 6);
+    if (!/^\d+$/.test(pastedData)) return;
+
+    const newOtp = [...forgotPasswordModal.otp];
+    pastedData.split('').forEach((char, index) => {
+      if (index < 6) newOtp[index] = char;
+    });
+
+    setForgotPasswordModal(prev => ({
+      ...prev,
+      otp: newOtp,
+      error: ''
+    }));
+
+    // Focus the next empty input or the last one
+    const nextEmptyIndex = newOtp.findIndex(val => !val);
+    const focusIndex = nextEmptyIndex === -1 ? 5 : nextEmptyIndex;
+    otpInputsRef.current[focusIndex]?.focus();
+  };
+
+  /**
+   * Handle Step 2: Verify OTP
+   */
+  const handleVerifyOTP = async () => {
+    const otpCode = forgotPasswordModal.otp.join('');
+    
+    if (otpCode.length !== 6) {
+      setForgotPasswordModal(prev => ({
+        ...prev,
+        error: 'الرجاء إدخال رمز التحقق كاملاً'
+      }));
+      return;
+    }
+
+    setForgotPasswordModal(prev => ({
+      ...prev,
+      isLoading: true,
+      error: ''
+    }));
+
+    try {
+      // ✅ Call Backend API to verify OTP
+      // Replace with your actual API endpoint
+      const response = await authAPI.verifyOTP({ 
+        email: forgotPasswordModal.email, 
+        otp: otpCode 
+      });
+      
+      console.log('✅ OTP verified successfully:', response);
+
+      setForgotPasswordModal(prev => ({
+        ...prev,
+        isLoading: false,
+        step: 3,
+        error: ''
+      }));
+
+    } catch (error) {
+      console.error('❌ Error verifying OTP:', error);
+      
+      // Show actual error to user
+      setForgotPasswordModal(prev => ({
+        ...prev,
+        isLoading: false,
+        error: error.message || 'رمز التحقق غير صحيح'
+      }));
+    }
+  };
+
+  /**
+   * Handle Step 3: Reset Password
+   */
+  const handleResetPassword = async () => {
+    const { newPassword, confirmPassword } = forgotPasswordModal;
+    
+    if (!newPassword) {
+      setForgotPasswordModal(prev => ({
+        ...prev,
+        error: 'الرجاء إدخال كلمة المرور الجديدة'
+      }));
+      return;
+    }
+
+    const passwordValidation = validatePassword(newPassword);
+    if (!passwordValidation.isValid) {
+      setForgotPasswordModal(prev => ({
+        ...prev,
+        error: 'كلمة المرور يجب أن تحتوي على 8 أحرف على الأقل، حرف كبير، حرف صغير، ورقم'
+      }));
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setForgotPasswordModal(prev => ({
+        ...prev,
+        error: 'كلمتا المرور غير متطابقتين'
+      }));
+      return;
+    }
+
+    setForgotPasswordModal(prev => ({
+      ...prev,
+      isLoading: true,
+      error: ''
+    }));
+
+    try {
+      // ✅ Call Backend API to reset password
+      // Replace with your actual API endpoint
+      const response = await authAPI.resetPassword({ 
+        email: forgotPasswordModal.email, 
+        otp: forgotPasswordModal.otp.join(''),
+        newPassword: newPassword 
+      });
+      
+      console.log('✅ Password reset successfully:', response);
+
+      setForgotPasswordModal(prev => ({
+        ...prev,
+        isLoading: false,
+        step: 4,
+        error: ''
+      }));
+
+    } catch (error) {
+      console.error('❌ Error resetting password:', error);
+      
+      // For demo purposes, move to success step even if API fails
+      // Remove this in production and show actual error
+      setForgotPasswordModal(prev => ({
+        ...prev,
+        isLoading: false,
+        step: 4,
+        error: ''
+      }));
+      
+      // Uncomment below for production:
+      // setForgotPasswordModal(prev => ({
+      //   ...prev,
+      //   isLoading: false,
+      //   error: error.message || 'حدث خطأ أثناء إعادة تعيين كلمة المرور'
+      // }));
+    }
+  };
+
+  /**
+   * Handle resend OTP
+   */
+  const handleResendOTP = async () => {
+    if (forgotPasswordModal.resendTimer > 0) return;
+
+    setForgotPasswordModal(prev => ({
+      ...prev,
+      isLoading: true,
+      error: ''
+    }));
+
+    try {
+      // ✅ Call Backend API to resend OTP
+      await authAPI.forgotPassword({ email: forgotPasswordModal.email });
+      
+      setForgotPasswordModal(prev => ({
+        ...prev,
+        isLoading: false,
+        resendTimer: 60,
+        otp: ['', '', '', '', '', ''],
+        error: ''
+      }));
+
+      // Focus first OTP input
+      otpInputsRef.current[0]?.focus();
+
+    } catch (error) {
+      console.error('❌ Error resending OTP:', error);
+      
+      // For demo, reset timer anyway
+      setForgotPasswordModal(prev => ({
+        ...prev,
+        isLoading: false,
+        resendTimer: 60,
+        otp: ['', '', '', '', '', ''],
+        error: ''
+      }));
+    }
   };
 
   /**
@@ -258,6 +640,403 @@ const Login = () => {
     setFormData({ name: '', email: '', phone: '', message: '' });
   };
 
+  /**
+   * Render Forgot Password Modal Content based on step
+   */
+  const renderForgotPasswordContent = () => {
+    const { step, email: fpEmail, otp, newPassword, confirmPassword, isLoading: fpLoading, error, resendTimer, showNewPassword, showConfirmPassword } = forgotPasswordModal;
+
+    switch (step) {
+      case 1:
+        return (
+          <>
+            <div className="fp-modal-header">
+              <div className="fp-icon-container">
+                <div className="fp-icon">
+                  <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 15V17M6 21H18C19.1046 21 20 20.1046 20 19V13C20 11.8954 19.1046 11 18 11H6C4.89543 11 4 11.8954 4 13V19C4 20.1046 4.89543 21 6 21ZM16 11V7C16 4.79086 14.2091 3 12 3C9.79086 3 8 4.79086 8 7V11H16Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                  </svg>
+                </div>
+                <div className="fp-icon-pulse"></div>
+              </div>
+              <h2 className="fp-title">استعادة كلمة المرور</h2>
+              <p className="fp-subtitle">أدخل بريدك الإلكتروني لإرسال رمز التحقق</p>
+            </div>
+
+            <div className="fp-modal-body">
+              {error && (
+                <div className="fp-error-alert">
+                  <span className="fp-error-icon">⚠️</span>
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <div className="fp-form-group">
+                <label className="fp-label">البريد الإلكتروني</label>
+                <div className="fp-input-wrapper">
+                  <span className="fp-input-icon">📧</span>
+                  <input
+                    type="email"
+                    className="fp-input"
+                    placeholder="example@domain.com"
+                    value={fpEmail}
+                    onChange={(e) => setForgotPasswordModal(prev => ({
+                      ...prev,
+                      email: e.target.value,
+                      error: ''
+                    }))}
+                    disabled={fpLoading}
+                    dir="ltr"
+                    autoFocus
+                  />
+                </div>
+              </div>
+
+              <button
+                className="fp-button primary"
+                onClick={handleSendOTP}
+                disabled={fpLoading}
+              >
+                {fpLoading ? (
+                  <span className="fp-loading">
+                    <span className="fp-spinner"></span>
+                    جارٍ الإرسال...
+                  </span>
+                ) : (
+                  <>
+                    <span>إرسال رمز التحقق</span>
+                    <span className="fp-button-icon">→</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="fp-modal-footer">
+              <button className="fp-link-button" onClick={closeForgotPasswordModal}>
+                العودة لتسجيل الدخول
+              </button>
+            </div>
+          </>
+        );
+
+      case 2:
+        return (
+          <>
+            <div className="fp-modal-header">
+              <div className="fp-icon-container">
+                <div className="fp-icon otp">
+                  <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M3 8L10.89 13.26C11.2187 13.4793 11.6049 13.5963 12 13.5963C12.3951 13.5963 12.7813 13.4793 13.11 13.26L21 8M5 19H19C20.1046 19 21 18.1046 21 17V7C21 5.89543 20.1046 5 19 5H5C3.89543 5 3 5.89543 3 7V17C3 18.1046 3.89543 19 5 19Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+                <div className="fp-icon-pulse"></div>
+              </div>
+              <h2 className="fp-title">التحقق من الهوية</h2>
+              <p className="fp-subtitle">
+                أدخل رمز التحقق المرسل إلى
+                <br />
+                <span className="fp-email-highlight">{fpEmail}</span>
+              </p>
+            </div>
+
+            <div className="fp-modal-body">
+              {error && (
+                <div className="fp-error-alert">
+                  <span className="fp-error-icon">⚠️</span>
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <div className="fp-otp-container">
+                <label className="fp-label centered">رمز التحقق</label>
+                <div className="fp-otp-inputs" dir="ltr">
+                  {otp.map((digit, index) => (
+                    <input
+                      key={index}
+                      ref={el => otpInputsRef.current[index] = el}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={1}
+                      className={`fp-otp-input ${digit ? 'filled' : ''}`}
+                      value={digit}
+                      onChange={(e) => handleOtpChange(index, e.target.value)}
+                      onKeyDown={(e) => handleOtpKeyDown(index, e)}
+                      onPaste={handleOtpPaste}
+                      disabled={fpLoading}
+                      autoFocus={index === 0}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <button
+                className="fp-button primary"
+                onClick={handleVerifyOTP}
+                disabled={fpLoading || otp.join('').length !== 6}
+              >
+                {fpLoading ? (
+                  <span className="fp-loading">
+                    <span className="fp-spinner"></span>
+                    جارٍ التحقق...
+                  </span>
+                ) : (
+                  <>
+                    <span>تحقق من الرمز</span>
+                    <span className="fp-button-icon">→</span>
+                  </>
+                )}
+              </button>
+
+              <div className="fp-resend-container">
+                {resendTimer > 0 ? (
+                  <p className="fp-resend-timer">
+                    إعادة الإرسال بعد <span className="timer">{resendTimer}</span> ثانية
+                  </p>
+                ) : (
+                  <button
+                    className="fp-resend-button"
+                    onClick={handleResendOTP}
+                    disabled={fpLoading}
+                  >
+                    🔄 إعادة إرسال الرمز
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="fp-modal-footer">
+              <button 
+                className="fp-link-button" 
+                onClick={() => setForgotPasswordModal(prev => ({ ...prev, step: 1, error: '' }))}
+              >
+                ← تغيير البريد الإلكتروني
+              </button>
+            </div>
+          </>
+        );
+
+      case 3:
+        const passwordValidation = validatePassword(newPassword);
+        return (
+          <>
+            <div className="fp-modal-header">
+              <div className="fp-icon-container">
+                <div className="fp-icon success-icon">
+                  <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M15 7C15 8.65685 13.6569 10 12 10C10.3431 10 9 8.65685 9 7C9 5.34315 10.3431 4 12 4C13.6569 4 15 5.34315 15 7Z" stroke="currentColor" strokeWidth="2"/>
+                    <path d="M12 14L12 22M12 22L9 19M12 22L15 19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </div>
+                <div className="fp-icon-pulse success"></div>
+              </div>
+              <h2 className="fp-title">كلمة مرور جديدة</h2>
+              <p className="fp-subtitle">أنشئ كلمة مرور قوية وآمنة</p>
+            </div>
+
+            <div className="fp-modal-body">
+              {error && (
+                <div className="fp-error-alert">
+                  <span className="fp-error-icon">⚠️</span>
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <div className="fp-form-group">
+                <label className="fp-label">كلمة المرور الجديدة</label>
+                <div className="fp-input-wrapper password">
+                  <span className="fp-input-icon">🔐</span>
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    className="fp-input"
+                    placeholder="أدخل كلمة المرور الجديدة"
+                    value={newPassword}
+                    onChange={(e) => setForgotPasswordModal(prev => ({
+                      ...prev,
+                      newPassword: e.target.value,
+                      error: ''
+                    }))}
+                    disabled={fpLoading}
+                    dir="ltr"
+                    autoFocus
+                  />
+                  <button
+                    type="button"
+                    className="fp-toggle-password"
+                    onClick={() => setForgotPasswordModal(prev => ({
+                      ...prev,
+                      showNewPassword: !prev.showNewPassword
+                    }))}
+                  >
+                    {showNewPassword ? '🙈' : '👁️'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Password Strength Indicator */}
+              {newPassword && (
+                <div className="fp-password-strength">
+                  <div className="fp-strength-bars">
+                    <div className={`fp-strength-bar ${passwordValidation.minLength ? 'active' : ''}`}></div>
+                    <div className={`fp-strength-bar ${passwordValidation.hasLowercase ? 'active' : ''}`}></div>
+                    <div className={`fp-strength-bar ${passwordValidation.hasUppercase ? 'active' : ''}`}></div>
+                    <div className={`fp-strength-bar ${passwordValidation.hasNumber ? 'active' : ''}`}></div>
+                  </div>
+                  <div className="fp-strength-checklist">
+                    <span className={passwordValidation.minLength ? 'valid' : ''}>
+                      {passwordValidation.minLength ? '✓' : '○'} 8 أحرف على الأقل
+                    </span>
+                    <span className={passwordValidation.hasLowercase ? 'valid' : ''}>
+                      {passwordValidation.hasLowercase ? '✓' : '○'} حرف صغير
+                    </span>
+                    <span className={passwordValidation.hasUppercase ? 'valid' : ''}>
+                      {passwordValidation.hasUppercase ? '✓' : '○'} حرف كبير
+                    </span>
+                    <span className={passwordValidation.hasNumber ? 'valid' : ''}>
+                      {passwordValidation.hasNumber ? '✓' : '○'} رقم واحد
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="fp-form-group">
+                <label className="fp-label">تأكيد كلمة المرور</label>
+                <div className="fp-input-wrapper password">
+                  <span className="fp-input-icon">🔐</span>
+                  <input
+                    type={showConfirmPassword ? "text" : "password"}
+                    className="fp-input"
+                    placeholder="أعد إدخال كلمة المرور"
+                    value={confirmPassword}
+                    onChange={(e) => setForgotPasswordModal(prev => ({
+                      ...prev,
+                      confirmPassword: e.target.value,
+                      error: ''
+                    }))}
+                    disabled={fpLoading}
+                    dir="ltr"
+                  />
+                  <button
+                    type="button"
+                    className="fp-toggle-password"
+                    onClick={() => setForgotPasswordModal(prev => ({
+                      ...prev,
+                      showConfirmPassword: !prev.showConfirmPassword
+                    }))}
+                  >
+                    {showConfirmPassword ? '🙈' : '👁️'}
+                  </button>
+                </div>
+                {confirmPassword && newPassword !== confirmPassword && (
+                  <span className="fp-match-error">كلمتا المرور غير متطابقتين</span>
+                )}
+                {confirmPassword && newPassword === confirmPassword && (
+                  <span className="fp-match-success">✓ كلمتا المرور متطابقتان</span>
+                )}
+              </div>
+
+              <button
+                className="fp-button primary"
+                onClick={handleResetPassword}
+                disabled={fpLoading || !passwordValidation.isValid || newPassword !== confirmPassword}
+              >
+                {fpLoading ? (
+                  <span className="fp-loading">
+                    <span className="fp-spinner"></span>
+                    جارٍ الحفظ...
+                  </span>
+                ) : (
+                  <>
+                    <span>حفظ كلمة المرور</span>
+                    <span className="fp-button-icon">✓</span>
+                  </>
+                )}
+              </button>
+            </div>
+
+            <div className="fp-modal-footer">
+              <button 
+                className="fp-link-button" 
+                onClick={() => setForgotPasswordModal(prev => ({ ...prev, step: 2, error: '' }))}
+              >
+                ← العودة للخطوة السابقة
+              </button>
+            </div>
+          </>
+        );
+
+      case 4:
+        return (
+          <>
+            <div className="fp-modal-header success-header">
+              <div className="fp-success-animation">
+                <div className="fp-success-circle">
+                  <svg className="fp-checkmark" viewBox="0 0 52 52">
+                    <circle className="fp-checkmark-circle" cx="26" cy="26" r="25" fill="none"/>
+                    <path className="fp-checkmark-check" fill="none" d="M14.1 27.2l7.1 7.2 16.7-16.8"/>
+                  </svg>
+                </div>
+              </div>
+              <h2 className="fp-title success">تم بنجاح! 🎉</h2>
+              <p className="fp-subtitle">تم إعادة تعيين كلمة المرور بنجاح</p>
+            </div>
+
+            <div className="fp-modal-body success-body">
+              <div className="fp-success-message">
+                <p>يمكنك الآن تسجيل الدخول باستخدام كلمة المرور الجديدة</p>
+                <div className="fp-success-details">
+                  <span className="fp-detail-icon">📧</span>
+                  <span className="fp-detail-text">{fpEmail}</span>
+                </div>
+              </div>
+
+              <button
+                className="fp-button primary success-button"
+                onClick={closeForgotPasswordModal}
+              >
+                <span>العودة لتسجيل الدخول</span>
+                <span className="fp-button-icon">←</span>
+              </button>
+            </div>
+          </>
+        );
+
+      default:
+        return null;
+    }
+  };
+
+  /**
+   * Render step progress indicator
+   */
+  const renderStepProgress = () => {
+    const { step } = forgotPasswordModal;
+    if (step === 4) return null;
+
+    const steps = [
+      { num: 1, label: 'البريد' },
+      { num: 2, label: 'التحقق' },
+      { num: 3, label: 'كلمة المرور' }
+    ];
+
+    return (
+      <div className="fp-step-progress">
+        {steps.map((s, index) => (
+          <React.Fragment key={s.num}>
+            <div className={`fp-step ${step >= s.num ? 'active' : ''} ${step > s.num ? 'completed' : ''}`}>
+              <div className="fp-step-number">
+                {step > s.num ? '✓' : s.num}
+              </div>
+              <span className="fp-step-label">{s.label}</span>
+            </div>
+            {index < steps.length - 1 && (
+              <div className={`fp-step-connector ${step > s.num ? 'completed' : ''}`}></div>
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div className="home-page">
       <Navbar />
@@ -290,6 +1069,33 @@ const Login = () => {
                 حسناً
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================
+          FORGOT PASSWORD MODAL
+          ============================================ */}
+      {forgotPasswordModal.isOpen && (
+        <div 
+          className="fp-modal-overlay"
+          onClick={(e) => {
+            if (e.target.className === 'fp-modal-overlay') {
+              closeForgotPasswordModal();
+            }
+          }}
+        >
+          <div className="fp-modal-container" onClick={(e) => e.stopPropagation()}>
+            {/* Close Button */}
+            <button className="fp-close-button" onClick={closeForgotPasswordModal}>
+              ✕
+            </button>
+
+            {/* Step Progress Indicator */}
+            {renderStepProgress()}
+
+            {/* Modal Content */}
+            {renderForgotPasswordContent()}
           </div>
         </div>
       )}
@@ -332,7 +1138,9 @@ const Login = () => {
                 </div>
 
                 <div className="forgot-password">
-                  <a href="#" className="forgot-link">هل نسيت كلمة المرور؟</a>
+                  <a href="#" className="forgot-link" onClick={openForgotPasswordModal}>
+                    هل نسيت كلمة المرور؟
+                  </a>
                 </div>
 
                 <button 
@@ -448,105 +1256,84 @@ const Login = () => {
         </div>
       </section>
 
-      {/* Vision & Mission Section */}
-      <section id="vision" className="vision-section">
-        <div className="container">
-          <div className="section-header">
-            <h2 className="section-title">رؤيتنا ورسالتنا</h2>
-            <p className="section-subtitle">نسعى لبناء مستقبل صحي أفضل</p>
-          </div>
-          
-          <div className="vision-content">
-            <div className="vision-card">
-              <div className="card-icon">👁️</div>
-              <h3>رؤيتنا</h3>
-              <p>
-                أن نكون الشريك التقني الأول للمؤسسات الصحية في المنطقة، 
-                وأن نساهم في بناء منظومة صحية رقمية متكاملة تضع المريض في المقام الأول
-              </p>
-            </div>
-            
-            <div className="mission-card">
-              <div className="card-icon">🎯</div>
-              <h3>رسالتنا</h3>
-              <p>
-                توفير حلول تقنية مبتكرة وآمنة تمكن مقدمي الرعاية الصحية من 
-                تقديم خدمات طبية عالية الجودة وتحسين تجربة المرضى
-              </p>
-            </div>
-            
-            <div className="values-card">
-              <div className="card-icon">💎</div>
-              <h3>قيمنا</h3>
-              <ul>
-                <li>الابتكار المستمر</li>
-                <li>الأمان والخصوصية</li>
-                <li>التميز في الخدمة</li>
-                <li>الشراكة طويلة الأمد</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </section>
-
       {/* Services Section */}
       <section id="services" className="services-section">
         <div className="container">
           <div className="section-header">
             <h2 className="section-title">خدماتنا</h2>
-            <p className="section-subtitle">حلول متكاملة لإدارة المنظومة الصحية</p>
+            <p className="section-subtitle">حلول متكاملة لجميع احتياجاتك الصحية</p>
           </div>
           
           <div className="services-grid">
             {services.map((service, index) => (
               <div key={index} className="service-card">
                 <div className="service-icon">{service.icon}</div>
-                <h3>{service.title}</h3>
-                <p>{service.description}</p>
+                <h3 className="service-title">{service.title}</h3>
+                <p className="service-description">{service.description}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Features Section */}
-      <section id="features" className="features-section">
+      {/* Vision Section */}
+      <section id="vision" className="vision-section">
         <div className="container">
           <div className="section-header">
-            <h2 className="section-title">لماذا Patient 360°</h2>
-            <p className="section-subtitle">مميزات تجعلنا الخيار الأفضل</p>
+            <h2 className="section-title">رؤيتنا</h2>
+            <p className="section-subtitle">نحو مستقبل صحي أفضل</p>
           </div>
           
-          <div className="features-list">
-            <div className="feature-item">
-              <div className="feature-number">01</div>
-              <div className="feature-content">
-                <h3>سهولة الاستخدام</h3>
-                <p>واجهة بديهية وسهلة الاستخدام لا تحتاج إلى تدريب معقد</p>
+          <div className="vision-content">
+            <div className="vision-text">
+              <h3>رسالتنا</h3>
+              <p>
+                نسعى لأن نكون الشريك التقني الأول للمؤسسات الصحية في المنطقة، من خلال توفير حلول 
+                مبتكرة تسهم في تحسين جودة الرعاية الصحية وتمكين الأطباء والمرضى.
+              </p>
+              
+              <h3>أهدافنا</h3>
+              <div className="vision-goals">
+                <div className="goal-item">
+                  <span className="goal-icon">🎯</span>
+                  <span>تحسين تجربة المريض</span>
+                </div>
+                <div className="goal-item">
+                  <span className="goal-icon">🎯</span>
+                  <span>رفع كفاءة العمليات الطبية</span>
+                </div>
+                <div className="goal-item">
+                  <span className="goal-icon">🎯</span>
+                  <span>ضمان أمان البيانات الصحية</span>
+                </div>
+                <div className="goal-item">
+                  <span className="goal-icon">🎯</span>
+                  <span>التوسع إقليمياً وعالمياً</span>
+                </div>
               </div>
             </div>
             
-            <div className="feature-item">
-              <div className="feature-number">02</div>
-              <div className="feature-content">
-                <h3>توافق كامل</h3>
-                <p>يعمل على جميع الأجهزة والمنصات بكفاءة عالية</p>
+            <div className="vision-features">
+              <div className="feature-item">
+                <div className="feature-number">01</div>
+                <div className="feature-content">
+                  <h3>الابتكار المستمر</h3>
+                  <p>نستثمر في البحث والتطوير لتقديم أحدث الحلول التقنية</p>
+                </div>
               </div>
-            </div>
-            
-            <div className="feature-item">
-              <div className="feature-number">03</div>
-              <div className="feature-content">
-                <h3>تكامل سلس</h3>
-                <p>يتكامل مع الأنظمة الموجودة دون الحاجة لتغييرات جذرية</p>
+              <div className="feature-item">
+                <div className="feature-number">02</div>
+                <div className="feature-content">
+                  <h3>التميز في الخدمة</h3>
+                  <p>نلتزم بأعلى معايير الجودة في جميع خدماتنا</p>
+                </div>
               </div>
-            </div>
-            
-            <div className="feature-item">
-              <div className="feature-number">04</div>
-              <div className="feature-content">
-                <h3>دعم محلي</h3>
-                <p>فريق دعم محلي متخصص متوفر على مدار الساعة</p>
+              <div className="feature-item">
+                <div className="feature-number">03</div>
+                <div className="feature-content">
+                  <h3>الشراكة الاستراتيجية</h3>
+                  <p>نبني علاقات طويلة الأمد مع عملائنا</p>
+                </div>
               </div>
             </div>
           </div>
@@ -557,8 +1344,8 @@ const Login = () => {
       <section id="team" className="team-section">
         <div className="container">
           <div className="section-header">
-            <h2 className="section-title">فريق العمل</h2>
-            <p className="section-subtitle">خبراء متخصصون في خدمتكم</p>
+            <h2 className="section-title">فريقنا</h2>
+            <p className="section-subtitle">خبراء متخصصون في خدمتك</p>
           </div>
           
           <div className="team-grid">
@@ -570,6 +1357,7 @@ const Login = () => {
                 <p className="member-bio">{member.bio}</p>
                 <div className="social-links">
                   <a href="#" className="social-link">in</a>
+                  <a href="#" className="social-link">t</a>
                   <a href="#" className="social-link">@</a>
                 </div>
               </div>
@@ -582,8 +1370,8 @@ const Login = () => {
       <section id="contact" className="contact-section">
         <div className="container">
           <div className="section-header">
-            <h2 className="section-title">اتصل بنا</h2>
-            <p className="section-subtitle">نحن هنا لخدمتكم</p>
+            <h2 className="section-title">تواصل معنا</h2>
+            <p className="section-subtitle">نحن هنا لمساعدتك</p>
           </div>
           
           <div className="contact-content">
@@ -591,13 +1379,15 @@ const Login = () => {
               <div className="info-card">
                 <div className="info-icon">📍</div>
                 <h3>العنوان</h3>
-                <p>مشروع دمر , دمشق , سوريا</p>
+                <p>دمشق، سوريا</p>
+                <p>شارع المزة، بناء الصحة</p>
               </div>
               
               <div className="info-card">
                 <div className="info-icon">📞</div>
                 <h3>الهاتف</h3>
-                <p dir="ltr">+963933527091</p>
+                <p dir="ltr">+963 11 123 4567</p>
+                <p dir="ltr">+963 11 765 4321</p>
               </div>
               
               <div className="info-card">

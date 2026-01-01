@@ -17,12 +17,20 @@ const personSchema = new mongoose.Schema({
     match: [/^[0-9]{11}$/, 'رقم الهوية الوطنية للوالد/الوالدة يجب أن يكون 11 رقماً']
   },
   
-  // Child ID - Auto-generated for minors (format: PARENT_ID-01, PARENT_ID-02, etc.)
+  // Child ID - Auto-generated for minors (format: PARENT_ID-001, PARENT_ID-002, etc.)
   childId: {
     type: String,
     required: false,
     unique: true,
-    sparse: true
+    sparse: true,
+    // ✅ NEW: Format validation for childId
+    validate: {
+      validator: function(v) {
+        if (!v) return true; // Allow null/empty
+        return /^[0-9]{11}-[0-9]{3}$/.test(v);
+      },
+      message: 'معرف الطفل يجب أن يكون بالصيغة: XXXXXXXXXXX-XXX'
+    }
   },
   
   // Is Minor flag (age < 18)
@@ -47,9 +55,34 @@ const personSchema = new mongoose.Schema({
     match: [/^[a-zA-Z\u0600-\u06FF\s]+$/, 'الاسم يجب أن يحتوي على أحرف عربية أو إنجليزية فقط']
   },
   
+  // ✅ UPDATED: Date of Birth with validation
   dateOfBirth: {
     type: Date,
-    required: [true, 'تاريخ الميلاد مطلوب']
+    required: [true, 'تاريخ الميلاد مطلوب'],
+    validate: {
+      validator: function(v) {
+        if (!v) return false;
+        
+        const today = new Date();
+        const birthDate = new Date(v);
+        
+        // ✅ Cannot be in the future
+        if (birthDate > today) {
+          return false;
+        }
+        
+        // ✅ Calculate age
+        const age = Math.floor((today - birthDate) / (365.25 * 24 * 60 * 60 * 1000));
+        
+        // ✅ Age must be between 0-120 years
+        if (age < 0 || age > 120) {
+          return false;
+        }
+        
+        return true;
+      },
+      message: 'تاريخ الميلاد يجب أن يكون في الماضي والعمر بين 0-120 سنة'
+    }
   },
   
   gender: {
@@ -74,7 +107,7 @@ const personSchema = new mongoose.Schema({
     maxlength: [200, 'العنوان يجب ألا يتجاوز 200 حرف']
   },
   
-  // NEW: Governorate field
+  // Governorate field
   governorate: {
     type: String,
     required: false,
@@ -88,7 +121,7 @@ const personSchema = new mongoose.Schema({
     }
   },
   
-  // NEW: City field
+  // City field
   city: {
     type: String,
     required: false,
@@ -105,6 +138,30 @@ personSchema.index({ nationalId: 1 }, { unique: true, sparse: true });
 personSchema.index({ childId: 1 }, { unique: true, sparse: true });
 personSchema.index({ parentNationalId: 1 });
 personSchema.index({ firstName: 1, lastName: 1 });
+
+// ============================================
+// PRE-SAVE MIDDLEWARE
+// ============================================
+
+// ✅ NEW: Auto-calculate isMinor based on dateOfBirth
+personSchema.pre('save', function(next) {
+  if (this.dateOfBirth) {
+    const today = new Date();
+    const birthDate = new Date(this.dateOfBirth);
+    const age = Math.floor((today - birthDate) / (365.25 * 24 * 60 * 60 * 1000));
+    
+    // ✅ Auto-set isMinor flag
+    this.isMinor = age < 18;
+    
+    console.log(`✅ Auto-calculated: age=${age}, isMinor=${this.isMinor}`);
+  }
+  
+  next();
+});
+
+// ============================================
+// PRE-VALIDATE MIDDLEWARE
+// ============================================
 
 // Custom validation: Either nationalId OR parentNationalId must be present
 personSchema.pre('validate', function(next) {
