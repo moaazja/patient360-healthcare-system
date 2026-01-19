@@ -2040,7 +2040,17 @@
   font-size: 0.95rem;
   font-weight: 700;
   color: #1f2937;
+  margin: 0 0 5px 0;
+}
+
+.prediction-english-name {
+  font-size: 0.85rem;
+  color: #6b7280;
   margin: 0 0 12px 0;
+  font-weight: 500;
+  direction: ltr;
+  text-align: right;
+  font-style: italic;
 }
 
 .prediction-bar-container {
@@ -2425,4 +2435,159 @@
 .logout-btn-profile:focus-visible {
   outline: 3px solid var(--accent-purple);
   outline-offset: 3px;
+}/* ============================================
+   ENHANCED ECG PREDICTIONS STYLES
+   Professional 4-predictions display
+   ============================================ */
+
+/* Predictions Header Enhancement */
+.predictions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding-bottom: 15px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.total-predictions-badge {
+  background: linear-gradient(135deg, var(--primary-teal) 0%, var(--accent-purple) 100%);
+  color: white;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(162, 63, 151, 0.3);
+}
+
+/* Grid Enhancement for 4 items */
+.predictions-grid-full {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+}
+
+/* Prediction Card Enhancement */
+.prediction-card {
+  background: white;
+  border-radius: 14px;
+  padding: 20px;
+  border-right: 5px solid #e0e0e0;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.06);
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.prediction-card.primary {
+  border-right-color: var(--primary-teal);
+  background: linear-gradient(135deg, #f0f9ff 0%, white 100%);
+  box-shadow: 0 6px 20px rgba(0, 80, 128, 0.15);
+}
+
+.prediction-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+}
+
+/* Arabic Name Styling */
+.prediction-arabic-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1f2937;
+  margin: 0 0 5px 0;
+  line-height: 1.4;
+}
+
+/* English Name Styling */
+.prediction-english-name {
+  font-size: 0.8rem;
+  color: #6b7280;
+  margin: 0 0 12px 0;
+  font-weight: 500;
+  direction: ltr;
+  text-align: right;
+  font-style: italic;
+  opacity: 0.8;
+}
+
+/* Prediction Stats Row */
+.prediction-stats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.prediction-percentage {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: var(--accent-purple);
+}
+
+.prediction-confidence-badge {
+  font-size: 0.75rem;
+  padding: 4px 10px;
+  background: rgba(162, 63, 151, 0.1);
+  border-radius: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Predictions Summary */
+.predictions-summary {
+  display: flex;
+  gap: 20px;
+  margin-top: 20px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%);
+  border-radius: 12px;
+  border: 2px solid #e0e7ff;
+}
+
+.summary-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.summary-icon {
+  font-size: 1.2rem;
+}
+
+/* Responsive Design for 4 predictions */
+@media (max-width: 1200px) {
+  .predictions-grid-full {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .predictions-grid-full {
+    grid-template-columns: 1fr;
+  }
+  
+  .predictions-header {
+    flex-direction: column;
+    text-align: center;
+  }
+  
+  .predictions-summary {
+    flex-direction: column;
+    gap: 12px;
+  }
+}
+
+/* RTL Support */
+[dir="rtl"] .prediction-card {
+  border-right: none;
+  border-left: 5px solid #e0e0e0;
+}
+
+[dir="rtl"] .prediction-card.primary {
+  border-left-color: var(--primary-teal);
 }

@@ -279,13 +279,6 @@ function formatVisitData(visit, includeFullDetails = false) {
       : 'غير محدد',
     specialization: visit.doctorId?.specialization || 'غير محدد',
 
-    // Basic vital signs
-    vitalSigns: visit.vitalSigns ? {
-      bloodPressure: visit.vitalSigns.bloodPressure,
-      heartRate: visit.vitalSigns.heartRate,
-      temperature: visit.vitalSigns.temperature,
-      oxygenSaturation: visit.vitalSigns.oxygenSaturation
-    } : null,
 
     // Medication count
     medicationsCount: visit.prescribedMedications?.length || 0,

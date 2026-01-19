@@ -196,9 +196,7 @@ const Navbar = () => {
                           <a href="#vision" onClick={(e) => {e.preventDefault(); scrollToSection('vision');}} className="dropdown-item">
                             <span>رؤيتنا ورسالتنا</span>
                           </a>
-                          <a href="#team" onClick={(e) => {e.preventDefault(); scrollToSection('team');}} className="dropdown-item">
-                            <span>فريق العمل</span>
-                          </a>
+                         
                           <a href="#contact" onClick={(e) => {e.preventDefault(); scrollToSection('contact');}} className="dropdown-item">
                             <span>اتصل بنا</span>
                           </a>
@@ -223,9 +221,7 @@ const Navbar = () => {
                           <a href="#services" onClick={(e) => {e.preventDefault(); scrollToSection('services');}} className="dropdown-item">
                             <span>خدماتنا</span>
                           </a>
-                          <a href="#features" onClick={(e) => {e.preventDefault(); scrollToSection('features');}} className="dropdown-item">
-                            <span>المميزات</span>
-                          </a>
+                         
                           <a href="#" onClick={handleSignupClick} className="dropdown-item">
                             <span>إنشاء حساب جديد</span>
                           </a>
@@ -233,29 +229,7 @@ const Navbar = () => {
                       )}
                     </div>
 
-                    <div className="nav-item dropdown">
-                      <button 
-                        className={`nav-button ${activeDropdown === 'language' ? 'active' : ''}`}
-                        onClick={() => toggleDropdown('language')}
-                      >
-                        <span>🌐 العربية</span>
-                        <svg className={`dropdown-arrow ${activeDropdown === 'language' ? 'rotated' : ''}`} 
-                             viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                          <polyline points="6 9 12 15 18 9"></polyline>
-                        </svg>
-                      </button>
-                      
-                      {activeDropdown === 'language' && (
-                        <div className="dropdown-menu">
-                          <a href="#" className="dropdown-item active-lang">
-                            <span>العربية</span>
-                          </a>
-                          <a href="#" className="dropdown-item">
-                            <span>English</span>
-                          </a>
-                        </div>
-                      )}
-                    </div>
+                  //
                   </>
                 )}
               </>

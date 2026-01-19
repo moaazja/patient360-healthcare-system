@@ -563,7 +563,6 @@ const PatientDashboard = () => {
   const [visits, setVisits] = useState([]);
   const [loadingVisits, setLoadingVisits] = useState(false);
   const [medications, setMedications] = useState([]);
-const [medicationSchedule, setMedicationSchedule] = useState(null);
 const [loadingMedications, setLoadingMedications] = useState(false);
   const [expandedVisit, setExpandedVisit] = useState(null);
   const [activeSection, setActiveSection] = useState('overview');
@@ -714,21 +713,10 @@ const [loadingMedications, setLoadingMedications] = useState(false);
       if (medsResponse.ok && medsData.success) {
         setMedications(medsData.medications || []);
       }
-      
-      // Load medication schedule
-      const scheduleResponse = await fetch('http://localhost:5000/api/patient/medications/schedule', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      const scheduleData = await scheduleResponse.json();
-      console.log('📅 Schedule response:', scheduleData);
-      
-      if (scheduleResponse.ok && scheduleData.success) {
-        setMedicationSchedule(scheduleData.schedule);
-      }
+  
       
       console.log('🔍 Final Medications:', medsData.medications);
-      console.log('🔍 Final Schedule:', scheduleData.schedule);
+      
 
     } catch (error) {
       console.error('❌ Error loading medications:', error);
@@ -827,7 +815,7 @@ const [loadingMedications, setLoadingMedications] = useState(false);
               <span className="tab-icon">
                 {section === 'overview' ? '📊' : section === 'visits' ? '📋' : section === 'consultation' ? '🤖' : '💊'}
               </span>
-              {section === 'overview' ? 'نظرة عامة' : section === 'visits' ? 'سجل الزيارات' : section === 'consultation' ? 'استشيرني' : 'تقويم الأدوية'}
+              {section === 'overview' ? 'نظرة عامة' : section === 'visits' ? 'سجل الزيارات' : section === 'consultation' ? 'استشيرني' : ' الأدوية'}
             </button>
           ))}
         </div>
@@ -1307,8 +1295,8 @@ const [loadingMedications, setLoadingMedications] = useState(false);
             <div className="pulse-ring"></div>
           </div>
           <div className="medications-header-text">
-            <h1>تقويم الأدوية</h1>
-            <p>Medication Calendar & Schedule</p>
+            <h1>الأدوية الموصوفة</h1>
+            <p>Prescribed Medications</p>
           </div>
         </div>
         <div className="medications-count-badge">
@@ -1333,7 +1321,7 @@ const [loadingMedications, setLoadingMedications] = useState(false);
           <p>سيتم عرض الأدوية الموصوفة هنا بعد زيارة الطبيب</p>
           <div className="empty-info">
             <span>💡</span>
-            <p>التقويم يعرض مواعيد تناول الأدوية اليومية والأسبوعية</p>
+            <p>يتم عرض تفاصيل كل دواء: الجرعة، التكرار، المدة، والتعليمات</p>
           </div>
         </div>
       )}
@@ -1428,79 +1416,13 @@ const [loadingMedications, setLoadingMedications] = useState(false);
             </div>
           </div>
 
-          {/* Weekly Schedule */}
-          {medicationSchedule && medicationSchedule.weeklySchedule && (
-            <div className="weekly-schedule-section">
-              <div className="section-header-meds">
-                <div className="header-left">
-                  <span className="section-icon">📅</span>
-                  <div>
-                    <h2>التقويم الأسبوعي</h2>
-                    <p>Weekly Medication Schedule</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="weekly-schedule-grid">
-                {medicationSchedule.weeklySchedule.map((daySchedule, index) => (
-                  <div 
-                    key={index} 
-                    className={`day-schedule-card ${index === new Date().getDay() ? 'today' : ''}`}
-                  >
-                    {/* Day Header */}
-                    <div className="day-header">
-                      <h3>{daySchedule.day}</h3>
-                      {index === new Date().getDay() && (
-                        <span className="today-badge">اليوم</span>
-                      )}
-                      <span className="day-count">
-                        {daySchedule.medications.length} جرعة
-                      </span>
-                    </div>
-
-                    {/* Day Medications Timeline */}
-                    <div className="day-medications-timeline">
-                      {daySchedule.medications.length > 0 ? (
-                        daySchedule.medications.map((med, medIndex) => (
-                          <div key={medIndex} className="timeline-item">
-                            <div className="timeline-time">
-                              <span className="time-icon">🕐</span>
-                              <span className="time-text">{med.time}</span>
-                            </div>
-                            <div className="timeline-content">
-                              <div className="timeline-med-name">
-                                <span className="med-icon-small">💊</span>
-                                <span>{med.medicationName}</span>
-                              </div>
-                              <div className="timeline-med-dosage">{med.dosage}</div>
-                              {med.instructions && (
-                                <div className="timeline-med-instructions">
-                                  {med.instructions}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="no-medications-day">
-                          <span>✓</span>
-                          <p>لا توجد أدوية</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Medication Instructions Banner */}
           <div className="medication-instructions-banner">
             <div className="instructions-icon">⚠️</div>
             <div className="instructions-content">
               <h4>تعليمات هامة</h4>
               <ul>
-                <li>التزم بمواعيد تناول الأدوية المحددة من قبل الطبيب</li>
+                <li>التزم بالجرعة والتكرار والمدة المحددة من قبل الطبيب</li>
                 <li>لا توقف أو تغير الجرعة دون استشارة الطبيب</li>
                 <li>احتفظ بالأدوية في مكان آمن وبعيد عن متناول الأطفال</li>
                 <li>في حالة نسيان جرعة، استشر الطبيب أو الصيدلي</li>

@@ -1181,3 +1181,98 @@ exports.resetPassword = async (req, res) => {
     });
   }
 };
+
+// ==========================================
+// ✅ NEW: CHECK DOCTOR REQUEST STATUS
+// ==========================================
+
+/**
+ * @route   POST /api/auth/check-doctor-status
+ * @desc    Check doctor registration request status and get credentials if approved
+ * @access  Public
+ */
+exports.checkDoctorRequestStatus = async (req, res) => {
+  try {
+    console.log('========================================');
+    console.log('🔍 CHECK DOCTOR REQUEST STATUS');
+    console.log('========================================');
+
+    const { email } = req.body;
+
+    // Validation
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'البريد الإلكتروني مطلوب'
+      });
+    }
+
+    console.log('📧 Checking status for email:', email);
+
+    // Find the request
+    const DoctorRequest = require('../models/DoctorRequest');
+    const request = await DoctorRequest.findOne({ 
+      email: email.toLowerCase() 
+    })
+      .select('status email plainPassword firstName lastName createdAt reviewedAt rejectionReason')
+      .lean();
+
+    if (!request) {
+      console.log('❌ No request found for this email');
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على طلب تسجيل بهذا البريد الإلكتروني'
+      });
+    }
+
+    console.log('✅ Request found');
+    console.log('Status:', request.status);
+
+    // Build response based on status
+    const response = {
+      success: true,
+      status: request.status,
+      submittedAt: request.createdAt
+    };
+
+    if (request.status === 'pending') {
+      console.log('⏳ Request is still pending');
+      response.message = 'طلبك قيد المراجعة من قبل الإدارة';
+      
+    } else if (request.status === 'approved') {
+      console.log('✅ Request is approved');
+      console.log('📧 Email:', request.email);
+      console.log('🔑 Password available:', !!request.plainPassword);
+      
+      response.message = 'تم قبول طلبك! يمكنك الآن تسجيل الدخول';
+      response.credentials = {
+        email: request.email,
+        password: request.plainPassword, // ✅ Return plain password
+        name: `${request.firstName} ${request.lastName}`
+      };
+      response.reviewedAt = request.reviewedAt;
+      
+    } else if (request.status === 'rejected') {
+      console.log('❌ Request was rejected');
+      response.message = 'تم رفض طلبك';
+      response.rejectionReason = request.rejectionReason || 'لم يتم تحديد سبب';
+      response.reviewedAt = request.reviewedAt;
+    }
+
+    console.log('========================================');
+    console.log('✅ Status check complete');
+    console.log('========================================');
+
+    res.status(200).json(response);
+
+  } catch (error) {
+    console.error('========================================');
+    console.error('❌ ERROR in checkDoctorRequestStatus:', error);
+    console.error('========================================');
+
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ أثناء التحقق من حالة الطلب'
+    });
+  }
+};

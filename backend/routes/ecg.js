@@ -10,30 +10,73 @@ const fs = require('fs');
 // Import middleware
 const { protect, restrictTo } = require('../middleware/auth');
 
+// ✅ Import file upload manager
+const FileUploadManager = require('../utils/fileUpload');
+
 // Import controller
 const ecgController = require('../controllers/ecgController');
 
 // ==========================================
-// MULTER CONFIGURATION FOR ECG UPLOADS
+// ✅ ORGANIZED MULTER CONFIGURATION FOR ECG UPLOADS
 // ==========================================
-
-// Create uploads directory if it doesn't exist
-const uploadsDir = path.join(__dirname, '../uploads/ecg');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-  console.log('✅ Created ECG uploads directory:', uploadsDir);
-}
 
 // Configure storage
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDir);
+  destination: async (req, file, cb) => {
+    try {
+      // For ECG, we need patient ID from request body
+      // Frontend must send patientId in the request
+      const patientId = req.body.patientId;
+      
+      if (!patientId) {
+        // If no patient ID, use temp folder
+        const tempDir = path.join('uploads', 'temp');
+        await FileUploadManager.ensureDirectory(tempDir);
+        return cb(null, tempDir);
+      }
+      
+      // Generate organized path
+      const fileInfo = FileUploadManager.generateFilePath(
+        'ecg',
+        patientId,
+        file.originalname
+      );
+      
+      // Create directory
+      await FileUploadManager.ensureDirectory(fileInfo.directory);
+      
+      cb(null, fileInfo.directory);
+      
+    } catch (error) {
+      console.error('Error creating ECG directory:', error);
+      cb(error, null);
+    }
   },
+  
   filename: (req, file, cb) => {
-    // Generate unique filename
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const ext = path.extname(file.originalname);
-    cb(null, `ecg-${uniqueSuffix}${ext}`);
+    try {
+      const patientId = req.body.patientId;
+      
+      if (!patientId) {
+        // Temp filename
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        const ext = path.extname(file.originalname);
+        return cb(null, `ecg-temp-${uniqueSuffix}${ext}`);
+      }
+      
+      // Generate organized filename
+      const fileInfo = FileUploadManager.generateFilePath(
+        'ecg',
+        patientId,
+        file.originalname
+      );
+      
+      cb(null, fileInfo.filename);
+      
+    } catch (error) {
+      console.error('Error generating ECG filename:', error);
+      cb(error, null);
+    }
   }
 });
 

@@ -5,7 +5,9 @@ const path = require('path');
 
 // Import middleware
 const { protect, restrictTo } = require('../middleware/auth');
-const { profileLimiter } = require('../middleware/rateLimiter');
+
+// ✅ Import file upload manager
+const FileUploadManager = require('../utils/fileUpload');
 
 // Import models
 const Patient = require('../models/Patient');
@@ -16,16 +18,55 @@ const Account = require('../models/Account');
 const visitController = require('../controllers/visitController');
 
 // ==========================================
-// MULTER CONFIGURATION FOR VISIT ATTACHMENTS
+// ✅ ORGANIZED MULTER CONFIGURATION FOR VISIT ATTACHMENTS
 // ==========================================
 
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'uploads/visits/');
+  destination: async function (req, file, cb) {
+    try {
+      // Get patient national ID from URL parameter
+      const nationalId = req.params.nationalId;
+      
+      if (!nationalId) {
+        return cb(new Error('Patient ID not found in request'), null);
+      }
+      
+      // Generate organized path
+      const fileInfo = FileUploadManager.generateFilePath(
+        'visit', 
+        nationalId, 
+        file.originalname
+      );
+      
+      // Create directory if doesn't exist
+      await FileUploadManager.ensureDirectory(fileInfo.directory);
+      
+      // Set destination to organized directory
+      cb(null, fileInfo.directory);
+      
+    } catch (error) {
+      console.error('Error in storage destination:', error);
+      cb(error, null);
+    }
   },
+  
   filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'visit-' + uniqueSuffix + path.extname(file.originalname));
+    try {
+      const nationalId = req.params.nationalId;
+      
+      // Generate organized filename
+      const fileInfo = FileUploadManager.generateFilePath(
+        'visit',
+        nationalId,
+        file.originalname
+      );
+      
+      cb(null, fileInfo.filename);
+      
+    } catch (error) {
+      console.error('Error generating filename:', error);
+      cb(error, null);
+    }
   }
 });
 
@@ -57,7 +98,6 @@ const upload = multer({
  * ALL ROUTES REQUIRE:
  * 1. Authentication (protect)
  * 2. Doctor role only (restrictTo('doctor'))
- * 3. Rate limiting
  */
 
 // ==========================================
@@ -73,22 +113,21 @@ router.get(
   '/search/:nationalId',
   protect,
   restrictTo('doctor'),
-  profileLimiter,
   async (req, res) => {
     try {
       const { nationalId } = req.params;
 
-console.log('🔍 Searching for:', nationalId);
+      console.log('🔍 Searching for:', nationalId);
 
-// ✅ Search by nationalId OR childId
-const person = await Person.findOne({
-  $or: [
-    { nationalId: nationalId },
-    { childId: nationalId }
-  ]
-}).lean();
+      // Search by nationalId OR childId
+      const person = await Person.findOne({
+        $or: [
+          { nationalId: nationalId },
+          { childId: nationalId }
+        ]
+      }).lean();
 
-console.log('📥 Person found:', person ? '✅' : '❌');
+      console.log('📥 Person found:', person ? '✅' : '❌');
 
       if (!person) {
         return res.status(404).json({
@@ -144,7 +183,6 @@ router.get(
   '/patients',
   protect,
   restrictTo('doctor'),
-  profileLimiter,
   async (req, res) => {
     try {
       // Get all patients
@@ -174,7 +212,6 @@ router.get(
             bloodType: patient.bloodType,
             height: patient.height,
             weight: patient.weight,
-            vitalSigns: patient.vitalSigns,
             doctorOpinion: patient.doctorOpinion,
             prescribedMedications: patient.prescribedMedications,
             lastUpdated: patient.updatedAt
@@ -206,12 +243,10 @@ router.put(
   '/patient/:nationalId',
   protect,
   restrictTo('doctor'),
-  profileLimiter,
   async (req, res) => {
     try {
       const { nationalId } = req.params;
       const {
-        vitalSigns,
         doctorOpinion,
         ecgResults,
         aiPrediction,
@@ -233,7 +268,6 @@ router.put(
         { personId: person._id },
         {
           $set: {
-            vitalSigns,
             doctorOpinion,
             ecgResults,
             aiPrediction,
@@ -278,8 +312,7 @@ router.post(
   '/patient/:nationalId/visit',
   protect,
   restrictTo('doctor'),
-  profileLimiter,
-  upload.single('visitPhoto'),  // ⬅️ ADDED: File upload middleware
+  upload.single('visitPhoto'),
   visitController.createVisit
 );
 
@@ -292,7 +325,6 @@ router.get(
   '/patient/:nationalId/visits',
   protect,
   restrictTo('doctor'),
-  profileLimiter,
   visitController.getPatientVisitsByNationalId
 );
 
@@ -305,7 +337,6 @@ router.get(
   '/visits',
   protect,
   restrictTo('doctor'),
-  profileLimiter,
   visitController.getDoctorVisits
 );
 
@@ -318,7 +349,6 @@ router.get(
   '/visit/:visitId',
   protect,
   restrictTo('doctor'),
-  profileLimiter,
   visitController.getVisitDetailsDoctor
 );
 
@@ -331,7 +361,6 @@ router.put(
   '/visit/:visitId',
   protect,
   restrictTo('doctor'),
-  profileLimiter,
   visitController.updateVisit
 );
 

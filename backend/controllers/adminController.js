@@ -1057,12 +1057,13 @@ exports.approveDoctorRequest = async (req, res) => {
     console.log('4️⃣ Updating request status...');
 
     request.status = 'approved';
-    request.reviewedBy = req.user._id;
+    request.reviewedBy = req.user.accountId || req.user._id;
     request.reviewedAt = new Date();
     request.adminNotes = adminNotes || '';
     request.createdPersonId = person._id;
     request.createdAccountId = account._id;
     request.createdDoctorId = doctor._id;
+    // ✅ KEEP plainPassword - Doctor needs to see it after approval!
 
     await request.save();
 

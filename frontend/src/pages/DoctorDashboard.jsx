@@ -81,18 +81,72 @@ const ECG_CONDITIONS = {
 
 /**
  * ============================================
- * ECG RESULT CARD COMPONENT
+ * ECG RESULT CARD COMPONENT - PROFESSIONAL
  * ============================================
- * Beautiful card design for ECG analysis results
+ * Shows ALL 4 predictions with Arabic & English names
  */
 const ECGResultCard = ({ result }) => {
-  const condition = ECG_CONDITIONS[result.prediction] || {
-    nameAr: result.prediction,
-    description: 'تم تحليل تخطيط القلب بواسطة الذكاء الاصطناعي.',
-    severity: 'info',
-    icon: '🔬',
-    recommendations: ['مراجعة الطبيب للتقييم النهائي']
+  // Disease name mappings
+  const diseaseNames = {
+    'MI': { ar: 'جلطة قلبية', en: 'Myocardial Infarction' },
+    'History of MI': { ar: 'تاريخ جلطة قلبية', en: 'History of MI' },
+    'Abnormal Heartbeat': { ar: 'نبض غير طبيعي', en: 'Abnormal Heartbeat' },
+    'Normal': { ar: 'طبيعي', en: 'Normal' }
   };
+
+  // Get main prediction
+  const mainPrediction = result.prediction || 'تحليل تخطيط القلب';
+  const confidence = result.confidence_percentage || '0%';
+  
+  // Get ALL 4 predictions
+  const allPredictions = result.all_predictions || result.top_predictions || [];
+  
+  // Get condition details
+  const getConditionDetails = (predictionText) => {
+    if (predictionText.includes('طبيعي') || predictionText.includes('Normal')) {
+      return {
+        nameAr: 'تخطيط طبيعي',
+        description: 'تخطيط القلب الكهربائي ضمن الحدود الطبيعية. لا توجد علامات على اضطرابات في النظم أو نقص التروية.',
+        severity: 'normal',
+        icon: '✅',
+        recommendations: ['متابعة نمط الحياة الصحي', 'ممارسة الرياضة بانتظام', 'فحص دوري كل سنة']
+      };
+    } else if (predictionText.includes('جلطة قلبية') || predictionText.includes('Myocardial Infarction')) {
+      return {
+        nameAr: 'احتشاء عضلة القلب',
+        description: 'علامات تدل على نوبة قلبية حادة أو سابقة. يتطلب تدخلاً طبياً فورياً.',
+        severity: 'critical',
+        icon: '🚨',
+        recommendations: ['تدخل طبي طارئ فوري', 'قسطرة قلبية تشخيصية', 'مراقبة في العناية المركزة القلبية']
+      };
+    } else if (predictionText.includes('نبض غير طبيعي') || predictionText.includes('Abnormal Heartbeat')) {
+      return {
+        nameAr: 'نبض غير طبيعي',
+        description: 'اضطراب في نظم القلب يتطلب تقييماً طبياً.',
+        severity: 'warning',
+        icon: '⚠️',
+        recommendations: ['فحوصات إضافية مطلوبة', 'اختبار الجهد', 'متابعة دورية']
+      };
+    } else if (predictionText.includes('تاريخ') || predictionText.includes('History')) {
+      return {
+        nameAr: 'تاريخ جلطة قلبية سابقة',
+        description: 'علامات تدل على جلطة قلبية سابقة.',
+        severity: 'warning',
+        icon: '📋',
+        recommendations: ['متابعة دورية', 'الالتزام بالأدوية', 'تعديل نمط الحياة']
+      };
+    } else {
+      return {
+        nameAr: mainPrediction,
+        description: 'تم تحليل تخطيط القلب بواسطة الذكاء الاصطناعي.',
+        severity: 'info',
+        icon: '🔬',
+        recommendations: ['مراجعة الطبيب للتقييم النهائي']
+      };
+    }
+  };
+
+  const condition = getConditionDetails(mainPrediction);
 
   const getSeverityClass = (severity) => {
     switch (severity) {
@@ -113,7 +167,7 @@ const ECGResultCard = ({ result }) => {
         <div className="result-header-content">
           <div className="result-header-label">التشخيص الرئيسي</div>
           <h2 className="result-diagnosis-title">{condition.nameAr}</h2>
-          <p className="result-diagnosis-en">{result.prediction}</p>
+          <p className="result-diagnosis-en">{mainPrediction}</p>
         </div>
         <div className="result-confidence-badge">
           <div className="confidence-circle">
@@ -126,13 +180,13 @@ const ECGResultCard = ({ result }) => {
               />
               <path
                 className="confidence-progress"
-                strokeDasharray={`${parseFloat(result.confidence_percentage) || 0}, 100`}
+                strokeDasharray={`${parseFloat(confidence) || 0}, 100`}
                 d="M18 2.0845
                   a 15.9155 15.9155 0 0 1 0 31.831
                   a 15.9155 15.9155 0 0 1 0 -31.831"
               />
             </svg>
-            <span className="confidence-text">{result.confidence_percentage}</span>
+            <span className="confidence-text">{confidence}</span>
           </div>
           <span className="confidence-label">نسبة الثقة</span>
         </div>
@@ -147,30 +201,58 @@ const ECGResultCard = ({ result }) => {
         </div>
       </div>
 
-      {/* Top Predictions Grid */}
+      {/* ALL 4 Predictions Grid - PROFESSIONAL */}
       <div className="ecg-predictions-section">
         <div className="predictions-header">
           <span className="predictions-icon">📊</span>
-          <h3>أعلى الاحتمالات</h3>
+          <h3>نتائج التحليل الكاملة - جميع الاحتمالات الأربعة</h3>
+          <span className="total-predictions-badge">{allPredictions.length} نتائج</span>
         </div>
-        <div className="predictions-grid">
-          {result.top_predictions && result.top_predictions.map((pred, index) => (
-            <div key={index} className={`prediction-card ${index === 0 ? 'primary' : ''}`}>
-              <div className="prediction-rank">
-                <span>{index + 1}</span>
-              </div>
-              <div className="prediction-content">
-                <h4>{pred.label}</h4>
-                <div className="prediction-bar-container">
-                  <div 
-                    className="prediction-bar" 
-                    style={{ width: pred.percentage }}
-                  ></div>
+        
+        <div className="predictions-grid predictions-grid-full">
+          {allPredictions.map((pred, index) => {
+            // Extract names from prediction object
+            const arabicName = pred.class_name_arabic || diseaseNames[pred.class_name_short]?.ar || pred.class_name_short || pred.label;
+            const englishName = pred.class_name_short || diseaseNames[pred.class_name_short]?.en || pred.label;
+            const percentage = pred.percentage;
+            const probability = pred.probability || 0;
+            
+            return (
+              <div key={index} className={`prediction-card ${index === 0 ? 'primary' : ''}`}>
+                <div className="prediction-rank">
+                  <span>{index + 1}</span>
                 </div>
-                <span className="prediction-percentage">{pred.percentage}</span>
+                <div className="prediction-content">
+                  <h4 className="prediction-arabic-name">{arabicName}</h4>
+                  <p className="prediction-english-name">{englishName}</p>
+                  <div className="prediction-bar-container">
+                    <div 
+                      className="prediction-bar" 
+                      style={{ width: percentage }}
+                    ></div>
+                  </div>
+                  <div className="prediction-stats">
+                    <span className="prediction-percentage">{percentage}</span>
+                    <span className="prediction-confidence-badge">
+                      {probability > 0.7 ? '🟢 عالية' : probability > 0.4 ? '🟡 متوسطة' : '🔴 منخفضة'}
+                    </span>
+                  </div>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
+        </div>
+        
+        {/* Summary Stats */}
+        <div className="predictions-summary">
+          <div className="summary-item">
+            <span className="summary-icon">✅</span>
+            <span className="summary-text">تم تحليل {allPredictions.length} احتمالات</span>
+          </div>
+          <div className="summary-item">
+            <span className="summary-icon">🎯</span>
+            <span className="summary-text">أعلى نتيجة: {allPredictions[0]?.percentage || '0%'}</span>
+          </div>
         </div>
       </div>
 
@@ -190,7 +272,7 @@ const ECGResultCard = ({ result }) => {
         </div>
       </div>
 
-      {/* Warning Banner if Critical */}
+      {/* Warning Banner */}
       {result.warning && (
         <div className="ecg-warning-banner">
           <span className="warning-icon">⚠️</span>
@@ -426,16 +508,64 @@ const DoctorDashboard = () => {
     loadData();
   }, [navigate]);
 
+
+useEffect(() => {
+  const checkAuthStatus = () => {
+    const token = localStorage.getItem('token');
+    const userData = localStorage.getItem('user');
+    
+    if (!token || !userData) {
+      navigate('/', { replace: true });
+      return;
+    }
+    
+    try {
+      const parsedUser = JSON.parse(userData);
+      if (!parsedUser.roles || !parsedUser.roles.includes('doctor')) {
+        navigate('/', { replace: true });
+      }
+    } catch (error) {
+      navigate('/', { replace: true });
+    }
+  };
+  
+  checkAuthStatus();
+  window.addEventListener('focus', checkAuthStatus);
+  window.addEventListener('visibilitychange', checkAuthStatus);
+  
+  return () => {
+    window.removeEventListener('focus', checkAuthStatus);
+    window.removeEventListener('visibilitychange', checkAuthStatus);
+  };
+}, [navigate]);
+
   // ═══════════════════════════════════════════════════════════════
   // AUTHENTICATION
   // ═══════════════════════════════════════════════════════════════
 
   const handleLogout = () => {
-    openModal('confirm', 'تأكيد تسجيل الخروج', 'هل أنت متأكد من رغبتك في تسجيل الخروج؟', async () => {
+  openModal('confirm', 'تأكيد تسجيل الخروج', 'هل أنت متأكد من رغبتك في تسجيل الخروج؟', async () => {
+    try {
       await logoutService();
-      navigate('/');
-    });
-  };
+      
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      localStorage.clear();
+      
+      navigate('/', { replace: true });
+      
+      setTimeout(() => {
+        window.location.href = '/';
+      }, 100);
+      
+    } catch (error) {
+      console.error('Logout error:', error);
+      
+      localStorage.clear();
+      window.location.href = '/';
+    }
+  });
+};
 
   // ═══════════════════════════════════════════════════════════════
   // PATIENT SEARCH WITH PARENT-CHILD SYSTEM
@@ -634,10 +764,12 @@ const DoctorDashboard = () => {
     
     try {
       const formData = new FormData();
-      formData.append('ecgFile', ecgFile);
+      formData.append('ecg_image', ecgFile);
+      
+      
       
       const token = localStorage.getItem('token');
-      const response = await fetch('http://localhost:5000/api/doctor/ecg/analyze', {
+      const response = await fetch('http://localhost:5000/api/ecg/analyze', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
@@ -648,7 +780,7 @@ const DoctorDashboard = () => {
       const data = await response.json();
       
       if (response.ok && data.success) {
-        setAiDiagnosis(data.analysis);
+        setAiDiagnosis(data);
         setTimeout(() => {
           resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }, 100);
@@ -1205,64 +1337,6 @@ const DoctorDashboard = () => {
                       className="form-textarea"
                       rows={3}
                     />
-                  </div>
-
-                  {/* Vital Signs */}
-                  <div className="form-section">
-                    <div className="form-section-header">
-                      <span>📊</span>
-                      <h3>العلامات الحيوية</h3>
-                    </div>
-                    <div className="vitals-grid">
-                      <VitalInput
-                        icon="🩺"
-                        label="ضغط الدم الانقباضي"
-                        value={vitalSigns.bloodPressureSystolic}
-                        onChange={(e) => setVitalSigns({...vitalSigns, bloodPressureSystolic: e.target.value})}
-                        unit="mmHg"
-                        placeholder="120"
-                      />
-                      <VitalInput
-                        icon="🩺"
-                        label="ضغط الدم الانبساطي"
-                        value={vitalSigns.bloodPressureDiastolic}
-                        onChange={(e) => setVitalSigns({...vitalSigns, bloodPressureDiastolic: e.target.value})}
-                        unit="mmHg"
-                        placeholder="80"
-                      />
-                      <VitalInput
-                        icon="💓"
-                        label="نبض القلب"
-                        value={vitalSigns.heartRate}
-                        onChange={(e) => setVitalSigns({...vitalSigns, heartRate: e.target.value})}
-                        unit="BPM"
-                        placeholder="75"
-                      />
-                      <VitalInput
-                        icon="🫁"
-                        label="تشبع الأكسجين"
-                        value={vitalSigns.spo2}
-                        onChange={(e) => setVitalSigns({...vitalSigns, spo2: e.target.value})}
-                        unit="%"
-                        placeholder="98"
-                      />
-                      <VitalInput
-                        icon="🌡️"
-                        label="درجة الحرارة"
-                        value={vitalSigns.temperature}
-                        onChange={(e) => setVitalSigns({...vitalSigns, temperature: e.target.value})}
-                        unit="°C"
-                        placeholder="37"
-                      />
-                      <VitalInput
-                        icon="🩸"
-                        label="سكر الدم"
-                        value={vitalSigns.bloodGlucose}
-                        onChange={(e) => setVitalSigns({...vitalSigns, bloodGlucose: e.target.value})}
-                        unit="mg/dL"
-                        placeholder="100"
-                      />
-                    </div>
                   </div>
 
                   {/* Photo Upload Section */}

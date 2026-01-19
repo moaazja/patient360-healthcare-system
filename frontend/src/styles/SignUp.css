@@ -313,47 +313,30 @@
   font-size: 0.95rem;
 }
 
-.check-status-form {
-  display: flex;
-  gap: 12px;
-}
-
-.check-status-input {
-  flex: 1;
-  padding: 12px 16px;
-  border: 2px solid #e5e7eb;
-  border-radius: 10px;
-  font-size: 1rem;
-  font-family: 'Cairo', monospace;
-  transition: all 0.3s ease;
-}
-
-.check-status-input:focus {
-  outline: none;
-  border-color: #005080;
-  box-shadow: 0 0 0 4px rgba(0, 80, 128, 0.1);
-}
-
 .check-status-btn {
-  padding: 12px 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 14px 32px;
   background: linear-gradient(135deg, #005080 0%, #0f4c63 100%);
   color: white;
   border: none;
-  border-radius: 10px;
+  border-radius: 12px;
+  font-size: 1rem;
   font-weight: 600;
+  font-family: 'Cairo', sans-serif;
   cursor: pointer;
-  white-space: nowrap;
   transition: all 0.3s ease;
 }
 
-.check-status-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 5px 20px rgba(0, 80, 128, 0.3);
+.check-status-btn:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 25px rgba(0, 80, 128, 0.35);
 }
 
-.check-status-btn:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
+.check-status-btn .btn-icon {
+  font-size: 1.2rem;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1169,13 +1152,8 @@ select.form-input {
   left: -50%;
   width: 200%;
   height: 200%;
-  background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%);
-  animation: rotate 20s linear infinite;
-}
-
-@keyframes rotate {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, transparent 60%);
+  /* Animation removed to prevent flashing effect on text */
 }
 
 .illustration-content {
@@ -1642,6 +1620,350 @@ select.form-input {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   STATUS CHECK MODAL - Professional UI
+   ═══════════════════════════════════════════════════════════════ */
+
+.status-check-modal {
+  background: white;
+  border-radius: 24px;
+  max-width: 480px;
+  width: 95%;
+  overflow: hidden;
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.25);
+  animation: slideUp 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.scm-header {
+  background: linear-gradient(135deg, #005080 0%, #0a6a96 50%, #a23f97 100%);
+  padding: 35px 30px 30px;
+  text-align: center;
+  color: white;
+}
+
+.scm-icon-wrapper {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  margin: 0 auto 20px;
+}
+
+.scm-icon {
+  width: 80px;
+  height: 80px;
+  background: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(10px);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 1;
+}
+
+.scm-icon svg {
+  width: 40px;
+  height: 40px;
+  stroke: white;
+}
+
+.scm-icon-pulse {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.5);
+  animation: scm-pulse 2s infinite;
+}
+
+@keyframes scm-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+
+.scm-header h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 0 8px;
+  font-family: 'Cairo', sans-serif;
+}
+
+.scm-header p {
+  font-size: 0.95rem;
+  opacity: 0.9;
+  margin: 0;
+  font-family: 'Cairo', sans-serif;
+}
+
+.scm-body {
+  padding: 30px;
+}
+
+.scm-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+  border: 1px solid #ef4444;
+  border-radius: 12px;
+  margin-bottom: 20px;
+  color: #991b1b;
+  font-size: 0.9rem;
+  font-family: 'Cairo', sans-serif;
+}
+
+.scm-error svg {
+  width: 20px;
+  height: 20px;
+  stroke: #ef4444;
+  flex-shrink: 0;
+}
+
+.scm-form-group {
+  margin-bottom: 20px;
+}
+
+.scm-form-group label {
+  display: block;
+  font-weight: 600;
+  color: #125c7a;
+  margin-bottom: 10px;
+  font-size: 0.95rem;
+  font-family: 'Cairo', sans-serif;
+}
+
+.scm-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.scm-input-icon {
+  position: absolute;
+  right: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.scm-input-icon svg {
+  width: 20px;
+  height: 20px;
+  stroke: #6b7c89;
+}
+
+.scm-input-wrapper input {
+  width: 100%;
+  padding: 16px 50px 16px 18px;
+  border: 2px solid #e5e7eb;
+  border-radius: 14px;
+  font-size: 1rem;
+  font-family: 'Inter', sans-serif;
+  transition: all 0.3s ease;
+  background: #f8fafb;
+}
+
+.scm-input-wrapper input.national-id-input {
+  font-family: 'Cairo', monospace;
+  font-size: 1.1rem;
+  letter-spacing: 2px;
+  text-align: center;
+  padding: 16px 50px;
+}
+
+.scm-input-wrapper input:focus {
+  outline: none;
+  border-color: #005080;
+  background: white;
+  box-shadow: 0 0 0 4px rgba(0, 80, 128, 0.1);
+}
+
+.scm-input-wrapper input::placeholder {
+  color: #9ca3af;
+  letter-spacing: normal;
+}
+
+.scm-input-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 8px 12px;
+  background: linear-gradient(135deg, #f0f7fa 0%, #e0f2f7 100%);
+  border-radius: 8px;
+  font-size: 0.85rem;
+  color: #5a7a8a;
+  font-family: 'Cairo', sans-serif;
+}
+
+.scm-input-hint .hint-icon {
+  font-size: 0.9rem;
+}
+
+.scm-submit-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px 24px;
+  background: linear-gradient(135deg, #005080 0%, #0f4c63 100%);
+  color: white;
+  border: none;
+  border-radius: 14px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  font-family: 'Cairo', sans-serif;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin-top: 10px;
+}
+
+.scm-submit-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 80, 128, 0.35);
+}
+
+.scm-submit-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.scm-submit-btn svg {
+  width: 20px;
+  height: 20px;
+  stroke: white;
+  transform: rotate(180deg);
+}
+
+.scm-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.scm-spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.scm-footer {
+  padding: 0 30px 20px;
+  text-align: center;
+}
+
+.scm-close-btn {
+  padding: 12px 30px;
+  background: transparent;
+  border: 2px solid #e5e7eb;
+  border-radius: 10px;
+  color: #5a7a8a;
+  font-weight: 600;
+  font-family: 'Cairo', sans-serif;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.scm-close-btn:hover {
+  border-color: #005080;
+  color: #005080;
+  background: rgba(0, 80, 128, 0.05);
+}
+
+.scm-security-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 15px 30px;
+  background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+  border-top: 1px solid #bbf7d0;
+  color: #166534;
+  font-size: 0.85rem;
+  font-family: 'Cairo', sans-serif;
+}
+
+.scm-security-note svg {
+  width: 18px;
+  height: 18px;
+  stroke: #16a34a;
+}
+
+/* Enhanced Status Card Styles */
+.status-card.enhanced {
+  background: white;
+  border-radius: 24px;
+  padding: 50px;
+  max-width: 650px;
+  width: 100%;
+  text-align: center;
+  box-shadow: 0 25px 80px rgba(0, 80, 128, 0.12);
+}
+
+.status-detail-row.highlight {
+  background: linear-gradient(135deg, #f8fafb 0%, #f0f7fa 100%);
+  border-radius: 10px;
+  padding: 15px;
+  margin: 10px 0;
+  border: none;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-weight: 600;
+}
+
+.detail-value.status-pending .status-badge {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+}
+
+.detail-value.status-accepted .status-badge {
+  background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+}
+
+.detail-value.status-rejected .status-badge {
+  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+}
+
+.national-id-value {
+  font-family: 'Cairo', monospace;
+  background: rgba(0, 80, 128, 0.08);
+  padding: 4px 12px;
+  border-radius: 6px;
+  letter-spacing: 1px;
+}
+
+.pending-info {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border: 1px solid #f59e0b;
+}
+
+.pending-info .info-text p {
+  color: #92400e;
+}
+
+/* ═══════════════════════════════════════════════════════════════
    RESPONSIVE DESIGN
    ═══════════════════════════════════════════════════════════════ */
 
@@ -1690,12 +2012,16 @@ select.form-input {
     grid-column: span 1;
   }
   
-  .check-status-form {
-    flex-direction: column;
+  .check-status-card {
+    padding: 25px 20px;
   }
   
   .status-card {
     padding: 30px 20px;
+  }
+  
+  .status-card.enhanced {
+    padding: 35px 20px;
   }
   
   .form-actions {
@@ -1705,6 +2031,23 @@ select.form-input {
   .btn-primary,
   .btn-secondary {
     width: 100%;
+  }
+  
+  .status-check-modal {
+    max-width: 95%;
+    margin: 20px;
+  }
+  
+  .scm-header {
+    padding: 25px 20px;
+  }
+  
+  .scm-body {
+    padding: 25px 20px;
+  }
+  
+  .scm-footer {
+    padding: 0 20px 15px;
   }
 }
 

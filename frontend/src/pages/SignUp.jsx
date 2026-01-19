@@ -110,6 +110,14 @@ const SignUp = () => {
   const [checkingStatus, setCheckingStatus] = useState(false);
   const [existingRequest, setExistingRequest] = useState(null);
   
+  // Status Check Modal State
+  const [statusCheckModal, setStatusCheckModal] = useState({
+    isOpen: false,
+    nationalId: '',
+    isLoading: false,
+    error: ''
+  });
+  
   // ═══════════════════════════════════════════════════════════════
   // PATIENT FORM DATA
   // ═══════════════════════════════════════════════════════════════
@@ -691,9 +699,88 @@ const validateDoctorStep = () => {
   };
   
   // ═══════════════════════════════════════════════════════════════
-  // CHECK EXISTING REQUEST STATUS
+  // STATUS CHECK MODAL FUNCTIONS
   // ═══════════════════════════════════════════════════════════════
   
+  const openStatusCheckModal = () => {
+    setStatusCheckModal({
+      isOpen: true,
+      nationalId: '',
+      isLoading: false,
+      error: ''
+    });
+  };
+  
+  const closeStatusCheckModal = () => {
+    setStatusCheckModal({
+      isOpen: false,
+      nationalId: '',
+      isLoading: false,
+      error: ''
+    });
+  };
+  
+  const handleStatusCheckSubmit = async () => {
+    const { nationalId } = statusCheckModal;
+    
+    // Validate input - using nationalId field as email
+    if (!nationalId.trim()) {
+      setStatusCheckModal(prev => ({ ...prev, error: 'الرجاء إدخال البريد الإلكتروني' }));
+      return;
+    }
+    
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(nationalId)) {
+      setStatusCheckModal(prev => ({ ...prev, error: 'البريد الإلكتروني غير صحيح' }));
+      return;
+    }
+    
+    setStatusCheckModal(prev => ({ ...prev, isLoading: true, error: '' }));
+    
+    try {
+      // ✅ UPDATED: Use new endpoint with email
+      const response = await fetch('http://localhost:5000/api/auth/check-doctor-status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email: statusCheckModal.nationalId  // Using nationalId field as email input
+        })
+      });
+      const data = await response.json();
+      
+      if (data.success) {
+        closeStatusCheckModal();
+        setExistingRequest({
+          status: data.status,
+          email: data.credentials?.email,
+          password: data.credentials?.password,
+          name: data.credentials?.name,
+          submittedAt: data.submittedAt,
+          reviewedAt: data.reviewedAt,
+          rejectionReason: data.rejectionReason,
+          message: data.message
+        });
+      } else {
+        setStatusCheckModal(prev => ({ 
+          ...prev, 
+          isLoading: false,
+          error: data.message || 'لم يتم العثور على طلب بهذا البريد الإلكتروني'
+        }));
+      }
+    } catch (error) {
+      console.error('Status check error:', error);
+      setStatusCheckModal(prev => ({ 
+        ...prev, 
+        isLoading: false,
+        error: 'حدث خطأ في الاتصال بالخادم'
+      }));
+    }
+  };
+  
+  // Legacy check status (keeping for backward compatibility)
   const handleCheckStatus = async () => {
     const nationalId = doctorFormData.nationalId.trim();
     
@@ -705,13 +792,31 @@ const validateDoctorStep = () => {
     setCheckingStatus(true);
     
     try {
-      const response = await fetch(`http://localhost:5000/api/auth/doctor-request/status/${nationalId}`);
+      // ✅ UPDATED: Use new endpoint with email
+      const response = await fetch('http://localhost:5000/api/auth/check-doctor-status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email: doctorFormData.email.trim()
+        })
+      });
       const data = await response.json();
       
-      if (data.success && data.request) {
-        setExistingRequest(data.request);
+      if (data.success) {
+        setExistingRequest({
+          status: data.status,
+          email: data.credentials?.email,
+          password: data.credentials?.password,
+          name: data.credentials?.name,
+          submittedAt: data.submittedAt,
+          reviewedAt: data.reviewedAt,
+          rejectionReason: data.rejectionReason,
+          message: data.message
+        });
       } else {
-        openModal('info', 'لا يوجد طلب', 'لم يتم العثور على طلب تسجيل بهذا الرقم الوطني');
+        openModal('info', 'لا يوجد طلب', data.message || 'لم يتم العثور على طلب تسجيل بهذا البريد الإلكتروني');
       }
     } catch (error) {
       console.error('Status check error:', error);
@@ -819,7 +924,7 @@ const validateDoctorStep = () => {
   if (existingRequest) {
     const statusConfig = {
       pending: { icon: '⏳', label: 'قيد المراجعة', className: 'status-pending', color: '#f59e0b' },
-      accepted: { icon: '✅', label: 'تم القبول', className: 'status-accepted', color: '#10b981' },
+      approved: { icon: '✅', label: 'تم القبول', className: 'status-accepted', color: '#10b981' },
       rejected: { icon: '❌', label: 'مرفوض', className: 'status-rejected', color: '#ef4444' }
     };
     
@@ -830,7 +935,7 @@ const validateDoctorStep = () => {
         <Navbar />
         <div className="signup-container">
           <div className="request-status-container">
-            <div className="status-card">
+            <div className="status-card enhanced">
               <div className={`status-icon ${existingRequest.status}`}>
                 <span className="status-icon-inner">{status.icon}</span>
                 {existingRequest.status === 'pending' && <div className="status-pulse"></div>}
@@ -840,22 +945,22 @@ const validateDoctorStep = () => {
               <div className="status-details">
                 <div className="status-detail-row">
                   <span className="detail-label">الاسم:</span>
-                  <span className="detail-value">{existingRequest.firstName} {existingRequest.lastName}</span>
+                  <span className="detail-value">{existingRequest.name || `${existingRequest.firstName} ${existingRequest.lastName}`}</span>
                 </div>
                 <div className="status-detail-row">
-                  <span className="detail-label">التخصص:</span>
-                  <span className="detail-value">
-                    {MEDICAL_SPECIALIZATIONS.find(s => s.id === existingRequest.specialization)?.nameAr || existingRequest.specialization}
-                  </span>
+                  <span className="detail-label">البريد الإلكتروني:</span>
+                  <span className="detail-value" dir="ltr">{existingRequest.email}</span>
                 </div>
-                <div className="status-detail-row">
+                <div className="status-detail-row highlight">
                   <span className="detail-label">حالة الطلب:</span>
-                  <span className={`detail-value ${status.className}`}>{status.label}</span>
+                  <span className={`detail-value ${status.className}`}>
+                    <span className="status-badge">{status.icon} {status.label}</span>
+                  </span>
                 </div>
                 <div className="status-detail-row">
                   <span className="detail-label">تاريخ التقديم:</span>
                   <span className="detail-value">
-                    {new Date(existingRequest.createdAt).toLocaleDateString('ar-EG')}
+                    {existingRequest.submittedAt ? new Date(existingRequest.submittedAt).toLocaleDateString('ar-EG') : '-'}
                   </span>
                 </div>
                 {existingRequest.reviewedAt && (
@@ -868,6 +973,16 @@ const validateDoctorStep = () => {
                 )}
               </div>
               
+              {existingRequest.status === 'pending' && (
+                <div className="status-info-box pending-info">
+                  <span className="info-icon">⏳</span>
+                  <div className="info-text">
+                    <p><strong>طلبك قيد المراجعة</strong></p>
+                    <p>سيتم مراجعة طلبك من قبل فريق وزارة الصحة السورية. ستتلقى إشعاراً عند اتخاذ القرار.</p>
+                  </div>
+                </div>
+              )}
+              
               {existingRequest.status === 'rejected' && existingRequest.rejectionReason && (
                 <div className="rejection-reason-box">
                   <span className="info-icon">⚠️</span>
@@ -878,13 +993,23 @@ const validateDoctorStep = () => {
                 </div>
               )}
               
-              {existingRequest.status === 'accepted' && (
+              {existingRequest.status === 'approved' && existingRequest.password && (
                 <div className="success-info-box">
                   <span className="info-icon">🎉</span>
                   <div className="info-text">
-                    <p>تهانينا! تم قبول طلبك.</p>
-                    <p>تم إرسال بيانات الدخول إلى بريدك الإلكتروني.</p>
-                    <p>يمكنك الآن تسجيل الدخول إلى المنصة.</p>
+                    <p><strong>تهانينا! تم قبول طلبك.</strong></p>
+                    <p>يمكنك الآن تسجيل الدخول باستخدام البيانات التالية:</p>
+                    <div className="credentials-box">
+                      <div className="credential-item">
+                        <span className="credential-label">البريد الإلكتروني:</span>
+                        <span className="credential-value" dir="ltr">{existingRequest.email}</span>
+                      </div>
+                      <div className="credential-item">
+                        <span className="credential-label">كلمة المرور:</span>
+                        <span className="credential-value" dir="ltr">{existingRequest.password}</span>
+                      </div>
+                    </div>
+                    <p className="important-note">⚠️ احفظ هذه البيانات في مكان آمن</p>
                   </div>
                 </div>
               )}
@@ -894,7 +1019,7 @@ const validateDoctorStep = () => {
                   رجوع
                 </button>
                 <button className="btn-primary" onClick={() => navigate('/')}>
-                  {existingRequest.status === 'accepted' ? 'تسجيل الدخول' : 'الصفحة الرئيسية'}
+                  {existingRequest.status === 'approved' ? 'تسجيل الدخول' : 'الصفحة الرئيسية'}
                 </button>
               </div>
             </div>
@@ -996,27 +1121,110 @@ const validateDoctorStep = () => {
               </div>
               <div className="check-status-card">
                 <h4>لديك طلب تسجيل سابق؟</h4>
-                <p>تحقق من حالة طلبك باستخدام الرقم الوطني</p>
-                <div className="check-status-form">
-                  <input
-                    type="text"
-                    placeholder="أدخل الرقم الوطني (11 رقم)"
-                    value={doctorFormData.nationalId}
-                    onChange={(e) => setDoctorFormData(prev => ({ ...prev, nationalId: e.target.value.replace(/\D/g, '').slice(0, 11) }))}
-                    className="check-status-input"
-                    dir="ltr"
-                    maxLength={11}
-                  />
-                  <button
-                    className="check-status-btn"
-                    onClick={handleCheckStatus}
-                    disabled={checkingStatus}
-                  >
-                    {checkingStatus ? 'جاري البحث...' : 'تحقق من الحالة'}
-                  </button>
-                </div>
+                <p>تحقق من حالة طلبك باستخدام بيانات التسجيل</p>
+                <button
+                  className="check-status-btn"
+                  onClick={openStatusCheckModal}
+                >
+                  <span className="btn-icon">🔍</span>
+                  تحقق من الحالة
+                </button>
               </div>
             </div>
+            
+            {/* Status Check Modal */}
+            {statusCheckModal.isOpen && (
+              <div className="modal-overlay" onClick={closeStatusCheckModal}>
+                <div className="status-check-modal" onClick={e => e.stopPropagation()}>
+                  <div className="scm-header">
+                    <div className="scm-icon-wrapper">
+                      <div className="scm-icon">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M21 21L16.65 16.65M19 11C19 15.4183 15.4183 19 11 19C6.58172 19 3 15.4183 3 11C3 6.58172 6.58172 3 11 3C15.4183 3 19 6.58172 19 11Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                        </svg>
+                      </div>
+                      <div className="scm-icon-pulse"></div>
+                    </div>
+                    <h2>التحقق من حالة الطلب</h2>
+                    <p>أدخل البريد الإلكتروني المستخدم عند التسجيل للتحقق من حالة طلبك</p>
+                  </div>
+                  
+                  <div className="scm-body">
+                    {statusCheckModal.error && (
+                      <div className="scm-error">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M12 8V12M12 16H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                        </svg>
+                        <span>{statusCheckModal.error}</span>
+                      </div>
+                    )}
+                    
+                    <div className="scm-form-group">
+                      <label>البريد الإلكتروني</label>
+                      <div className="scm-input-wrapper">
+                        <span className="scm-input-icon">
+                          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="2"/>
+                            <path d="M3 7L12 13L21 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                          </svg>
+                        </span>
+                        <input
+                          type="email"
+                          placeholder="أدخل البريد الإلكتروني"
+                          value={statusCheckModal.nationalId}
+                          onChange={(e) => setStatusCheckModal(prev => ({ 
+                            ...prev, 
+                            nationalId: e.target.value.trim(),
+                            error: '' 
+                          }))}
+                          disabled={statusCheckModal.isLoading}
+                          dir="ltr"
+                          className="email-input"
+                        />
+                      </div>
+                      <div className="scm-input-hint">
+                        <span className="hint-icon">ℹ️</span>
+                        <span>البريد الإلكتروني المستخدم عند التسجيل</span>
+                      </div>
+                    </div>
+                    
+                    <button
+                      className="scm-submit-btn"
+                      onClick={handleStatusCheckSubmit}
+                      disabled={statusCheckModal.isLoading || !statusCheckModal.nationalId}
+                    >
+                      {statusCheckModal.isLoading ? (
+                        <span className="scm-loading">
+                          <span className="scm-spinner"></span>
+                          جارٍ البحث...
+                        </span>
+                      ) : (
+                        <>
+                          <span>التحقق من الحالة</span>
+                          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M5 12H19M19 12L13 6M19 12L13 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  
+                  <div className="scm-footer">
+                    <button className="scm-close-btn" onClick={closeStatusCheckModal}>
+                      إلغاء
+                    </button>
+                  </div>
+                  
+                  <div className="scm-security-note">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M12 22C12 22 20 18 20 12V5L12 2L4 5V12C4 18 12 22 12 22Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M9 12L11 14L15 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    <span>بياناتك محمية ومشفرة</span>
+                  </div>
+                </div>
+              </div>
+            )}
             
             <div className="login-link">
               لديك حساب بالفعل؟ <Link to="/">تسجيل الدخول</Link>

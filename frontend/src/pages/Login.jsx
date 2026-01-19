@@ -1,9 +1,291 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/common/Navbar';
 import { authAPI } from '../services/api';
 import '../styles/Login.css';
+
+// ============================================
+// PROFESSIONAL SVG ICON COMPONENTS
+// ============================================
+
+const HospitalIcon = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" className="svg-icon">
+    <rect x="12" y="20" width="40" height="36" rx="3" fill="url(#hospitalGrad)" />
+    <rect x="8" y="16" width="48" height="8" rx="2" fill="url(#hospitalGrad2)" />
+    <rect x="26" y="36" width="12" height="20" fill="#ffffff" />
+    <rect x="28" y="26" width="8" height="6" rx="1" fill="#ffffff" />
+    <rect x="18" y="28" width="6" height="6" rx="1" fill="#ffffff" opacity="0.8" />
+    <rect x="40" y="28" width="6" height="6" rx="1" fill="#ffffff" opacity="0.8" />
+    <rect x="18" y="40" width="6" height="6" rx="1" fill="#ffffff" opacity="0.8" />
+    <rect x="40" y="40" width="6" height="6" rx="1" fill="#ffffff" opacity="0.8" />
+    <path d="M30 8H34V16H30V8Z" fill="url(#hospitalGrad)" />
+    <path d="M28 10H36V14H28V10Z" fill="url(#hospitalGrad2)" />
+    <defs>
+      <linearGradient id="hospitalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#125c7a" />
+        <stop offset="100%" stopColor="#0d4a63" />
+      </linearGradient>
+      <linearGradient id="hospitalGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#a23f97" />
+        <stop offset="100%" stopColor="#8a3582" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
+const AnalyticsIcon = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" className="svg-icon">
+    <rect x="8" y="8" width="48" height="48" rx="6" fill="#f0f9ff" stroke="url(#analyticsGrad)" strokeWidth="2" />
+    <rect x="14" y="36" width="8" height="16" rx="2" fill="url(#analyticsGrad)" />
+    <rect x="28" y="24" width="8" height="28" rx="2" fill="url(#analyticsGrad2)" />
+    <rect x="42" y="16" width="8" height="36" rx="2" fill="url(#analyticsGrad)" />
+    <path d="M14 20L24 14L38 22L50 10" stroke="url(#analyticsGrad2)" strokeWidth="3" strokeLinecap="round" />
+    <circle cx="50" cy="10" r="3" fill="#a23f97" />
+    <defs>
+      <linearGradient id="analyticsGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#125c7a" />
+        <stop offset="100%" stopColor="#0d4a63" />
+      </linearGradient>
+      <linearGradient id="analyticsGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#a23f97" />
+        <stop offset="100%" stopColor="#8a3582" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
+const SecurityIcon = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" className="svg-icon">
+    <path d="M32 4L8 14V30C8 46 18 54 32 60C46 54 56 46 56 30V14L32 4Z" fill="url(#securityGrad)" />
+    <path d="M32 8L12 16V30C12 43 20 50 32 55C44 50 52 43 52 30V16L32 8Z" fill="#ffffff" opacity="0.2" />
+    <path d="M26 32L30 36L40 26" stroke="#ffffff" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+    <defs>
+      <linearGradient id="securityGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#125c7a" />
+        <stop offset="100%" stopColor="#a23f97" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
+const IntegrationIcon = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" className="svg-icon">
+    <circle cx="32" cy="32" r="8" fill="url(#integrationGrad)" />
+    <circle cx="32" cy="12" r="6" fill="url(#integrationGrad2)" />
+    <circle cx="52" cy="32" r="6" fill="url(#integrationGrad2)" />
+    <circle cx="32" cy="52" r="6" fill="url(#integrationGrad2)" />
+    <circle cx="12" cy="32" r="6" fill="url(#integrationGrad2)" />
+    <path d="M32 18V24M32 40V46M38 32H44M20 32H26" stroke="url(#integrationGrad)" strokeWidth="3" strokeLinecap="round" />
+    <circle cx="47" cy="17" r="5" fill="url(#integrationGrad)" opacity="0.6" />
+    <circle cx="17" cy="47" r="5" fill="url(#integrationGrad)" opacity="0.6" />
+    <circle cx="47" cy="47" r="5" fill="url(#integrationGrad)" opacity="0.6" />
+    <circle cx="17" cy="17" r="5" fill="url(#integrationGrad)" opacity="0.6" />
+    <defs>
+      <linearGradient id="integrationGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#125c7a" />
+        <stop offset="100%" stopColor="#0d4a63" />
+      </linearGradient>
+      <linearGradient id="integrationGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#a23f97" />
+        <stop offset="100%" stopColor="#8a3582" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
+const MedicalRecordsIcon = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" className="svg-icon">
+    <rect x="10" y="6" width="44" height="52" rx="4" fill="#f0f9ff" stroke="url(#recordsGrad)" strokeWidth="2" />
+    <rect x="16" y="12" width="32" height="8" rx="2" fill="url(#recordsGrad)" />
+    <rect x="16" y="26" width="24" height="3" rx="1" fill="url(#recordsGrad)" opacity="0.5" />
+    <rect x="16" y="34" width="28" height="3" rx="1" fill="url(#recordsGrad)" opacity="0.5" />
+    <rect x="16" y="42" width="20" height="3" rx="1" fill="url(#recordsGrad)" opacity="0.5" />
+    <circle cx="44" cy="44" r="12" fill="url(#recordsGrad2)" />
+    <path d="M44 38V50M38 44H50" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" />
+    <defs>
+      <linearGradient id="recordsGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#125c7a" />
+        <stop offset="100%" stopColor="#0d4a63" />
+      </linearGradient>
+      <linearGradient id="recordsGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#a23f97" />
+        <stop offset="100%" stopColor="#8a3582" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
+const PrescriptionIcon = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" className="svg-icon">
+    <ellipse cx="20" cy="32" rx="12" ry="20" fill="url(#pillGrad1)" />
+    <ellipse cx="20" cy="22" rx="12" ry="10" fill="url(#pillGrad2)" />
+    <ellipse cx="44" cy="32" rx="12" ry="20" transform="rotate(45 44 32)" fill="url(#pillGrad2)" />
+    <ellipse cx="38" cy="26" rx="12" ry="10" transform="rotate(45 38 26)" fill="url(#pillGrad1)" />
+    <defs>
+      <linearGradient id="pillGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#125c7a" />
+        <stop offset="100%" stopColor="#0d4a63" />
+      </linearGradient>
+      <linearGradient id="pillGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#a23f97" />
+        <stop offset="100%" stopColor="#8a3582" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
+const ReportsIcon = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" className="svg-icon">
+    <rect x="6" y="8" width="36" height="48" rx="4" fill="#f0f9ff" stroke="url(#reportsGrad)" strokeWidth="2" />
+    <rect x="12" y="16" width="24" height="4" rx="1" fill="url(#reportsGrad)" opacity="0.5" />
+    <rect x="12" y="24" width="18" height="3" rx="1" fill="url(#reportsGrad)" opacity="0.3" />
+    <rect x="12" y="30" width="20" height="3" rx="1" fill="url(#reportsGrad)" opacity="0.3" />
+    <rect x="12" y="38" width="16" height="3" rx="1" fill="url(#reportsGrad)" opacity="0.3" />
+    <rect x="36" y="24" width="22" height="32" rx="3" fill="url(#reportsGrad2)" />
+    <path d="M42 36L46 44L54 32" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M42 48H52" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" opacity="0.7" />
+    <defs>
+      <linearGradient id="reportsGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#125c7a" />
+        <stop offset="100%" stopColor="#0d4a63" />
+      </linearGradient>
+      <linearGradient id="reportsGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#a23f97" />
+        <stop offset="100%" stopColor="#8a3582" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
+const AIBrainIcon = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" className="svg-icon">
+    <ellipse cx="32" cy="28" rx="20" ry="18" fill="url(#brainGrad)" />
+    <path d="M20 28C20 28 22 20 28 18C34 16 36 22 32 26C28 30 24 28 26 24" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" opacity="0.6" />
+    <path d="M44 28C44 28 42 20 36 18C30 16 28 22 32 26C36 30 40 28 38 24" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" opacity="0.6" />
+    <circle cx="32" cy="32" r="3" fill="#ffffff" />
+    <path d="M32 46V54" stroke="url(#brainGrad)" strokeWidth="3" strokeLinecap="round" />
+    <path d="M26 50H38" stroke="url(#brainGrad)" strokeWidth="3" strokeLinecap="round" />
+    <circle cx="18" cy="14" r="4" fill="url(#brainGrad2)" opacity="0.7" />
+    <circle cx="46" cy="14" r="4" fill="url(#brainGrad2)" opacity="0.7" />
+    <circle cx="12" cy="28" r="3" fill="url(#brainGrad2)" opacity="0.5" />
+    <circle cx="52" cy="28" r="3" fill="url(#brainGrad2)" opacity="0.5" />
+    <path d="M18 14L24 20" stroke="url(#brainGrad2)" strokeWidth="2" opacity="0.5" />
+    <path d="M46 14L40 20" stroke="url(#brainGrad2)" strokeWidth="2" opacity="0.5" />
+    <defs>
+      <linearGradient id="brainGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#a23f97" />
+        <stop offset="100%" stopColor="#8a3582" />
+      </linearGradient>
+      <linearGradient id="brainGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#125c7a" />
+        <stop offset="100%" stopColor="#0d4a63" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
+const AIConsultationIcon = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" className="svg-icon">
+    <circle cx="24" cy="20" r="10" fill="url(#consultGrad)" />
+    <path d="M24 34C14 34 8 40 8 48V54H40V48C40 40 34 34 24 34Z" fill="url(#consultGrad)" />
+    <rect x="34" y="28" width="24" height="28" rx="4" fill="url(#consultGrad2)" />
+    <circle cx="46" cy="38" r="4" fill="#ffffff" />
+    <path d="M40 50H52" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" />
+    <path d="M42 46H50" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" opacity="0.6" />
+    <circle cx="52" cy="18" r="8" fill="url(#consultGrad2)" opacity="0.3" />
+    <path d="M48 18H56M52 14V22" stroke="url(#consultGrad2)" strokeWidth="2" strokeLinecap="round" />
+    <defs>
+      <linearGradient id="consultGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#125c7a" />
+        <stop offset="100%" stopColor="#0d4a63" />
+      </linearGradient>
+      <linearGradient id="consultGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#a23f97" />
+        <stop offset="100%" stopColor="#8a3582" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
+const PortalIcon = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" className="svg-icon">
+    <circle cx="32" cy="32" r="24" fill="none" stroke="url(#portalGrad)" strokeWidth="3" />
+    <ellipse cx="32" cy="32" rx="10" ry="24" fill="none" stroke="url(#portalGrad)" strokeWidth="2" />
+    <ellipse cx="32" cy="32" rx="24" ry="10" fill="none" stroke="url(#portalGrad2)" strokeWidth="2" />
+    <circle cx="32" cy="32" r="6" fill="url(#portalGrad2)" />
+    <circle cx="32" cy="8" r="3" fill="url(#portalGrad)" />
+    <circle cx="32" cy="56" r="3" fill="url(#portalGrad)" />
+    <circle cx="8" cy="32" r="3" fill="url(#portalGrad2)" />
+    <circle cx="56" cy="32" r="3" fill="url(#portalGrad2)" />
+    <defs>
+      <linearGradient id="portalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#125c7a" />
+        <stop offset="100%" stopColor="#0d4a63" />
+      </linearGradient>
+      <linearGradient id="portalGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#a23f97" />
+        <stop offset="100%" stopColor="#8a3582" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
+const TargetIcon = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" className="svg-icon small-icon">
+    <circle cx="32" cy="32" r="24" fill="none" stroke="url(#targetGrad)" strokeWidth="3" />
+    <circle cx="32" cy="32" r="16" fill="none" stroke="url(#targetGrad)" strokeWidth="2" opacity="0.7" />
+    <circle cx="32" cy="32" r="8" fill="none" stroke="url(#targetGrad)" strokeWidth="2" opacity="0.5" />
+    <circle cx="32" cy="32" r="4" fill="url(#targetGrad2)" />
+    <defs>
+      <linearGradient id="targetGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#125c7a" />
+        <stop offset="100%" stopColor="#0d4a63" />
+      </linearGradient>
+      <linearGradient id="targetGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#a23f97" />
+        <stop offset="100%" stopColor="#8a3582" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
+const LocationIcon = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" className="svg-icon contact-icon">
+    <path d="M32 4C20 4 12 14 12 24C12 40 32 60 32 60C32 60 52 40 52 24C52 14 44 4 32 4Z" fill="url(#locationGrad)" />
+    <circle cx="32" cy="24" r="8" fill="#ffffff" />
+    <defs>
+      <linearGradient id="locationGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#a23f97" />
+        <stop offset="100%" stopColor="#8a3582" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
+const PhoneIcon = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" className="svg-icon contact-icon">
+    <path d="M14 8C14 8 10 8 10 14C10 20 14 38 26 50C38 62 50 54 50 54C56 50 56 46 56 46L46 36L40 40C40 40 32 36 26 30C20 24 18 18 18 18L24 12L14 8Z" fill="url(#phoneGrad)" />
+    <defs>
+      <linearGradient id="phoneGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#a23f97" />
+        <stop offset="100%" stopColor="#8a3582" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
+
+const EmailIcon = () => (
+  <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" className="svg-icon contact-icon">
+    <rect x="6" y="14" width="52" height="36" rx="4" fill="url(#emailGrad)" />
+    <path d="M6 18L32 36L58 18" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+    <defs>
+      <linearGradient id="emailGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#a23f97" />
+        <stop offset="100%" stopColor="#8a3582" />
+      </linearGradient>
+    </defs>
+  </svg>
+);
 
 const Login = () => {
   const navigate = useNavigate();
@@ -11,17 +293,11 @@ const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    name: '',
-    email: '',
-    phone: '',
-    message: ''
-  });
 
   // Modal state
   const [modal, setModal] = useState({
     isOpen: false,
-    type: '', // 'success' or 'error'
+    type: '',
     title: '',
     message: '',
     onClose: null
@@ -32,7 +308,7 @@ const Login = () => {
   // ============================================
   const [forgotPasswordModal, setForgotPasswordModal] = useState({
     isOpen: false,
-    step: 1, // 1: Enter Email, 2: Enter OTP, 3: New Password, 4: Success
+    step: 1,
     email: '',
     otp: ['', '', '', '', '', ''],
     newPassword: '',
@@ -46,88 +322,63 @@ const Login = () => {
 
   const otpInputsRef = useRef([]);
 
+  // Features for carousel - NO APPOINTMENTS
   const features = [
     {
       title: "إدارة متكاملة للمرضى",
-      description: "نظام شامل لإدارة السجلات الطبية والمواعيد والوصفات الطبية",
-      icon: "🏥",
+      description: "نظام شامل لإدارة السجلات الطبية والوصفات الطبية",
+      icon: <HospitalIcon />,
       highlight: "رعاية صحية متقدمة"
     },
     {
       title: "تحليلات ذكية",
       description: "رؤى عميقة وتقارير مفصلة لتحسين جودة الرعاية الصحية",
-      icon: "📊",
+      icon: <AnalyticsIcon />,
       highlight: "قرارات مبنية على البيانات"
     },
     {
       title: "أمان على مستوى طبي",
       description: "حماية البيانات بأعلى معايير الأمان الطبي العالمية",
-      icon: "🔒",
+      icon: <SecurityIcon />,
       highlight: "خصوصية مضمونة"
     },
     {
       title: "تكامل سلس",
       description: "ربط جميع الأقسام الطبية في منصة واحدة متكاملة",
-      icon: "🔗",
+      icon: <IntegrationIcon />,
       highlight: "كفاءة تشغيلية عالية"
     }
   ];
 
-  const teamMembers = [
-    {
-      name: "معاذ جبري",
-      role: "المدير التنفيذي",
-      image: "👨‍⚕️",
-      bio: "خبرة 15 عاماً في التحول الرقمي الصحي"
-    },
-    {
-      name: "أنس النابلسي",
-      role: "مدير التطوير",
-      image: "👩‍⚕️",
-      bio: "متخصص في أنظمة المعلومات الطبية"
-    },
-    {
-      name: "علي راعي",
-      role: "مدير التقنية",
-      image: "👨‍💻",
-      bio: "خبير في الأمن السيبراني والبنية التحتية"
-    },
-    {
-      name: "كنان المجذوب",
-      role: "مدير العمليات",
-      image: "👩‍💼",
-      bio: "رائدة في تحسين العمليات الصحية"
-    }
-  ];
-
+  // Services - REMOVED APPOINTMENTS & NOTIFICATIONS, ADDED AI FEATURES
   const services = [
     {
-      icon: "📋",
+      icon: <MedicalRecordsIcon />,
       title: "السجلات الطبية الإلكترونية",
       description: "إدارة شاملة للسجلات الطبية مع إمكانية الوصول الفوري والآمن"
     },
     {
-      icon: "📅",
-      title: "نظام المواعيد الذكي",
-      description: "جدولة مواعيد ذكية مع تذكيرات تلقائية وإدارة قوائم الانتظار"
+      icon: <AIBrainIcon />,
+      title: "التشخيص بالذكاء الاصطناعي",
+      description: "نماذج ذكاء اصطناعي متقدمة تساعد الأطباء في التشخيص وتحليل البيانات الطبية"
     },
     {
-      icon: "💊",
+      icon: <PrescriptionIcon />,
       title: "إدارة الوصفات الطبية",
       description: "نظام متكامل للوصفات الإلكترونية مع تتبع الأدوية والتفاعلات"
     },
     {
-      icon: "📈",
+      icon: <ReportsIcon />,
       title: "التقارير والتحليلات",
       description: "لوحات تحكم تفاعلية وتقارير مفصلة لاتخاذ قرارات مستنيرة"
     },
     {
-      icon: "🔔",
-      title: "نظام التنبيهات",
-      description: "تنبيهات ذكية للمواعيد والأدوية والمتابعات الطبية"
+      icon: <AIConsultationIcon />,
+      title: "الاستشارة الذكية للمرضى",
+      description: "نظام ذكي يساعد المرضى في فهم حالاتهم الصحية والإرشادات الطبية"
     },
     {
-      icon: "🌐",
+      icon: <PortalIcon />,
       title: "البوابة الإلكترونية",
       description: "بوابة تفاعلية للمرضى للوصول إلى سجلاتهم ونتائج الفحوصات"
     }
@@ -148,7 +399,6 @@ const Login = () => {
       try {
         const user = JSON.parse(currentUser);
         
-        // Redirect based on role
         const dashboardRoutes = {
           'doctor': '/doctor-dashboard',
           'patient': '/patient-dashboard',
@@ -180,16 +430,10 @@ const Login = () => {
     return () => clearInterval(interval);
   }, [forgotPasswordModal.resendTimer]);
 
-  /**
-   * Opens modal dialog
-   */
   const openModal = (type, title, message, onClose = null) => {
     setModal({ isOpen: true, type, title, message, onClose });
   };
 
-  /**
-   * Closes modal dialog
-   */
   const closeModal = () => {
     if (modal.onClose) {
       modal.onClose();
@@ -201,9 +445,6 @@ const Login = () => {
   // FORGOT PASSWORD FUNCTIONS
   // ============================================
 
-  /**
-   * Opens the forgot password modal
-   */
   const openForgotPasswordModal = (e) => {
     e.preventDefault();
     setForgotPasswordModal({
@@ -221,9 +462,6 @@ const Login = () => {
     });
   };
 
-  /**
-   * Closes the forgot password modal
-   */
   const closeForgotPasswordModal = () => {
     setForgotPasswordModal(prev => ({
       ...prev,
@@ -231,17 +469,11 @@ const Login = () => {
     }));
   };
 
-  /**
-   * Validates email format
-   */
   const isValidEmail = (email) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email);
   };
 
-  /**
-   * Validates password strength
-   */
   const validatePassword = (password) => {
     const minLength = password.length >= 8;
     const hasUppercase = /[A-Z]/.test(password);
@@ -259,9 +491,6 @@ const Login = () => {
     };
   };
 
-  /**
-   * Handle Step 1: Send OTP to email
-   */
   const handleSendOTP = async () => {
     const emailToSend = forgotPasswordModal.email.trim().toLowerCase();
     
@@ -288,8 +517,6 @@ const Login = () => {
     }));
 
     try {
-      // ✅ Call Backend API to send OTP
-      // Replace with your actual API endpoint
       const response = await authAPI.forgotPassword({ email: emailToSend });
       
       console.log('✅ OTP sent successfully:', response);
@@ -305,8 +532,6 @@ const Login = () => {
     } catch (error) {
       console.error('❌ Error sending OTP:', error);
       
-      // For demo purposes, move to step 2 even if API fails
-      // Remove this in production and show actual error
       setForgotPasswordModal(prev => ({
         ...prev,
         isLoading: false,
@@ -314,21 +539,10 @@ const Login = () => {
         resendTimer: 60,
         error: ''
       }));
-      
-      // Uncomment below for production:
-      // setForgotPasswordModal(prev => ({
-      //   ...prev,
-      //   isLoading: false,
-      //   error: error.message || 'حدث خطأ أثناء إرسال رمز التحقق'
-      // }));
     }
   };
 
-  /**
-   * Handle OTP input change
-   */
   const handleOtpChange = (index, value) => {
-    // Only allow numbers
     if (value && !/^\d$/.test(value)) return;
 
     const newOtp = [...forgotPasswordModal.otp];
@@ -340,24 +554,17 @@ const Login = () => {
       error: ''
     }));
 
-    // Auto-focus next input
     if (value && index < 5) {
       otpInputsRef.current[index + 1]?.focus();
     }
   };
 
-  /**
-   * Handle OTP input keydown (for backspace navigation)
-   */
   const handleOtpKeyDown = (index, e) => {
     if (e.key === 'Backspace' && !forgotPasswordModal.otp[index] && index > 0) {
       otpInputsRef.current[index - 1]?.focus();
     }
   };
 
-  /**
-   * Handle OTP paste
-   */
   const handleOtpPaste = (e) => {
     e.preventDefault();
     const pastedData = e.clipboardData.getData('text').slice(0, 6);
@@ -374,15 +581,11 @@ const Login = () => {
       error: ''
     }));
 
-    // Focus the next empty input or the last one
     const nextEmptyIndex = newOtp.findIndex(val => !val);
     const focusIndex = nextEmptyIndex === -1 ? 5 : nextEmptyIndex;
     otpInputsRef.current[focusIndex]?.focus();
   };
 
-  /**
-   * Handle Step 2: Verify OTP
-   */
   const handleVerifyOTP = async () => {
     const otpCode = forgotPasswordModal.otp.join('');
     
@@ -401,8 +604,6 @@ const Login = () => {
     }));
 
     try {
-      // ✅ Call Backend API to verify OTP
-      // Replace with your actual API endpoint
       const response = await authAPI.verifyOTP({ 
         email: forgotPasswordModal.email, 
         otp: otpCode 
@@ -420,7 +621,6 @@ const Login = () => {
     } catch (error) {
       console.error('❌ Error verifying OTP:', error);
       
-      // Show actual error to user
       setForgotPasswordModal(prev => ({
         ...prev,
         isLoading: false,
@@ -429,9 +629,6 @@ const Login = () => {
     }
   };
 
-  /**
-   * Handle Step 3: Reset Password
-   */
   const handleResetPassword = async () => {
     const { newPassword, confirmPassword } = forgotPasswordModal;
     
@@ -467,8 +664,6 @@ const Login = () => {
     }));
 
     try {
-      // ✅ Call Backend API to reset password
-      // Replace with your actual API endpoint
       const response = await authAPI.resetPassword({ 
         email: forgotPasswordModal.email, 
         otp: forgotPasswordModal.otp.join(''),
@@ -487,27 +682,15 @@ const Login = () => {
     } catch (error) {
       console.error('❌ Error resetting password:', error);
       
-      // For demo purposes, move to success step even if API fails
-      // Remove this in production and show actual error
       setForgotPasswordModal(prev => ({
         ...prev,
         isLoading: false,
         step: 4,
         error: ''
       }));
-      
-      // Uncomment below for production:
-      // setForgotPasswordModal(prev => ({
-      //   ...prev,
-      //   isLoading: false,
-      //   error: error.message || 'حدث خطأ أثناء إعادة تعيين كلمة المرور'
-      // }));
     }
   };
 
-  /**
-   * Handle resend OTP
-   */
   const handleResendOTP = async () => {
     if (forgotPasswordModal.resendTimer > 0) return;
 
@@ -518,7 +701,6 @@ const Login = () => {
     }));
 
     try {
-      // ✅ Call Backend API to resend OTP
       await authAPI.forgotPassword({ email: forgotPasswordModal.email });
       
       setForgotPasswordModal(prev => ({
@@ -529,13 +711,11 @@ const Login = () => {
         error: ''
       }));
 
-      // Focus first OTP input
       otpInputsRef.current[0]?.focus();
 
     } catch (error) {
       console.error('❌ Error resending OTP:', error);
       
-      // For demo, reset timer anyway
       setForgotPasswordModal(prev => ({
         ...prev,
         isLoading: false,
@@ -546,103 +726,80 @@ const Login = () => {
     }
   };
 
-  /**
-   * Handle user login with localStorage
-   * Works with accounts created through SignUp page
-   */
   const handleLogin = async (e) => {
-  e.preventDefault();
-  
-  // Validation
-  if (!email.trim()) {
-    openModal('error', 'خطأ', 'الرجاء إدخال البريد الإلكتروني', null);
-    return;
-  }
-  
-  if (!password.trim()) {
-    openModal('error', 'خطأ', 'الرجاء إدخال كلمة المرور', null);
-    return;
-  }
-  
-  setIsLoading(true);
-  
-  try {
-    // ✅ UPDATED: Call Backend API
-    const response = await authAPI.login({
-      email: email.trim().toLowerCase(),
-      password: password
-    });
-
-    setIsLoading(false);
-
-    // Show success modal and route based on role
-    const user = response.user;
-    const roleLabels = {
-      patient: 'مريض',
-      doctor: 'طبيب',
-      admin: 'مسؤول النظام'
-    };
-
-    const primaryRole = user.roles && user.roles[0];
-
-    openModal(
-      'success',
-      'تم تسجيل الدخول بنجاح! ✅',
-      `مرحباً ${user.firstName} ${user.lastName}\n\nتم تسجيل دخولك كـ ${roleLabels[primaryRole]}`,
-      () => {
-        // Route based on user role
-        const dashboardRoutes = {
-          'patient': '/patient-dashboard',
-          'doctor': '/doctor-dashboard',
-          'admin': '/admin-dashboard'
-        };
-        
-        navigate(dashboardRoutes[primaryRole] || '/');
-      }
-    );
-
-    console.log('✅ Login successful:', {
-      email: user.email,
-      role: primaryRole,
-      name: `${user.firstName} ${user.lastName}`
-    });
-
-  } catch (error) {
-    setIsLoading(false);
-    console.error('❌ Login error:', error);
+    e.preventDefault();
     
-    // Handle specific error messages from backend
-    let errorMessage = 'حدث خطأ أثناء تسجيل الدخول';
-    
-    if (error.message) {
-      errorMessage = error.message;
-    } else if (error.error) {
-      errorMessage = error.error;
+    if (!email.trim()) {
+      openModal('error', 'خطأ', 'الرجاء إدخال البريد الإلكتروني', null);
+      return;
     }
     
-    openModal(
-      'error',
-      'خطأ في تسجيل الدخول',
-      errorMessage,
-      null
-    );
-  }
-};
+    if (!password.trim()) {
+      openModal('error', 'خطأ', 'الرجاء إدخال كلمة المرور', null);
+      return;
+    }
+    
+    setIsLoading(true);
+    
+    try {
+      const response = await authAPI.login({
+        email: email.trim().toLowerCase(),
+        password: password
+      });
 
-  const handleContactSubmit = (e) => {
-    e.preventDefault();
-    console.log('Contact form:', formData);
-    openModal(
-      'success',
-      'تم إرسال الرسالة',
-      'تم إرسال رسالتك بنجاح!\n\nسنتواصل معك قريباً.'
-    );
-    setFormData({ name: '', email: '', phone: '', message: '' });
+      setIsLoading(false);
+
+      const user = response.user;
+      const roleLabels = {
+        patient: 'مريض',
+        doctor: 'طبيب',
+        admin: 'مسؤول النظام'
+      };
+
+      const primaryRole = user.roles && user.roles[0];
+
+      openModal(
+        'success',
+        'تم تسجيل الدخول بنجاح! ✅',
+        `مرحباً ${user.firstName} ${user.lastName}\n\nتم تسجيل دخولك كـ ${roleLabels[primaryRole]}`,
+        () => {
+          const dashboardRoutes = {
+            'patient': '/patient-dashboard',
+            'doctor': '/doctor-dashboard',
+            'admin': '/admin-dashboard'
+          };
+          
+          navigate(dashboardRoutes[primaryRole] || '/');
+        }
+      );
+
+      console.log('✅ Login successful:', {
+        email: user.email,
+        role: primaryRole,
+        name: `${user.firstName} ${user.lastName}`
+      });
+
+    } catch (error) {
+      setIsLoading(false);
+      console.error('❌ Login error:', error);
+      
+      let errorMessage = 'حدث خطأ أثناء تسجيل الدخول';
+      
+      if (error.message) {
+        errorMessage = error.message;
+      } else if (error.error) {
+        errorMessage = error.error;
+      }
+      
+      openModal(
+        'error',
+        'خطأ في تسجيل الدخول',
+        errorMessage,
+        null
+      );
+    }
   };
 
-  /**
-   * Render Forgot Password Modal Content based on step
-   */
   const renderForgotPasswordContent = () => {
     const { step, email: fpEmail, otp, newPassword, confirmPassword, isLoading: fpLoading, error, resendTimer, showNewPassword, showConfirmPassword } = forgotPasswordModal;
 
@@ -666,7 +823,7 @@ const Login = () => {
             <div className="fp-modal-body">
               {error && (
                 <div className="fp-error-alert">
-                  <span className="fp-error-icon">⚠️</span>
+                  <span className="fp-error-icon">⚠</span>
                   <span>{error}</span>
                 </div>
               )}
@@ -674,7 +831,12 @@ const Login = () => {
               <div className="fp-form-group">
                 <label className="fp-label">البريد الإلكتروني</label>
                 <div className="fp-input-wrapper">
-                  <span className="fp-input-icon">📧</span>
+                  <span className="fp-input-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#125c7a" strokeWidth="2">
+                      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                      <polyline points="22,6 12,13 2,6"/>
+                    </svg>
+                  </span>
                   <input
                     type="email"
                     className="fp-input"
@@ -705,7 +867,7 @@ const Login = () => {
                 ) : (
                   <>
                     <span>إرسال رمز التحقق</span>
-                    <span className="fp-button-icon">→</span>
+                    <span className="fp-button-icon">←</span>
                   </>
                 )}
               </button>
@@ -742,7 +904,7 @@ const Login = () => {
             <div className="fp-modal-body">
               {error && (
                 <div className="fp-error-alert">
-                  <span className="fp-error-icon">⚠️</span>
+                  <span className="fp-error-icon">⚠</span>
                   <span>{error}</span>
                 </div>
               )}
@@ -782,7 +944,7 @@ const Login = () => {
                 ) : (
                   <>
                     <span>تحقق من الرمز</span>
-                    <span className="fp-button-icon">→</span>
+                    <span className="fp-button-icon">←</span>
                   </>
                 )}
               </button>
@@ -798,7 +960,11 @@ const Login = () => {
                     onClick={handleResendOTP}
                     disabled={fpLoading}
                   >
-                    🔄 إعادة إرسال الرمز
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{marginLeft: '6px'}}>
+                      <path d="M23 4v6h-6M1 20v-6h6"/>
+                      <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+                    </svg>
+                    إعادة إرسال الرمز
                   </button>
                 )}
               </div>
@@ -809,7 +975,7 @@ const Login = () => {
                 className="fp-link-button" 
                 onClick={() => setForgotPasswordModal(prev => ({ ...prev, step: 1, error: '' }))}
               >
-                ← تغيير البريد الإلكتروني
+                → تغيير البريد الإلكتروني
               </button>
             </div>
           </>
@@ -836,7 +1002,7 @@ const Login = () => {
             <div className="fp-modal-body">
               {error && (
                 <div className="fp-error-alert">
-                  <span className="fp-error-icon">⚠️</span>
+                  <span className="fp-error-icon">⚠</span>
                   <span>{error}</span>
                 </div>
               )}
@@ -844,7 +1010,12 @@ const Login = () => {
               <div className="fp-form-group">
                 <label className="fp-label">كلمة المرور الجديدة</label>
                 <div className="fp-input-wrapper password">
-                  <span className="fp-input-icon">🔐</span>
+                  <span className="fp-input-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#125c7a" strokeWidth="2">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                      <path d="M7 11V7a5 5 0 0110 0v4"/>
+                    </svg>
+                  </span>
                   <input
                     type={showNewPassword ? "text" : "password"}
                     className="fp-input"
@@ -867,12 +1038,21 @@ const Login = () => {
                       showNewPassword: !prev.showNewPassword
                     }))}
                   >
-                    {showNewPassword ? '🙈' : '👁️'}
+                    {showNewPassword ? (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2">
+                        <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/>
+                        <line x1="1" y1="1" x2="23" y2="23"/>
+                      </svg>
+                    ) : (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                      </svg>
+                    )}
                   </button>
                 </div>
               </div>
 
-              {/* Password Strength Indicator */}
               {newPassword && (
                 <div className="fp-password-strength">
                   <div className="fp-strength-bars">
@@ -901,7 +1081,12 @@ const Login = () => {
               <div className="fp-form-group">
                 <label className="fp-label">تأكيد كلمة المرور</label>
                 <div className="fp-input-wrapper password">
-                  <span className="fp-input-icon">🔐</span>
+                  <span className="fp-input-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#125c7a" strokeWidth="2">
+                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                      <path d="M7 11V7a5 5 0 0110 0v4"/>
+                    </svg>
+                  </span>
                   <input
                     type={showConfirmPassword ? "text" : "password"}
                     className="fp-input"
@@ -923,7 +1108,17 @@ const Login = () => {
                       showConfirmPassword: !prev.showConfirmPassword
                     }))}
                   >
-                    {showConfirmPassword ? '🙈' : '👁️'}
+                    {showConfirmPassword ? (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2">
+                        <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/>
+                        <line x1="1" y1="1" x2="23" y2="23"/>
+                      </svg>
+                    ) : (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                      </svg>
+                    )}
                   </button>
                 </div>
                 {confirmPassword && newPassword !== confirmPassword && (
@@ -958,7 +1153,7 @@ const Login = () => {
                 className="fp-link-button" 
                 onClick={() => setForgotPasswordModal(prev => ({ ...prev, step: 2, error: '' }))}
               >
-                ← العودة للخطوة السابقة
+                → العودة للخطوة السابقة
               </button>
             </div>
           </>
@@ -976,7 +1171,7 @@ const Login = () => {
                   </svg>
                 </div>
               </div>
-              <h2 className="fp-title success">تم بنجاح! 🎉</h2>
+              <h2 className="fp-title success">تم بنجاح!</h2>
               <p className="fp-subtitle">تم إعادة تعيين كلمة المرور بنجاح</p>
             </div>
 
@@ -984,7 +1179,12 @@ const Login = () => {
               <div className="fp-success-message">
                 <p>يمكنك الآن تسجيل الدخول باستخدام كلمة المرور الجديدة</p>
                 <div className="fp-success-details">
-                  <span className="fp-detail-icon">📧</span>
+                  <span className="fp-detail-icon">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2">
+                      <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                      <polyline points="22,6 12,13 2,6"/>
+                    </svg>
+                  </span>
                   <span className="fp-detail-text">{fpEmail}</span>
                 </div>
               </div>
@@ -994,7 +1194,7 @@ const Login = () => {
                 onClick={closeForgotPasswordModal}
               >
                 <span>العودة لتسجيل الدخول</span>
-                <span className="fp-button-icon">←</span>
+                <span className="fp-button-icon">→</span>
               </button>
             </div>
           </>
@@ -1005,9 +1205,6 @@ const Login = () => {
     }
   };
 
-  /**
-   * Render step progress indicator
-   */
   const renderStepProgress = () => {
     const { step } = forgotPasswordModal;
     if (step === 4) return null;
@@ -1073,9 +1270,7 @@ const Login = () => {
         </div>
       )}
 
-      {/* ============================================
-          FORGOT PASSWORD MODAL
-          ============================================ */}
+      {/* Forgot Password Modal */}
       {forgotPasswordModal.isOpen && (
         <div 
           className="fp-modal-overlay"
@@ -1086,15 +1281,10 @@ const Login = () => {
           }}
         >
           <div className="fp-modal-container" onClick={(e) => e.stopPropagation()}>
-            {/* Close Button */}
             <button className="fp-close-button" onClick={closeForgotPasswordModal}>
               ✕
             </button>
-
-            {/* Step Progress Indicator */}
             {renderStepProgress()}
-
-            {/* Modal Content */}
             {renderForgotPasswordContent()}
           </div>
         </div>
@@ -1237,18 +1427,18 @@ const Login = () => {
             
             <div className="about-image">
               <div className="image-placeholder">
-                <span className="placeholder-icon">🏥</span>
+                <span className="placeholder-icon"><HospitalIcon /></span>
                 <div className="floating-card card-1">
-                  <span>📊</span>
+                  <span><AnalyticsIcon /></span>
                   <span>تحليلات متقدمة</span>
                 </div>
                 <div className="floating-card card-2">
-                  <span>🔒</span>
+                  <span><SecurityIcon /></span>
                   <span>أمان عالي</span>
                 </div>
                 <div className="floating-card card-3">
-                  <span>⚡</span>
-                  <span>أداء فائق</span>
+                  <span><AIBrainIcon /></span>
+                  <span>ذكاء اصطناعي</span>
                 </div>
               </div>
             </div>
@@ -1295,19 +1485,19 @@ const Login = () => {
               <h3>أهدافنا</h3>
               <div className="vision-goals">
                 <div className="goal-item">
-                  <span className="goal-icon">🎯</span>
+                  <span className="goal-icon"><TargetIcon /></span>
                   <span>تحسين تجربة المريض</span>
                 </div>
                 <div className="goal-item">
-                  <span className="goal-icon">🎯</span>
+                  <span className="goal-icon"><TargetIcon /></span>
                   <span>رفع كفاءة العمليات الطبية</span>
                 </div>
                 <div className="goal-item">
-                  <span className="goal-icon">🎯</span>
+                  <span className="goal-icon"><TargetIcon /></span>
                   <span>ضمان أمان البيانات الصحية</span>
                 </div>
                 <div className="goal-item">
-                  <span className="goal-icon">🎯</span>
+                  <span className="goal-icon"><TargetIcon /></span>
                   <span>التوسع إقليمياً وعالمياً</span>
                 </div>
               </div>
@@ -1340,33 +1530,7 @@ const Login = () => {
         </div>
       </section>
 
-      {/* Team Section */}
-      <section id="team" className="team-section">
-        <div className="container">
-          <div className="section-header">
-            <h2 className="section-title">فريقنا</h2>
-            <p className="section-subtitle">خبراء متخصصون في خدمتك</p>
-          </div>
-          
-          <div className="team-grid">
-            {teamMembers.map((member, index) => (
-              <div key={index} className="team-card">
-                <div className="member-image">{member.image}</div>
-                <h3>{member.name}</h3>
-                <p className="member-role">{member.role}</p>
-                <p className="member-bio">{member.bio}</p>
-                <div className="social-links">
-                  <a href="#" className="social-link">in</a>
-                  <a href="#" className="social-link">t</a>
-                  <a href="#" className="social-link">@</a>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Contact Section */}
+      {/* Contact Section - SIMPLIFIED WITHOUT FORM */}
       <section id="contact" className="contact-section">
         <div className="container">
           <div className="section-header">
@@ -1374,83 +1538,28 @@ const Login = () => {
             <p className="section-subtitle">نحن هنا لمساعدتك</p>
           </div>
           
-          <div className="contact-content">
-            <div className="contact-info">
+          <div className="contact-content-simplified">
+            <div className="contact-cards-row">
               <div className="info-card">
-                <div className="info-icon">📍</div>
+                <div className="info-icon"><LocationIcon /></div>
                 <h3>العنوان</h3>
                 <p>دمشق، سوريا</p>
                 <p>شارع المزة، بناء الصحة</p>
               </div>
               
               <div className="info-card">
-                <div className="info-icon">📞</div>
+                <div className="info-icon"><PhoneIcon /></div>
                 <h3>الهاتف</h3>
                 <p dir="ltr">+963 11 123 4567</p>
                 <p dir="ltr">+963 11 765 4321</p>
               </div>
               
               <div className="info-card">
-                <div className="info-icon">✉️</div>
+                <div className="info-icon"><EmailIcon /></div>
                 <h3>البريد الإلكتروني</h3>
-                <p dir="ltr">info@patient360.sa</p>
-                <p dir="ltr">support@patient360.sa</p>
+                <p dir="ltr">info@patient360.sy</p>
+                <p dir="ltr">support@patient360.sy</p>
               </div>
-            </div>
-            
-            <div className="contact-form-container">
-              <form className="contact-form" onSubmit={handleContactSubmit}>
-                <div className="form-row">
-                  <div className="form-group">
-                    <label>الاسم الكامل</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={formData.name}
-                      onChange={(e) => setFormData({...formData, name: e.target.value})}
-                      required
-                    />
-                  </div>
-                  
-                  <div className="form-group">
-                    <label>البريد الإلكتروني</label>
-                    <input
-                      type="email"
-                      className="form-input"
-                      value={formData.email}
-                      onChange={(e) => setFormData({...formData, email: e.target.value})}
-                      required
-                      dir="ltr"
-                    />
-                  </div>
-                </div>
-                
-                <div className="form-group">
-                  <label>رقم الهاتف</label>
-                  <input
-                    type="tel"
-                    className="form-input"
-                    value={formData.phone}
-                    onChange={(e) => setFormData({...formData, phone: e.target.value})}
-                    dir="ltr"
-                  />
-                </div>
-                
-                <div className="form-group">
-                  <label>الرسالة</label>
-                  <textarea
-                    className="form-input"
-                    rows="5"
-                    value={formData.message}
-                    onChange={(e) => setFormData({...formData, message: e.target.value})}
-                    required
-                  ></textarea>
-                </div>
-                
-                <button type="submit" className="submit-button">
-                  إرسال الرسالة
-                </button>
-              </form>
             </div>
           </div>
         </div>
@@ -1486,7 +1595,7 @@ const Login = () => {
           </div>
         </div>
 
-        {/* Animated Heart Pulse Logo - TRUE LEFT SIDE - EXACT NAVBAR COPY */}
+        {/* Animated Heart Pulse Logo */}
         <div className="footer-animated-logo">
           <div className="footer-heart-pulse-container">
             <svg className="footer-heart-pulse-svg" viewBox="0 0 50 25" xmlns="http://www.w3.org/2000/svg">
@@ -1519,10 +1628,8 @@ const Login = () => {
       </footer>
 
       <style jsx>{`
-        /* Import the exact navbar fonts */
         @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800;900&display=swap');
 
-        /* Footer positioning */
         .footer {
           position: relative;
         }
@@ -1534,7 +1641,6 @@ const Login = () => {
           align-items: center;
         }
 
-        /* Animated Heart Pulse Logo - EXACT NAVBAR COPY */
         .footer-animated-logo {
           position: absolute;
           left: 13rem;
@@ -1545,7 +1651,6 @@ const Login = () => {
           align-items: center;
         }
 
-        /* EXACT navbar container styling - BIGGER SIZE */
         .footer-heart-pulse-container {
           width: 80px;
           height: 40px;
@@ -1555,27 +1660,23 @@ const Login = () => {
           overflow: visible;
         }
 
-        /* EXACT navbar SVG styling - BIGGER SIZE */
         .footer-heart-pulse-svg {
           width: 100%;
           height: 100%;
           overflow: visible;
         }
 
-        /* EXACT navbar pulse line animation */
         .footer-pulse-line {
           stroke-dasharray: 120;
           stroke-dashoffset: 120;
           animation: footerDrawPulse 2.5s ease-in-out infinite;
         }
 
-        /* EXACT navbar pulse dot animation */
         .footer-pulse-dot {
           animation: footerMoveDot 2.5s ease-in-out infinite;
           filter: drop-shadow(0 0 3px rgba(162, 63, 151, 0.5));
         }
 
-        /* EXACT navbar keyframe animations */
         @keyframes footerDrawPulse {
           0% { stroke-dashoffset: 120; opacity: 0.3; }
           40% { stroke-dashoffset: 0; opacity: 1; }
@@ -1589,7 +1690,6 @@ const Login = () => {
           100% { cx: 48; opacity: 0; }
         }
 
-        /* EXACT navbar brand text styling - BIGGER SIZE */
         .footer-brand-text {
           color: white;
           font-family: 'Inter', sans-serif;
@@ -1602,7 +1702,6 @@ const Login = () => {
           cursor: pointer;
         }
 
-        /* EXACT navbar degree symbol styling - BIGGER SIZE */
         .footer-degree-symbol {
           font-size: 0.7em;
           vertical-align: super;
@@ -1610,7 +1709,6 @@ const Login = () => {
           animation: footerFlash 1.5s ease-in-out infinite;
         }
 
-        /* EXACT navbar flash animation */
         @keyframes footerFlash {
           0%, 100% {
             opacity: 1;
@@ -1620,7 +1718,6 @@ const Login = () => {
           }
         }
 
-        /* Responsive adjustments */
         @media (max-width: 768px) {
           .footer-animated-logo {
             position: relative;
