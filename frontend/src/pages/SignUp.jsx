@@ -1349,10 +1349,12 @@ const SignUp = () => {
     });
   }, []);
 
+
   /* ─────────────────────────────────────────────────────────────────
      FILE UPLOAD HELPERS — factory makes one set of handlers per form
      ───────────────────────────────────────────────────────────────── */
 
+     
   const makeFileHandlers = useCallback((setFn) => {
     const upload = (fieldName, file) => {
       if (file.size > MAX_FILE_BYTES) {
