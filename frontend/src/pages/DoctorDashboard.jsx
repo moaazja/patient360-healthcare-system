@@ -18,6 +18,15 @@
  *  - Recent patients quick access (localStorage cached)
  *  - Cmd/Ctrl+K quick search
  *
+ *  ─────────────────────────────────────────────────────────────────────
+ *  LAB TEST ORDER WORKFLOW (updated):
+ *  ─────────────────────────────────────────────────────────────────────
+ *  The doctor no longer picks a specific laboratory when ordering tests.
+ *  The patient is free to walk into ANY laboratory — the technician
+ *  looks up the patient by national ID and sees the pending order.
+ *  This removes the friction of a patient being tied to one lab they
+ *  may not want (or can't reach).
+ *
  *  DB collections this dashboard reads/writes:
  *    persons, children, patients, doctors, visits, prescriptions,
  *    appointments, availability_slots, lab_tests, notifications
@@ -854,12 +863,12 @@ const DoctorDashboard = () => {
 
   /* ─────────────────────────────────────────────────────────────────
      STATE — طلب تحاليل مختبرية (Lab Test Order)
+     ─────────────────────────────────────────────────────────────────
+     UPDATED: No longer assigns a specific laboratory. The doctor just
+     builds the list of tests; the patient picks any lab they want and
+     the tech looks them up by national ID. See the LAB-TEST-ORDER
+     section header at the top of this file for full context.
      ───────────────────────────────────────────────────────────────── */
-
-  // قائمة المختبرات المتاحة + المختار
-  const [laboratories, setLaboratories] = useState([]);
-  const [labsLoading, setLabsLoading] = useState(false);
-  const [selectedLabId, setSelectedLabId] = useState('');
 
   // التحاليل المضافة للطلب: [{ testName, notes }]
   const [labTests, setLabTests] = useState([]);
@@ -1069,32 +1078,6 @@ const DoctorDashboard = () => {
   }, [navigate]);
 
   /* ─────────────────────────────────────────────────────────────────
-     EFFECT — تحميل المختبرات عند فتح صفحة المريض
-     يُحمّل المختبرات النشطة مرة واحدة فقط، ويُفلتر حسب محافظة المريض
-     عند توفّرها لإظهار الأقرب للمريض أولاً.
-     ───────────────────────────────────────────────────────────────── */
-
-  useEffect(() => {
-    if (!selectedPatient || laboratories.length > 0) return;
-
-    setLabsLoading(true);
-    const governorate = selectedPatient.governorate || undefined;
-
-    doctorAPI.getLaboratories(governorate)
-      .then((data) => {
-        if (data?.laboratories && Array.isArray(data.laboratories)) {
-          setLaboratories(data.laboratories);
-        }
-      })
-      .catch((err) => {
-        // الباك قد لا يحتوي endpoint بعد — لا نعرض خطأ مزعج للطبيب
-        console.warn('[DoctorDashboard] getLaboratories unavailable:', err.message);
-        setLaboratories([]);
-      })
-      .finally(() => setLabsLoading(false));
-  }, [selectedPatient, laboratories.length]);
-
-  /* ─────────────────────────────────────────────────────────────────
      KEYBOARD SHORTCUT — Cmd/Ctrl+K opens patient lookup
      ───────────────────────────────────────────────────────────────── */
 
@@ -1269,7 +1252,6 @@ const DoctorDashboard = () => {
     // إعادة تعيين حقول طلب التحاليل
     setLabTests([]);
     setNewLabTest({ testName: '', notes: '' });
-    setSelectedLabId('');
   }, []);
 
   const handleVitalChange = useCallback((field, value) => {
@@ -1424,19 +1406,18 @@ const DoctorDashboard = () => {
 
   /* ─────────────────────────────────────────────────────────────────
      SAVE VISIT
+     ─────────────────────────────────────────────────────────────────
+     UPDATED for new lab workflow:
+     - No laboratoryId is sent with the lab test payload. The backend
+       now accepts lab tests without a specific lab assigned, leaving
+       the test "free-floating" until any lab tech picks it up via
+       patient national ID search.
      ───────────────────────────────────────────────────────────────── */
 
   const handleSaveVisit = useCallback(async () => {
     if (!selectedPatient) return;
     if (!chiefComplaint.trim()) {
       openModal('error', 'حقل مطلوب', 'الرجاء إدخال الشكوى الرئيسية');
-      return;
-    }
-
-    // التحقق من شروط طلب التحاليل
-    if (labTests.length > 0 && !selectedLabId) {
-      openModal('error', 'حقل مطلوب',
-        'الرجاء اختيار المختبر، أو إزالة التحاليل المضافة');
       return;
     }
 
@@ -1468,19 +1449,19 @@ const DoctorDashboard = () => {
         formData.append('xrayAnalysis', JSON.stringify({ ...xrayResult, model: xrayModel }));
       }
 
-      // الخطوة 1: حفظ الزيارة
+      // Step 1: Save the visit
       const visitResponse = await doctorAPI.savePatientVisit(nationalId, formData);
       const newVisitId = visitResponse?.visit?._id || visitResponse?.visitId;
 
-      // الخطوة 2 (اختيارية): إنشاء طلب التحاليل
+      // Step 2 (optional): Create the lab test order — no laboratory assigned
       let labOrderResult = null;
       let labOrderError = null;
 
-      if (labTests.length > 0 && selectedLabId) {
+      if (labTests.length > 0) {
         try {
           setSubmittingLabOrder(true);
           const labPayload = {
-            laboratoryId: selectedLabId,
+            // laboratoryId is intentionally omitted — patient picks the lab
             testsOrdered: labTests.map((t, idx) => ({
               testCode: `CUSTOM-${idx + 1}`,
               testName: t.testName,
@@ -1513,6 +1494,7 @@ const DoctorDashboard = () => {
 
       if (labOrderResult?.labTest?.testNumber) {
         successMessage += `\n\nتم إرسال طلب التحاليل برقم: ${labOrderResult.labTest.testNumber}`;
+        successMessage += `\nيمكن للمريض الذهاب لأي مختبر في سوريا لإجراء التحليل.`;
       } else if (labOrderError) {
         successTitle = 'تم الحفظ مع تحذير';
         successMessage += `\n\nلكن فشل إرسال طلب التحاليل: ${labOrderError}`;
@@ -1542,7 +1524,7 @@ const DoctorDashboard = () => {
     selectedPatient, chiefComplaint, diagnosis, doctorNotes, visitType,
     vitalSigns, medications, followUpDate, followUpNotes, visitPhoto,
     ecgResult, xrayResult, xrayModel, isCardiologist, isOrthopedist,
-    labTests, selectedLabId,
+    labTests,
     openModal, closeModal, resetVisitForm,
   ]);
 
@@ -1767,22 +1749,7 @@ const DoctorDashboard = () => {
 
   if (!user) return null;
 
-  // ──────────────────────────────────────────────────────────────────
-  // RENDER CONTINUES IN PART B & PART C
-  // ──────────────────────────────────────────────────────────────────
-  // Part B will contain:
-  //   - Sidebar component
-  //   - Main return() with all section renders:
-  //     1. Home (greeting + KPIs + today appts + recent activity)
-  //     2. Appointments (week calendar with slot management)
-  //     3. Patient Lookup (search hero + recent patients)
-  //
-  // Part C will contain:
-  //   - Patient Record render (4 tabs: overview / history / new visit)
-  //   - AI Tools render (cardiologist ECG + orthopedist X-Ray)
-  //   - Notifications panel
-  //   - Slot creation modal
-  //   - Closing }} and export
+
   /* ═════════════════════════════════════════════════════════════════
      RENDER — main shell, sidebar, and primary sections
      ═════════════════════════════════════════════════════════════════ */
@@ -2628,10 +2595,6 @@ const DoctorDashboard = () => {
           )}
 
           {/* ───────────────────────────────────────────────────
-              PATIENT RECORD CONTINUES IN PART C
-              (renders when activeSection === 'lookup' && selectedPatient)
-              ─────────────────────────────────────────────────── */}
-          {/* ───────────────────────────────────────────────────
               PATIENT RECORD (when a patient is selected)
               ─────────────────────────────────────────────────── */}
           {activeSection === 'lookup' && selectedPatient && (
@@ -3085,9 +3048,8 @@ const DoctorDashboard = () => {
                                 </div>
                               </div>
                             )}
-                          
-                            
-                          {visit.labTests && visit.labTests.length > 0 && (
+
+                            {visit.labTests && visit.labTests.length > 0 && (
                               <div className="dd-visit-section">
                                 <span className="dd-visit-label">التحاليل المختبرية ({visit.labTests.length})</span>
                                 <div className="dd-visit-labs">
@@ -3126,7 +3088,7 @@ const DoctorDashboard = () => {
                                         )}
                                       </div>
                                       {lab.resultPdfUrl && (
-                                        <a 
+                                        <a
                                           href={`http://localhost:5000${lab.resultPdfUrl}`}
                                           target="_blank"
                                           rel="noopener noreferrer"
@@ -3209,7 +3171,7 @@ const DoctorDashboard = () => {
                     />
                   </section>
 
-                  {/* Vital signs grid (THE NEW FEATURE) */}
+                  {/* Vital signs grid */}
                   <section className="dd-form-section">
                     <div className="dd-form-section-header">
                       <div className="dd-form-section-icon">
@@ -3361,6 +3323,11 @@ const DoctorDashboard = () => {
 
                   {/* ═══════════════════════════════════════════════
                        LAB TEST ORDER SECTION — طلب تحاليل مختبرية
+                       ─────────────────────────────────────────────
+                       UPDATED WORKFLOW: No lab selection dropdown.
+                       Doctor just builds the list of tests; patient
+                       chooses ANY lab and the tech looks them up by
+                       national ID.
                       ═══════════════════════════════════════════════ */}
                   <section className="dd-form-section dd-lab-order-section">
                     <div className="dd-form-section-header">
@@ -3370,43 +3337,59 @@ const DoctorDashboard = () => {
                       <h3 className="dd-form-section-title">طلب تحاليل مختبرية (اختياري)</h3>
                     </div>
 
-                    {/* اختيار المختبر */}
-                    <div className="dd-field" style={{ marginBottom: '1rem' }}>
-                      <label className="dd-field-label">
-                        المختبر
-                        {labTests.length > 0 && <span className="dd-required"> *</span>}
-                      </label>
-
-                      {labsLoading ? (
-                        <div className="dd-lab-loading">
-                          <Loader2 size={16} className="dd-spin" />
-                          <span>جاري تحميل المختبرات...</span>
-                        </div>
-                      ) : laboratories.length === 0 ? (
-                        <div className="dd-lab-empty">
-                          <Info size={16} strokeWidth={2.2} />
-                          <span>لا توجد مختبرات متاحة حالياً (تأكد من تشغيل الـ backend)</span>
-                        </div>
-                      ) : (
-                        <select
-                          className="dd-input"
-                          value={selectedLabId}
-                          onChange={(e) => setSelectedLabId(e.target.value)}
+                    {/* Info banner — replaces the old lab dropdown */}
+                    <div
+                      className="dd-lab-info-banner"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 12,
+                        padding: '14px 16px',
+                        background: 'rgba(var(--tm-action-rgb), 0.08)',
+                        border: '1px solid rgba(var(--tm-action-rgb), 0.22)',
+                        borderRadius: 12,
+                        marginBottom: 16,
+                        fontFamily: 'Cairo, sans-serif'
+                      }}
+                    >
+                      <div
+                        style={{
+                          flexShrink: 0,
+                          width: 36,
+                          height: 36,
+                          borderRadius: 10,
+                          background: 'var(--tm-action)',
+                          color: '#FFFFFF',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                      >
+                        <Info size={18} strokeWidth={2.2} />
+                      </div>
+                      <div style={{ flex: 1, lineHeight: 1.7 }}>
+                        <h4
+                          style={{
+                            margin: 0,
+                            marginBottom: 4,
+                            fontSize: '0.95rem',
+                            fontWeight: 700,
+                            color: 'var(--tm-primary)'
+                          }}
                         >
-                          <option value="">-- اختر المختبر --</option>
-                          {laboratories.map((lab) => (
-                            <option key={lab._id} value={lab._id}>
-                              {lab.arabicName || lab.name}
-                              {lab.governorate && ` — ${lab.governorate}`}
-                              {lab.city && `, ${lab.city}`}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-
-                      <p className="dd-field-hint">
-                        💡 يمكن للمريض الذهاب لمختبر آخر إذا رغب — هذا اقتراح فقط
-                      </p>
+                          المريض حر باختيار المختبر
+                        </h4>
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: '0.825rem',
+                            color: 'var(--tm-text-secondary)'
+                          }}
+                        >
+                          يذهب المريض بالرقم الوطني لأي مختبر في سوريا ويجد طلب التحاليل جاهزاً عند فني المختبر.
+                          لا حاجة لاختيار مختبر محدد.
+                        </p>
+                      </div>
                     </div>
 
                     {/* إضافة تحليل جديد */}
@@ -3617,7 +3600,6 @@ const DoctorDashboard = () => {
               {/* ═══ TAB: AI Tools (cardiologist or orthopedist) ═══ */}
               {patientTab === 'ai' && hasAITools && (
                 <>
-                  {/* Render the appropriate AI tool inline */}
                   {isCardiologist && renderECGTool()}
                   {isOrthopedist && renderXRayTool()}
                 </>
@@ -3660,6 +3642,7 @@ const DoctorDashboard = () => {
           )}
         </main>
       </div>
+
 
       {/* ═══════════════════════════════════════════════════════════════
           AVAILABILITY SLOT CREATION MODAL
@@ -3757,10 +3740,7 @@ const DoctorDashboard = () => {
       )}
 
       {/* ═══════════════════════════════════════════════════════════════
-          APPOINTMENT DETAILS MODAL — shown when doctor clicks a booked
-          cell in the calendar. Displays patient identity + visit reason,
-          and offers a "Cancel appointment" action that hits the shared
-          /api/appointments/:id/cancel endpoint.
+          APPOINTMENT DETAILS MODAL
           ═══════════════════════════════════════════════════════════════ */}
       {showApptDetails && selectedAppointment && (
         <div
@@ -3795,7 +3775,6 @@ const DoctorDashboard = () => {
                   || 'غير محدد';
                 const phone = patient.phoneNumber || 'غير محدد';
 
-                // Localized status → Arabic + colored chip class
                 const STATUS_LABELS = {
                   scheduled:   { label: 'مجدول',   cls: 'info'    },
                   confirmed:   { label: 'مؤكد',    cls: 'success' },
@@ -3814,7 +3793,6 @@ const DoctorDashboard = () => {
                     })
                   : 'غير محدد';
 
-                // Compact row renderer so each line stays consistent
                 const Row = ({ icon: Icon, label, value, dir = 'auto' }) => (
                   <div
                     style={{
@@ -3925,9 +3903,7 @@ const DoctorDashboard = () => {
       )}
 
       {/* ═══════════════════════════════════════════════════════════════
-          AVAILABLE-SLOT DETAILS MODAL — shown when doctor clicks one of
-          their own "متاح" chips. Displays slot info and lets them delete
-          the slot via DELETE /api/doctor/availability-slots/:id.
+          AVAILABLE-SLOT DETAILS MODAL
           ═══════════════════════════════════════════════════════════════ */}
       {showSlotDetails && selectedSlotDetails && (
         <div
@@ -4084,7 +4060,6 @@ const DoctorDashboard = () => {
     ) : null;
     const ConditionIcon = condition?.Icon || Heart;
 
-    // Normalize predictions to a consistent shape
     const allPredictions = ecgResult?.all_predictions
                         || ecgResult?.predictions
                         || ecgResult?.top_predictions

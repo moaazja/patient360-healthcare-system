@@ -2072,7 +2072,7 @@ const LabDashboard = () => {
                             )}
                             {order.resultPdfUrl && (
                               <a
-                                href={order.resultPdfUrl}
+                             href={`http://localhost:5000${order.resultPdfUrl}`}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className="lab-history-pdf-link"

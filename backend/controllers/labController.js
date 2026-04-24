@@ -438,10 +438,15 @@ exports.searchPatientByNationalId = async (req, res) => {
       .select('bloodType allergies chronicDiseases height weight')
       .lean();
 
-    // ── 4) Fetch this patient's active lab tests AT THIS LAB ──
-    const activeTests = await LabTest.find({
+const activeTests = await LabTest.find({
       [refField]: refValue,
-      laboratoryId: labTech.laboratoryId,
+      // New visibility rule: see tests assigned to this lab OR unassigned
+      // (bare tests any lab can pick up — matches the new free-choice workflow)
+      $or: [
+        { laboratoryId: labTech.laboratoryId },
+        { laboratoryId: { $exists: false } },
+        { laboratoryId: null }
+      ],
       status: { $in: STATUS_WORK_QUEUE }
     })
       .populate({
@@ -597,17 +602,22 @@ exports.collectSample = async (req, res) => {
     if (!test) {
       return res.status(404).json({ success: false, message: 'التحليل غير موجود' });
     }
-    if (String(test.laboratoryId) !== String(labTech.laboratoryId)) {
+ if (test.laboratoryId && String(test.laboratoryId) !== String(labTech.laboratoryId)) {
       return res.status(403).json({
         success: false,
         message: 'هذا التحليل لا ينتمي لمختبرك'
       });
     }
     if (!STATUS_PRE_COLLECT.includes(test.status)) {
-      return res.status(400).json({
+   return res.status(400).json({
         success: false,
         message: `لا يمكن تسجيل عينة لتحليل حالته "${test.status}"`
       });
+    }
+
+    if (!test.laboratoryId) {
+      test.laboratoryId = labTech.laboratoryId;
+      console.log(`📌 Lab ${labTech.laboratoryId} claimed unassigned test ${test.testNumber}`);
     }
 
     // ── Update ──

@@ -118,13 +118,9 @@ exports.createLabTest = async (req, res) => {
       totalCost
     } = req.body;
 
-    // ── 1. VALIDATION ─────────────────────────────────────────────────────
-    if (!laboratoryId) {
-      return res.status(400).json({
-        success: false,
-        message: 'يجب تحديد المختبر (laboratoryId)'
-      });
-    }
+ // ── 1. VALIDATION ─────────────────────────────────────────────────────
+    // laboratoryId is now OPTIONAL — patient chooses lab later.
+    // Only testsOrdered is required from the doctor.
     if (!Array.isArray(testsOrdered) || testsOrdered.length === 0) {
       return res.status(400).json({
         success: false,
@@ -150,21 +146,23 @@ exports.createLabTest = async (req, res) => {
       });
     }
 
-    // ── 4. VERIFY LABORATORY EXISTS ───────────────────────────────────────
-    const lab = await Laboratory.findById(laboratoryId).lean();
-    if (!lab) {
-      return res.status(404).json({
-        success: false,
-        message: 'المختبر غير موجود'
-      });
+// ── 4. VERIFY LABORATORY (IF SPECIFIED) ───────────────────────────────
+    // laboratoryId is optional. If provided, verify it exists.
+    if (laboratoryId) {
+      const lab = await Laboratory.findById(laboratoryId).lean();
+      if (!lab) {
+        return res.status(404).json({
+          success: false,
+          message: 'المختبر المحدد غير موجود'
+        });
+      }
     }
 
-    // ── 5. CREATE LAB TEST ────────────────────────────────────────────────
-    const labTest = await LabTest.create({
+const labTest = await LabTest.create({
       ...patientRef,
       orderedBy: doctor._id,
       visitId: visitId || undefined,
-      laboratoryId,
+      laboratoryId: laboratoryId || undefined,
       orderDate: new Date(),
       scheduledDate: scheduledDate ? new Date(scheduledDate) : undefined,
       testsOrdered: testsOrdered.map(t => ({

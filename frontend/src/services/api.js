@@ -1562,9 +1562,7 @@ export const doctorAPI = {
     if (!payload || typeof payload !== 'object') {
       throw { message: 'بيانات الطلب غير صالحة' };
     }
-    if (!payload.laboratoryId) {
-      throw { message: 'الرجاء اختيار المختبر' };
-    }
+    
     if (!Array.isArray(payload.testsOrdered) || payload.testsOrdered.length === 0) {
       throw { message: 'الرجاء إضافة تحليل واحد على الأقل' };
     }

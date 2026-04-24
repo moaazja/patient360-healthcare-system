@@ -2169,6 +2169,8 @@ select.pd-form-input {
 .pd-lab-results-table tbody td {
   padding: 10px 12px;
   border-bottom: 1px solid var(--tm-border);
+  text-align: start;
+  vertical-align: middle;
 }
 .pd-lab-results-table tbody tr:last-child td { border-bottom: none; }
 .pd-lab-results-table tbody tr.is-abnormal { background: #FFF8E1; }

@@ -8,11 +8,22 @@
  *    1. getMyProfile             — Lab tech's own profile + laboratory info
  *    2. getMyDashboardStats      — Today's tests, pending tests, KPIs
  *    3. getMyTestsPerformed      — Lab tech's test completion history
- *    4. getLabPendingOrders      — All pending orders at the lab tech's lab
- *    5. getLabTodaySchedule      — Tests scheduled for today at this lab
+ *    4. getLabPendingOrders      — All pending orders visible to this lab tech
+ *    5. getLabTodaySchedule      — Tests scheduled for today, visible to lab
  *
  *  Lab tech account → Person → LabTechnician record relationship:
  *    Account.personId → Person._id ← LabTechnician.personId → LabTechnician.laboratoryId
+ *
+ *  ─────────────────────────────────────────────────────────────────────────
+ *  VISIBILITY MODEL (updated):
+ *  ─────────────────────────────────────────────────────────────────────────
+ *  Doctors no longer pre-assign a laboratory to a test order. The patient
+ *  is free to walk into ANY laboratory. Each lab technician can see:
+ *    (a) tests pre-assigned to their own laboratory (legacy / referral), AND
+ *    (b) tests with no laboratory assigned yet (free-floating orders).
+ *
+ *  This is enforced via the `buildLabVisibilityFilter` helper below, which
+ *  is composed into every query that lists tests for a lab tech.
  *
  *  Conventions kept:
  *    - Arabic error messages, emoji-marked console logs
@@ -44,6 +55,33 @@ async function getLabTechFromAccount(account) {
   }
 
   return labTech;
+}
+
+// ============================================================================
+// HELPER: Build the "tests this lab tech can see" filter
+// ============================================================================
+
+/**
+ * Returns a Mongo filter that matches:
+ *   (a) Tests assigned to this lab tech's laboratory, OR
+ *   (b) Tests not yet assigned to any laboratory (patient hasn't visited
+ *       a specific lab — order is "free-floating").
+ *
+ * This is used in every lab-tech listing/count query so that a tech can pick
+ * up any free order that walks in from a patient with their national ID,
+ * regardless of which lab the doctor (if any) originally suggested.
+ *
+ * Always combine with other conditions using $and to avoid clashing
+ * with a query-level $or.
+ */
+function buildLabVisibilityFilter(labTech) {
+  return {
+    $or: [
+      { laboratoryId: labTech.laboratoryId },
+      { laboratoryId: { $exists: false } },
+      { laboratoryId: null }
+    ]
+  };
 }
 
 // ============================================================================
@@ -88,7 +126,9 @@ exports.getMyProfile = async (req, res) => {
 
 /**
  * @route   GET /api/lab-technician/dashboard-stats
- * @desc    Today's lab KPIs for the dashboard
+ * @desc    Today's lab KPIs for the dashboard.
+ *          Counts include both lab-assigned tests and free-floating orders
+ *          (see `buildLabVisibilityFilter` for visibility rules).
  * @access  Private (lab_technician)
  */
 exports.getMyDashboardStats = async (req, res) => {
@@ -98,7 +138,11 @@ exports.getMyDashboardStats = async (req, res) => {
     const startOfToday = new Date(new Date().setHours(0, 0, 0, 0));
     const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
-    // Run all stats in parallel for speed
+    const labFilter = buildLabVisibilityFilter(labTech);
+
+    // Run all stats in parallel for speed.
+    // Each query is wrapped in $and to safely combine the lab visibility $or
+    // with any other conditions (especially other $or clauses).
     const [
       pendingOrdersCount,
       sampleCollectedCount,
@@ -109,38 +153,45 @@ exports.getMyDashboardStats = async (req, res) => {
       labTodayTotal
     ] = await Promise.all([
       LabTest.countDocuments({
-        laboratoryId: labTech.laboratoryId,
-        status: { $in: ['ordered', 'scheduled'] }
+        $and: [labFilter, { status: { $in: ['ordered', 'scheduled'] } }]
       }),
       LabTest.countDocuments({
-        laboratoryId: labTech.laboratoryId,
-        status: 'sample_collected'
+        $and: [labFilter, { status: 'sample_collected' }]
       }),
       LabTest.countDocuments({
-        laboratoryId: labTech.laboratoryId,
-        status: 'in_progress'
+        $and: [labFilter, { status: 'in_progress' }]
       }),
       LabTest.countDocuments({
-        laboratoryId: labTech.laboratoryId,
-        completedBy: labTech._id,
-        completedAt: { $gte: startOfToday }
-      }),
-      LabTest.countDocuments({
-        laboratoryId: labTech.laboratoryId,
-        completedBy: labTech._id,
-        completedAt: { $gte: startOfMonth }
-      }),
-      LabTest.countDocuments({
-        laboratoryId: labTech.laboratoryId,
-        isCritical: true,
-        status: 'completed'
-      }),
-      LabTest.countDocuments({
-        laboratoryId: labTech.laboratoryId,
-        $or: [
-          { scheduledDate: { $gte: startOfToday } },
-          { sampleCollectedAt: { $gte: startOfToday } },
+        $and: [
+          labFilter,
+          { completedBy: labTech._id },
           { completedAt: { $gte: startOfToday } }
+        ]
+      }),
+      LabTest.countDocuments({
+        $and: [
+          labFilter,
+          { completedBy: labTech._id },
+          { completedAt: { $gte: startOfMonth } }
+        ]
+      }),
+      LabTest.countDocuments({
+        $and: [
+          labFilter,
+          { isCritical: true },
+          { status: 'completed' }
+        ]
+      }),
+      LabTest.countDocuments({
+        $and: [
+          labFilter,
+          {
+            $or: [
+              { scheduledDate: { $gte: startOfToday } },
+              { sampleCollectedAt: { $gte: startOfToday } },
+              { completedAt: { $gte: startOfToday } }
+            ]
+          }
         ]
       })
     ]);
@@ -173,7 +224,9 @@ exports.getMyDashboardStats = async (req, res) => {
 
 /**
  * @route   GET /api/lab-technician/tests-performed
- * @desc    Lab tech's completed tests history, paginated
+ * @desc    Lab tech's completed tests history, paginated.
+ *          Filtered by `completedBy` (this tech personally), so the lab
+ *          visibility filter is not needed here.
  * @access  Private (lab_technician)
  *
  * Query: page, limit, startDate, endDate
@@ -228,7 +281,8 @@ exports.getMyTestsPerformed = async (req, res) => {
 
 /**
  * @route   GET /api/lab-technician/pending-orders
- * @desc    All pending tests at the lab tech's laboratory.
+ * @desc    All pending tests visible to this lab tech.
+ *          Includes tests pre-assigned to their lab AND free-floating orders.
  *          Sorted by priority (stat → urgent → routine), then by orderDate.
  * @access  Private (lab_technician)
  *
@@ -243,11 +297,17 @@ exports.getLabPendingOrders = async (req, res) => {
     const safePage = Math.max(parseInt(page, 10) || 1, 1);
     const safeLimit = Math.min(parseInt(limit, 10) || 20, 100);
 
+    const labFilter = buildLabVisibilityFilter(labTech);
+
     const query = {
-      laboratoryId: labTech.laboratoryId,
-      status: status
-        ? status
-        : { $in: ['ordered', 'scheduled', 'sample_collected', 'in_progress'] }
+      $and: [
+        labFilter,
+        {
+          status: status
+            ? status
+            : { $in: ['ordered', 'scheduled', 'sample_collected', 'in_progress'] }
+        }
+      ]
     };
 
     // MongoDB aggregation to sort by priority (stat first) then orderDate
@@ -297,7 +357,8 @@ exports.getLabPendingOrders = async (req, res) => {
 
 /**
  * @route   GET /api/lab-technician/today-schedule
- * @desc    Tests scheduled or active at the lab today
+ * @desc    Tests scheduled or active today, visible to this lab tech.
+ *          Includes tests pre-assigned to their lab AND free-floating orders.
  * @access  Private (lab_technician)
  */
 exports.getLabTodaySchedule = async (req, res) => {
@@ -307,13 +368,19 @@ exports.getLabTodaySchedule = async (req, res) => {
     const startOfToday = new Date(new Date().setHours(0, 0, 0, 0));
     const endOfToday = new Date(new Date().setHours(23, 59, 59, 999));
 
+    const labFilter = buildLabVisibilityFilter(labTech);
+
     const tests = await LabTest.find({
-      laboratoryId: labTech.laboratoryId,
-      $or: [
-        { scheduledDate: { $gte: startOfToday, $lte: endOfToday } },
-        { sampleCollectedAt: { $gte: startOfToday, $lte: endOfToday } },
+      $and: [
+        labFilter,
         {
-          status: { $in: ['ordered', 'scheduled', 'sample_collected', 'in_progress'] }
+          $or: [
+            { scheduledDate: { $gte: startOfToday, $lte: endOfToday } },
+            { sampleCollectedAt: { $gte: startOfToday, $lte: endOfToday } },
+            {
+              status: { $in: ['ordered', 'scheduled', 'sample_collected', 'in_progress'] }
+            }
+          ]
         }
       ]
     })

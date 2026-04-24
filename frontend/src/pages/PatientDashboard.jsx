@@ -2502,12 +2502,12 @@ export default function PatientDashboard() {
                                   : '';
                                 return (
                                   <tr key={idx} className={rowClass}>
-                                    <td dir="auto">{r.testName}</td>
-                                    <td dir="ltr">
-                                      {r.value}
-                                      {r.unit && <span className="pd-lab-unit">{' '}{r.unit}</span>}
-                                    </td>
-                                    <td dir="ltr">{r.referenceRange || '—'}</td>
+                                   <td>{r.testName}</td>
+                                   <td>
+                                    {r.value}
+                                    {r.unit && <span className="pd-lab-unit">{' '}{r.unit}</span>}
+                                     </td>
+                                    <td>{r.referenceRange || '—'}</td>
                                   </tr>
                                 );
                               })}

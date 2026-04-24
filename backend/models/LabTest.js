@@ -127,11 +127,11 @@ const LabTestSchema = new Schema(
     },
     visitId: { type: Schema.Types.ObjectId, ref: 'Visit', sparse: true },
 
-    // ── Performing laboratory ─────────────────────────────────────────────
-    laboratoryId: {
+   // ── Performing laboratory (optional)
+   laboratoryId: {
       type: Schema.Types.ObjectId,
       ref: 'Laboratory',
-      required: [true, 'المختبر مطلوب'],
+      // required removed — field is now optional
     },
 
     // ── Order metadata ────────────────────────────────────────────────────
