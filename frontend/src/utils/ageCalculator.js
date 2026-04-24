@@ -21,12 +21,12 @@ export const calculateAge = (birthDate) => {
 };
 
 /**
- * Check if person is a minor (under 18)
+ * Check if person is a minor (under 14 — Syrian national ID threshold)
  * @param {string|Date} birthDate - Date of birth
- * @returns {boolean} True if under 18, false otherwise
+ * @returns {boolean} True if under 14, false otherwise
  */
 export const isMinor = (birthDate) => {
-  return calculateAge(birthDate) < 18;
+  return calculateAge(birthDate) < 14;
 };
 
 /**

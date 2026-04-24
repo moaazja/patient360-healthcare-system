@@ -1222,7 +1222,7 @@ const SignUp = () => {
 
     const calculatedAge = calculateAge(dob);
     setAge(calculatedAge);
-    const minor = calculatedAge < 18;
+    const minor = calculatedAge < 14;
     setIsMinor(minor);
 
     if (minor) {
@@ -1718,7 +1718,7 @@ const SignUp = () => {
       setLoading(false);
 
       const successMessage = isMinor
-        ? `مرحباً ${patientFormData.firstName} ${patientFormData.lastName}\n\nتم تسجيلك كمريض في منصة Patient 360° بنجاح.\n\nمعرف الطفل: ${response.childId}\n\nيمكنك الآن تسجيل الدخول.`
+          ? `مرحباً ${patientFormData.firstName} ${patientFormData.lastName}\n\nتم تسجيلك كمريض في منصة Patient 360° بنجاح.\n\nرقم تسجيل الطفل: ${response.user?.childRegistrationNumber || '—'}\n\nيمكنك الآن تسجيل الدخول.`
         : `مرحباً ${patientFormData.firstName} ${patientFormData.lastName}\n\nتم تسجيلك كمريض في منصة Patient 360° بنجاح.\n\nيمكنك الآن تسجيل الدخول.`;
 
       openModal('success', 'تم إنشاء الحساب بنجاح', successMessage, () => navigate('/'));
@@ -2863,7 +2863,7 @@ const SignUp = () => {
                         <User size={20} strokeWidth={2} />
                       )}
                       <span>
-                        العمر: {age} سنة — {isMinor ? 'قاصر (أقل من 18)' : 'بالغ'}
+                        العمر: {age} سنة — {isMinor ? 'قاصر (أقل من 14)' : 'بالغ'}
                       </span>
                     </div>
                   )}
@@ -3048,7 +3048,7 @@ const SignUp = () => {
                       <>
                         <label className="form-label" htmlFor="patient-parentNationalId">
                           الرقم الوطني للوالد/الوالدة <span className="required-mark">*</span>
-                          <span className="label-hint">(الطفل أقل من 18 سنة)</span>
+                           <span className="label-hint">(الطفل أقل من 14 سنة)</span>
                         </label>
                         <div className="form-input-wrapper">
                           <span className="form-input-icon" aria-hidden="true">
