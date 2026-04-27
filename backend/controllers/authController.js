@@ -428,11 +428,7 @@ exports.login = async (req, res) => {
   console.log('🔵 ========== LOGIN ATTEMPT ==========');
 
   try {
-    const rawEmail = req.body?.email;
-    const rawPassword = req.body?.password;
-
-    const email = typeof rawEmail === 'string' ? rawEmail.trim() : '';
-    const password = typeof rawPassword === 'string' ? rawPassword.trim() : '';
+    const { email, password } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({

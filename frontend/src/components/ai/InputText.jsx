@@ -6,15 +6,6 @@
  * Arabic and Latin content both render in their natural direction as
  * the user types.
  *
- * The clear (×) button used to overlap the textarea content because it
- * was layered on top via absolute positioning without any reserved
- * space inside the textarea. Fixed by adding inline padding-inline-start
- * to the textarea whenever the clear button is visible — the X now sits
- * in a reserved 36px gutter that the text never enters. (We pad
- * inline-start, not right, so the gutter is logical-direction-aware:
- * RTL text gets a left gutter where the X is rendered, LTR text gets a
- * right gutter, all without changing layout code.)
- *
  * See InputModeToggle.jsx for the AI-atom styling convention
  * (className-only; all styles live in frontend/src/styles/PatientDashboard.css
  * under the pd-ai-* prefix).
@@ -45,11 +36,6 @@
 import React, { useRef } from 'react';
 import { Send, X } from 'lucide-react';
 
-// Width reserved for the clear (×) button + a small breathing gap.
-// Must stay in sync with the visual position rules in PatientDashboard.css
-// (.pd-ai-input-text-clear sits at inset-inline-start: 8px, ~24px wide).
-const CLEAR_BUTTON_GUTTER_PX = 36;
-
 export default function InputText({
   value,
   onChange,
@@ -69,8 +55,6 @@ export default function InputText({
     charCount >= maxLength ? 'error' :
     charCount >= warningThreshold ? 'warning' :
     'normal';
-
-  const showClearButton = value.length > 0 && !disabled;
 
   const handleSubmit = () => {
     if (!canSubmit) return;
@@ -105,13 +89,6 @@ export default function InputText({
     .filter(Boolean)
     .join(' ');
 
-  // Reserve space for the X gutter inline (logical-direction aware) so the
-  // text never flows underneath the button. Falls back gracefully when the
-  // X isn't rendered.
-  const textareaStyle = showClearButton
-    ? { paddingInlineStart: `${CLEAR_BUTTON_GUTTER_PX}px` }
-    : undefined;
-
   return (
     <div className="pd-ai-input-text" dir="rtl">
       <div className="pd-ai-input-text-field">
@@ -127,10 +104,9 @@ export default function InputText({
           maxLength={maxLength}
           rows={5}
           aria-label="حقل إدخال النص"
-          style={textareaStyle}
         />
 
-        {showClearButton && (
+        {value.length > 0 && !disabled && (
           <button
             type="button"
             className="pd-ai-input-text-clear"

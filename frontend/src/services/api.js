@@ -1074,100 +1074,93 @@ export const patientAPI = {
     }
   },
 
+  /* BACKEND TODO: implement POST /api/patient/emergency-report — proxy to senior redwan Flask :8000, persist to emergency_reports */
   /**
-   * Emergency triage AI — proxies to Redwan's FastAPI via Node backend.
+   * Emergency triage AI (senior redwan). Sends text and/or image to the
+   * backend proxy which forwards to Flask :8000 (/predict/{text,image})
+   * and persists the AI response into the emergency_reports collection
+   * using patientPersonId OR patientChildId from JWT.
    *
-   * The Node backend at POST /api/emergency:
-   *   1. Saves the uploaded image/audio under /uploads/emergency/
-   *   2. Calls the appropriate FastAPI endpoint:
-   *        text  → POST :8000/predict/text   (form: text)
-   *        image → POST :8000/predict/image  (form: image)
-   *        voice → POST :8000/predict/voice  (form: audio)
-   *   3. Maps FastAPI's rich response → DB schema enums
-   *   4. Persists to emergency_reports collection
-   *   5. Returns the saved report
+   * v1 supports text and image only; voice and combined are valid schema
+   * enums but not accepted until HTTPS + mic flow lands (CLAUDE.md pending
+   * work item 8). Method throws on those inputType values.
    *
-   * Required FormData fields (built by PatientDashboard.submitTriage):
-   *   - text     : Arabic symptom description (string) — text mode
-   *   - image    : File — image mode
-   *   - audio    : File — voice mode
-   *   - location : JSON-stringified GeoJSON Point
-   *                e.g. '{"type":"Point","coordinates":[36.27,33.51]}'
-   *   - locationAccuracy : meters (string), optional
-   *   - locationAddress  : human-readable address (string), optional
-   *   - governorate      : Syrian governorate enum (string), optional
+   * FormData keys:
+   *   - inputType: 'text' | 'image' (required)
+   *   - textDescription: string (optional)
+   *   - image: File (optional — required if inputType = 'image')
+   *   - location: JSON string '{"lat":..,"lng":..}' (optional)
+   *   - locationAccuracy: number — meters, from Geolocation API coords.accuracy (optional)
    *
-   * Note: 'inputType' is NO LONGER sent — the backend derives it from
-   * which fields are present in req.body and req.files.
+   * Uses multipart/form-data with a 30s timeout to accommodate image upload.
    *
    * @param {FormData} formData
    * @returns {Promise<{
    *   success: true,
-   *   message: string,
    *   report: {
-   *     _id: string,
+   *     _id: string, patientPersonId?: string, patientChildId?: string,
+   *     reportedAt: string,
+   *     inputType: 'text'|'image',
+   *     textDescription?: string, imageUrl?: string,
    *     aiRiskLevel: 'low'|'moderate'|'high'|'critical',
-   *     aiAssessment: string,
    *     aiFirstAid: string[],
-   *     aiConfidenceScore: number,
-   *     recommendAmbulance: boolean,
-   *     status: 'active'|'resolved'|'false_alarm'|'referred_to_hospital'
+   *     aiConfidence: number,
+   *     aiRawResponse?: string,
+   *     aiModelVersion?: string,
+   *     location?: object, locationAddress?: string, locationAccuracy?: number,
+   *     ambulanceCalled?: boolean, ambulanceStatus?: string,
+   *     status: 'active'|'resolved'|'false_alarm'|'referred_to_hospital',
+   *     createdAt: string
    *   }
    * }>}
    */
   submitEmergencyReport: async (formData) => {
+    // ── v1 inputType gate (amendment 3): reject voice/combined ───────────
+    const inputType = formData && typeof formData.get === 'function' ? formData.get('inputType') : null;
+    if (inputType === 'voice' || inputType === 'combined') {
+      throw { message: 'إدخال الصوت غير مدعوم في هذا الإصدار. يرجى استخدام النص أو الصورة.' };
+    }
+
     try {
-      const response = await api.post('/emergency', formData, {
+      const response = await api.post('/patient/emergency-report', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
-        // 90s — covers Whisper transcription on CPU + classification
-        timeout: 90000,
+        timeout: 30000
       });
       return response.data;
     } catch (error) {
-      const errorMessage = error.response?.data?.message
-        || error.message
-        || 'حدث خطأ في إرسال تقرير الطوارئ';
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في إرسال تقرير الطوارئ';
       throw { message: errorMessage, ...error.response?.data };
     }
   },
 
+  /* BACKEND TODO: implement GET /api/patient/emergency-reports */
   /**
    * List the patient's past emergency reports.
    *
-   * Backend: GET /api/emergency/mine — scoped by reporterPersonId OR
-   * reporterChildId from JWT. Sorted by reportedAt descending.
+   * Scoped by patientPersonId OR patientChildId from JWT. Sorted by
+   * reportedAt descending.
    *
    * @returns {Promise<{
    *   success: true,
    *   count: number,
-   *   page: number,
-   *   pages: number,
    *   reports: Array<{
-   *     _id: string,
-   *     reportedAt: string,
-   *     inputType: 'text'|'image'|'voice'|'combined',
-   *     textDescription?: string,
-   *     imageUrl?: string,
-   *     audioUrl?: string,
-   *     aiRiskLevel: 'low'|'moderate'|'high'|'critical',
-   *     aiAssessment: string,
-   *     aiFirstAid: string[],
-   *     aiConfidenceScore: number,
-   *     recommendAmbulance: boolean,
-   *     ambulanceStatus: string,
-   *     status: string,
+   *     _id: string, patientPersonId?: string, patientChildId?: string,
+   *     reportedAt: string, inputType: string,
+   *     textDescription?: string, imageUrl?: string,
+   *     aiRiskLevel: string, aiFirstAid: string[], aiConfidence: number,
+   *     aiModelVersion?: string, location?: object, locationAddress?: string,
+   *     ambulanceCalled?: boolean, ambulanceStatus?: string,
+   *     status: string, resolvedAt?: string, resolutionNote?: string,
    *     createdAt: string
    *   }>
    * }>}
    */
   getEmergencyReports: async () => {
     try {
-      const response = await api.get('/emergency/mine');
+      const response = await api.get('/patient/emergency-reports');
       return response.data;
     } catch (error) {
-      const errorMessage = error.response?.data?.message
-        || error.message
-        || 'حدث خطأ في تحميل تقارير الطوارئ';
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل تقارير الطوارئ';
       throw { message: errorMessage, ...error.response?.data };
     }
   }
