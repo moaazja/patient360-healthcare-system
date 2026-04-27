@@ -493,33 +493,34 @@ const Login = () => {
      LOGIN HANDLER
      ───────────────────────────────────────────────────────────────── */
 
-  const handleLogin = useCallback(
-    async (e) => {
-      e.preventDefault();
-      setLoginError('');
+ const handleLogin = useCallback(
+  async (e) => {
+    e.preventDefault();
+    setLoginError('');
 
-      const trimmedEmail = email.trim().toLowerCase();
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPassword = password.trim();
 
-      if (!trimmedEmail) {
-        setLoginError('الرجاء إدخال البريد الإلكتروني');
-        return;
-      }
-      if (!isValidEmail(trimmedEmail)) {
-        setLoginError('الرجاء إدخال بريد إلكتروني صحيح');
-        return;
-      }
-      if (!password) {
-        setLoginError('الرجاء إدخال كلمة المرور');
-        return;
-      }
+    if (!trimmedEmail) {
+      setLoginError('الرجاء إدخال البريد الإلكتروني');
+      return;
+    }
+    if (!isValidEmail(trimmedEmail)) {
+      setLoginError('الرجاء إدخال بريد إلكتروني صحيح');
+      return;
+    }
+    if (!trimmedPassword) {
+      setLoginError('الرجاء إدخال كلمة المرور');
+      return;
+    }
 
-      setIsLoading(true);
+    setIsLoading(true);
 
-      try {
-        const response = await authAPI.login({
-          email: trimmedEmail,
-          password,
-        });
+    try {
+      const response = await authAPI.login({
+        email: trimmedEmail,
+        password: trimmedPassword,
+      });
 
         const user = response.user;
         const primaryRole =

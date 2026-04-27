@@ -6,10 +6,13 @@
  * Teal Medica gradient; inactive uses surface color; disabled modes show
  * a tooltip explaining why.
  *
- * In v1, voice is always disabled (tooltip: "قريباً — يتطلب اتصال آمن")
- * because it requires HTTPS + mic permission — tracked as pending work
- * item 8 in CLAUDE.md. The component is v2-ready: once voice is enabled,
- * remove it from PERMANENTLY_DISABLED below.
+ * Voice is now ENABLED — Redwan's FastAPI service includes Whisper
+ * transcription, so the patient can upload an Arabic voice file and
+ * receive a transcription + AI classification. The original v1 lockout
+ * (`PERMANENTLY_DISABLED = new Set(['voice'])`) was removed once the
+ * /predict/voice endpoint was wired through the Node backend. Modes
+ * the parent doesn't include in `availableModes` still render as
+ * disabled — that mechanism is kept intact.
  *
  * ─── STYLING CONVENTION FOR ALL 8 AI ATOMS ────────────────────────────
  * Styles for every component under frontend/src/components/ai/ live in
@@ -34,9 +37,8 @@
  * @param {'text'|'image'|'voice'} props.mode - currently selected mode
  * @param {(mode: 'text'|'image'|'voice') => void} props.onChange
  * @param {Array<'text'|'image'|'voice'>} [props.availableModes]
- *   Modes the parent wants clickable. Defaults to ['text', 'image'].
- *   Modes outside this list render disabled. Voice is permanently
- *   disabled in v1 regardless.
+ *   Modes the parent wants clickable. Defaults to ['text', 'image', 'voice'].
+ *   Modes outside this list render disabled.
  */
 
 import React, { useRef } from 'react';
@@ -48,15 +50,17 @@ const MODES = [
   { key: 'voice', icon: Mic,           label: 'صوت'  },
 ];
 
-const PERMANENTLY_DISABLED = new Set(['voice']);
-const PERMANENTLY_DISABLED_TOOLTIPS = {
-  voice: 'قريباً — يتطلب اتصال آمن',
-};
+// Hard lockouts no longer apply now that voice is wired end-to-end via
+// Redwan's FastAPI. Kept as an empty Set so future temporary lockouts
+// (e.g., a feature flag during a model retraining window) only need to
+// add a key here without restructuring the component.
+const PERMANENTLY_DISABLED = new Set();
+const PERMANENTLY_DISABLED_TOOLTIPS = {};
 
 export default function InputModeToggle({
   mode,
   onChange,
-  availableModes = ['text', 'image'],
+  availableModes = ['text', 'image', 'voice'],
 }) {
   const containerRef = useRef(null);
 

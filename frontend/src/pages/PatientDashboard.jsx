@@ -56,6 +56,7 @@ import InputImage from '../components/ai/InputImage';
 import ResultCard from '../components/ai/ResultCard';
 import SeverityBadge from '../components/ai/SeverityBadge';
 import FirstAidSteps from '../components/ai/FirstAidSteps';
+import InputAudio from '../components/ai/InputAudio';
 import ConfidenceBar from '../components/ai/ConfidenceBar';
 import EmptyState from '../components/ai/EmptyState';
 
@@ -941,6 +942,7 @@ export default function PatientDashboard() {
   const [triageMode, setTriageMode] = useState('text');
   const [triageText, setTriageText] = useState('');
   const [triageImageFile, setTriageImageFile] = useState(null);
+  const [triageAudioFile, setTriageAudioFile] = useState(null);
   const [triageResult, setTriageResult] = useState(null);
   const [triageLoading, setTriageLoading] = useState(false);
   const [triageError, setTriageError] = useState(null);
@@ -1300,11 +1302,16 @@ export default function PatientDashboard() {
                   </p>
                 )}
                 {isMinor && (
-                  <span className="pd-sidebar-user-badge pd-sidebar-user-badge--minor">
-                    <Baby size={12} aria-hidden="true" />
-                    <span>قاصر</span>
-                  </span>
-                )}
+                  <span
+                   className="pd-sidebar-user-badge pd-sidebar-user-badge--minor"
+                   role="status"
+                   aria-label="حساب تحت إشراف ولي الأمر"
+                  title="حساب تحت إشراف ولي الأمر"
+                  >
+                   <ShieldCheck size={12} aria-hidden="true" strokeWidth={2.5} />
+                           <                 span>بإشراف ولي أمر</span>
+                           </span>
+                 )}
               </>
             )}
           </div>
@@ -2621,22 +2628,33 @@ export default function PatientDashboard() {
     }
   };
 
-  const submitTriage = async (inputType, payload) => {
+  const submitTriage = async (mode, payload) => {
     setTriageLoading(true);
     setTriageError(null);
+    setTriageResult(null);
 
     const location = await getLocationWithTimeout();
 
     const formData = new FormData();
-    formData.append('inputType', inputType);
-    if (inputType === 'text') {
-      formData.append('textDescription', payload);
-    } else if (inputType === 'image') {
+
+    // ── Field names match backend req.body / req.files contract ─────────
+    if (mode === 'text') {
+      formData.append('text', payload);
+    } else if (mode === 'image') {
       formData.append('image', payload);
+    } else if (mode === 'voice') {
+      formData.append('audio', payload);
     }
+
+    // ── Location as GeoJSON Point (backend validates [lng, lat] order) ──
     if (location) {
-      formData.append('location', JSON.stringify({ lat: location.lat, lng: location.lng }));
-      formData.append('locationAccuracy', String(location.accuracy));
+      formData.append('location', JSON.stringify({
+        type: 'Point',
+        coordinates: [location.lng, location.lat],
+      }));
+      if (Number.isFinite(location.accuracy)) {
+        formData.append('locationAccuracy', String(location.accuracy));
+      }
     }
 
     try {
@@ -2656,6 +2674,7 @@ export default function PatientDashboard() {
 
   const handleTriageTextSubmit  = (text) => submitTriage('text',  text);
   const handleTriageImageSubmit = (file) => submitTriage('image', file);
+  const handleTriageVoiceSubmit = (file) => submitTriage('voice', file);
 
   const renderAIAssistant = () => (
     <div className="pd-ai-assistant">
@@ -2733,7 +2752,7 @@ export default function PatientDashboard() {
           <InputModeToggle
             mode={triageMode}
             onChange={setTriageMode}
-            availableModes={['text', 'image']}
+            availableModes={['text', 'image', 'voice']}
           />
 
           <div className="pd-ai-panel-body">
@@ -2753,6 +2772,15 @@ export default function PatientDashboard() {
                   onChange={setTriageImageFile}
                   onSubmit={handleTriageImageSubmit}
                   maxSizeMB={10}
+                  disabled={triageLoading}
+                  openAlert={openAlert}
+                />
+              )}
+              {triageMode === 'voice' && (
+                <InputAudio
+                  onChange={setTriageAudioFile}
+                  onSubmit={handleTriageVoiceSubmit}
+                  maxSizeMB={15}
                   disabled={triageLoading}
                   openAlert={openAlert}
                 />
