@@ -16,6 +16,7 @@ import '../../auth/presentation/providers/auth_provider.dart';
 import '../../notifications/presentation/providers/notifications_provider.dart';
 import 'profile_edit_sheet.dart';
 import 'widgets/info_pair.dart';
+import '../../../shared/widgets/app_drawer.dart';
 
 /// Top-level read-only profile view. Three cards: personal info, medical
 /// info, and emergency contact. Editing happens in [ProfileEditSheet].
@@ -33,6 +34,7 @@ class ProfileScreen extends ConsumerWidget {
         subtitle: 'معلوماتك الشخصية والطبية',
         unreadCount: unread,
       ),
+      drawer: const AppDrawer(),
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (Object err, _) => Center(
@@ -139,9 +141,9 @@ class _PersonalCard extends StatelessWidget {
       children: <Widget>[
         Text(
           fullName,
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w800,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
         ),
         const SizedBox(height: 8),
         InfoPair(
@@ -150,14 +152,12 @@ class _PersonalCard extends StatelessWidget {
           ltr: true,
           copyable: true,
         ),
-        InfoPair(
-          label: 'الجنس',
-          value: genderLabel,
-        ),
+        InfoPair(label: 'الجنس', value: genderLabel),
         if (dob != null)
           InfoPair(
             label: 'تاريخ الميلاد',
-            value: '${intl.DateFormat('yyyy-MM-dd').format(dob)}'
+            value:
+                '${intl.DateFormat('yyyy-MM-dd').format(dob)}'
                 '${age != null ? '  •  $age سنة' : ''}',
             ltr: true,
           ),
@@ -170,7 +170,8 @@ class _PersonalCard extends StatelessWidget {
         ),
         InfoPair(
           label: 'رقم الهاتف',
-          value: person?.phoneNumber ??
+          value:
+              person?.phoneNumber ??
               child?.phoneNumber ??
               child?.guardianPhoneNumber ??
               '—',
@@ -283,10 +284,7 @@ class _MedicalCard extends StatelessWidget {
           const SizedBox(height: 14),
           const _SectionHeader(label: 'الحساسيّات', icon: LucideIcons.bug),
           const SizedBox(height: 4),
-          _TagPills(
-            items: patient.allergies,
-            tint: const Color(0xFFE91E63),
-          ),
+          _TagPills(items: patient.allergies, tint: const Color(0xFFE91E63)),
         ],
         if (patient.chronicDiseases.isNotEmpty) ...<Widget>[
           const SizedBox(height: 14),
@@ -299,18 +297,27 @@ class _MedicalCard extends StatelessWidget {
         ],
         if (patient.currentMedications.isNotEmpty) ...<Widget>[
           const SizedBox(height: 14),
-          const _SectionHeader(label: 'الأدوية الحالية', icon: LucideIcons.pill),
+          const _SectionHeader(
+            label: 'الأدوية الحالية',
+            icon: LucideIcons.pill,
+          ),
           const SizedBox(height: 4),
           for (final String m in patient.currentMedications)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 2),
               child: Row(
                 children: <Widget>[
-                  Icon(LucideIcons.dot, size: 14, color: scheme.onSurfaceVariant),
+                  Icon(
+                    LucideIcons.dot,
+                    size: 14,
+                    color: scheme.onSurfaceVariant,
+                  ),
                   const SizedBox(width: 4),
                   Expanded(
-                    child: Text(m,
-                        style: Theme.of(context).textTheme.bodyMedium),
+                    child: Text(
+                      m,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
                   ),
                 ],
               ),
@@ -406,10 +413,7 @@ class _MetricChip extends StatelessWidget {
         const SizedBox(width: 2),
         Text(
           unit,
-          style: TextStyle(
-            color: scheme.onSurfaceVariant,
-            fontSize: 11,
-          ),
+          style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 11),
         ),
       ],
     );
@@ -435,10 +439,7 @@ class _LifestyleChip extends StatelessWidget {
         children: <Widget>[
           Text(
             '$prefix: ',
-            style: TextStyle(
-              color: scheme.onSurfaceVariant,
-              fontSize: 12,
-            ),
+            style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
           ),
           Text(
             label,
@@ -496,9 +497,9 @@ class _SectionHeader extends StatelessWidget {
         Text(
           label,
           style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: scheme.onSurfaceVariant,
-                fontWeight: FontWeight.w800,
-              ),
+            color: scheme.onSurfaceVariant,
+            fontWeight: FontWeight.w800,
+          ),
         ),
       ],
     );
@@ -522,9 +523,9 @@ class _SurgeryRow extends StatelessWidget {
               Expanded(
                 child: Text(
                   surgery.surgeryName,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
                 ),
               ),
               if (surgery.surgeryDate != null)
@@ -541,16 +542,10 @@ class _SurgeryRow extends StatelessWidget {
           if ((surgery.hospital ?? '').isNotEmpty)
             Text(
               surgery.hospital!,
-              style: TextStyle(
-                color: scheme.onSurfaceVariant,
-                fontSize: 12,
-              ),
+              style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12),
             ),
           if ((surgery.notes ?? '').isNotEmpty)
-            Text(
-              surgery.notes!,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
+            Text(surgery.notes!, style: Theme.of(context).textTheme.bodySmall),
         ],
       ),
     );
@@ -645,9 +640,9 @@ class _ProfileCard extends StatelessWidget {
               const SizedBox(width: 10),
               Text(
                 title,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
               ),
             ],
           ),

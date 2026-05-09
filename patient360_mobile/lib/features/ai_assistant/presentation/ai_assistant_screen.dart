@@ -1,3 +1,13 @@
+// ════════════════════════════════════════════════════════════════════════════
+//  AIAssistantScreen — Patient 360° (mobile)
+//  ──────────────────────────────────────────────────────────────────────────
+//  Mirrors the web's renderAIAssistant() in PatientDashboard.jsx. Two
+//  subtabs: استشارة الأخصائي + الإسعاف الأولي. The triage tab now supports
+//  three input modes — text / image / voice — matching the web 1:1.
+// ════════════════════════════════════════════════════════════════════════════
+
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
@@ -14,13 +24,14 @@ import '../domain/severity_level.dart';
 import '../domain/specialist_result.dart';
 import 'providers/ai_providers.dart';
 import 'widgets/emergency_report_tile.dart';
+import 'widgets/empty_state.dart';
+import 'widgets/input_audio.dart';
 import 'widgets/input_image.dart';
 import 'widgets/input_mode_toggle.dart';
 import 'widgets/input_text.dart';
 import 'widgets/report_detail_sheet.dart';
 import 'widgets/result_card.dart';
 
-/// Sub-tab discriminator for the parent /ai screen.
 enum _AiTab { specialist, triage }
 
 const String _ambulanceNumber = '110';
@@ -29,20 +40,17 @@ class AIAssistantScreen extends ConsumerStatefulWidget {
   const AIAssistantScreen({super.key});
 
   @override
-  ConsumerState<AIAssistantScreen> createState() =>
-      _AIAssistantScreenState();
+  ConsumerState<AIAssistantScreen> createState() => _AIAssistantScreenState();
 }
 
 class _AIAssistantScreenState extends ConsumerState<AIAssistantScreen> {
-  _AiTab _tab = _AiTab.specialist;
+  _AiTab _tab = _AiTab.triage;
   final TextEditingController _specialistText = TextEditingController();
   final TextEditingController _triageText = TextEditingController();
   AiInputMode _triageMode = AiInputMode.text;
   XFile? _triageImage;
+  File? _triageAudio;
 
-  /// IDs of reports that already triggered the critical AlertDialog this
-  /// session — avoids re-prompting the same patient multiple times for one
-  /// submission round.
   final Set<String> _criticalDialogShownIds = <String>{};
 
   @override
@@ -60,8 +68,6 @@ class _AIAssistantScreenState extends ConsumerState<AIAssistantScreen> {
             ?.unreadNotifications ??
         0;
 
-    // Listen for a new triage report → prompt the critical dialog when
-    // applicable. ref.listen runs in the build method per Riverpod docs.
     ref.listen<AsyncValue<EmergencyReport?>>(
       triageControllerProvider,
       (AsyncValue<EmergencyReport?>? _, AsyncValue<EmergencyReport?> next) {
@@ -83,7 +89,7 @@ class _AIAssistantScreenState extends ConsumerState<AIAssistantScreen> {
       body: Column(
         children: <Widget>[
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
             child: _SubTabRow(
               current: _tab,
               onChange: (_AiTab t) => setState(() => _tab = t),
@@ -102,6 +108,9 @@ class _AIAssistantScreenState extends ConsumerState<AIAssistantScreen> {
                   pickedImage: _triageImage,
                   onImageChange: (XFile? f) =>
                       setState(() => _triageImage = f),
+                  pickedAudio: _triageAudio,
+                  onAudioChange: (File? f) =>
+                      setState(() => _triageAudio = f),
                 ),
               ],
             ),
@@ -120,8 +129,11 @@ class _AIAssistantScreenState extends ConsumerState<AIAssistantScreen> {
         return AlertDialog(
           icon: const Icon(LucideIcons.octagonAlert,
               color: AppColors.error, size: 36),
-          title: const Text('حالة حرجة',
-              style: TextStyle(fontWeight: FontWeight.w800)),
+          title: const Text(
+            'حالة حرجة',
+            style: TextStyle(fontWeight: FontWeight.w800),
+            textAlign: TextAlign.center,
+          ),
           content: const Text(
             'الإسعاف الأولي بدأ الآن. اتصل بالإسعاف فوراً.',
             style: TextStyle(height: 1.6),
@@ -161,12 +173,13 @@ Future<void> _dialAmbulance() async {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Sub-tab row
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+// Subtab row
+// ════════════════════════════════════════════════════════════════════════════
 
 class _SubTabRow extends StatelessWidget {
   const _SubTabRow({required this.current, required this.onChange});
+
   final _AiTab current;
   final ValueChanged<_AiTab> onChange;
 
@@ -176,7 +189,7 @@ class _SubTabRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: scheme.surfaceContainer,
+        color: scheme.surfaceContainerHighest,
         borderRadius: AppRadii.radiusLg,
         border: Border.all(color: scheme.outline),
       ),
@@ -211,6 +224,7 @@ class _SubTabButton extends StatelessWidget {
     required this.selected,
     required this.onTap,
   });
+
   final IconData icon;
   final String label;
   final bool selected;
@@ -219,20 +233,24 @@ class _SubTabButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    final Color fg = selected ? Colors.white : scheme.onSurfaceVariant;
+    final Color fg = selected ? scheme.primary : scheme.onSurfaceVariant;
+    final Color bg = selected ? scheme.surfaceContainer : Colors.transparent;
+
     return Material(
-      color: selected ? AppColors.action : Colors.transparent,
+      color: bg,
       borderRadius: AppRadii.radiusMd,
+      elevation: selected ? 1 : 0,
+      shadowColor: scheme.primary.withValues(alpha: 0.06),
       child: InkWell(
         borderRadius: AppRadii.radiusMd,
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: <Widget>[
               Icon(icon, size: 16, color: fg),
-              const SizedBox(width: 6),
+              const SizedBox(width: 8),
               Flexible(
                 child: Text(
                   label,
@@ -240,8 +258,7 @@ class _SubTabButton extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: fg,
-                    fontWeight:
-                        selected ? FontWeight.w700 : FontWeight.w500,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
                     fontSize: 13,
                   ),
                 ),
@@ -254,39 +271,42 @@ class _SubTabButton extends StatelessWidget {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
 // Specialist tab
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
 
 class _SpecialistTab extends ConsumerWidget {
   const _SpecialistTab({required this.controller});
+
   final TextEditingController controller;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final AsyncValue<SpecialistResult?> async =
         ref.watch(specialistControllerProvider);
+
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       children: <Widget>[
-        const _IntroCard(
-          icon: LucideIcons.stethoscope,
-          title: 'اختر الأخصائي المناسب لأعراضك',
-          body: 'هذه النتيجة للإرشاد فقط ولا تحل محل الاستشارة الطبية.',
+        const _IntroPanel(
           tone: _IntroTone.info,
+          title: 'اختر الأخصائي المناسب لأعراضك',
+          body:
+              'اكتب أعراضك وسيقترح لك المساعد الذكي نوع الطبيب المناسب '
+              'لحالتك. هذه النتيجة للإرشاد فقط ولا تحل محل الاستشارة الطبية.',
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
         InputText(
           controller: controller,
           maxLength: 2000,
           disabled: async.isLoading,
+          hintText:
+              'صف أعراضك بلغة واضحة، مثل: ألم في الصدر وضيق في التنفس منذ يومين...',
           onSubmit: () {
             final String text = controller.text.trim();
             if (text.isEmpty) return;
             // ignore: discarded_futures
-            ref
-                .read(specialistControllerProvider.notifier)
-                .submit(text);
+            ref.read(specialistControllerProvider.notifier).submit(text);
           },
         ),
         const SizedBox(height: 16),
@@ -303,9 +323,9 @@ class _SpecialistTab extends ConsumerWidget {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
 // Triage tab
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
 
 class _TriageTab extends ConsumerWidget {
   const _TriageTab({
@@ -314,6 +334,8 @@ class _TriageTab extends ConsumerWidget {
     required this.onModeChange,
     required this.pickedImage,
     required this.onImageChange,
+    required this.pickedAudio,
+    required this.onAudioChange,
   });
 
   final TextEditingController textController;
@@ -321,6 +343,8 @@ class _TriageTab extends ConsumerWidget {
   final ValueChanged<AiInputMode> onModeChange;
   final XFile? pickedImage;
   final ValueChanged<XFile?> onImageChange;
+  final File? pickedAudio;
+  final ValueChanged<File?> onAudioChange;
 
   void _alert(BuildContext context, String message) {
     ScaffoldMessenger.maybeOf(context)
@@ -337,10 +361,16 @@ class _TriageTab extends ConsumerWidget {
     final bool busy = async.isLoading;
 
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       children: <Widget>[
-        const _AmbulanceCallout(),
-        const SizedBox(height: 12),
+        const _IntroPanel(
+          tone: _IntroTone.emergency,
+          title: 'الإسعاف الأولي الذكي',
+          body:
+              'صف حالتك أو ارفع صورة للإصابة وسنوفر لك إرشادات الإسعاف '
+              'الأولي. في حالة الطوارئ الحقيقية، اتصل بالإسعاف فوراً.',
+        ),
+        const SizedBox(height: 16),
         InputModeToggle(
           current: mode,
           onChanged: onModeChange,
@@ -352,17 +382,15 @@ class _TriageTab extends ConsumerWidget {
             controller: textController,
             maxLength: 2000,
             disabled: busy,
-            hintText: 'صف الحالة وموقع الألم وشدّته...',
+            hintText: 'صف الحالة — مثال: جرح في اليد ينزف منذ 5 دقائق...',
             onSubmit: () {
               final String text = textController.text.trim();
               if (text.isEmpty) return;
               // ignore: discarded_futures
-              ref
-                  .read(triageControllerProvider.notifier)
-                  .submitText(text);
+              ref.read(triageControllerProvider.notifier).submitText(text);
             },
           )
-        else
+        else if (mode == AiInputMode.image)
           Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
@@ -383,14 +411,27 @@ class _TriageTab extends ConsumerWidget {
                             .submitImage(pickedImage!);
                       },
                 icon: const Icon(LucideIcons.send, size: 16),
-                label: const Text('إرسال للتحليل'),
+                label: const Text('تحليل الصورة'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.action,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
               ),
             ],
+          )
+        else
+          // mode == AiInputMode.voice
+          InputAudio(
+            disabled: busy,
+            onChanged: onAudioChange,
+            onAlert: (String msg) => _alert(context, msg),
+            onSubmit: (File audioFile) {
+              // ignore: discarded_futures
+              ref
+                  .read(triageControllerProvider.notifier)
+                  .submitVoice(XFile(audioFile.path));
+            },
           ),
         const SizedBox(height: 16),
         if (async.isLoading)
@@ -412,60 +453,79 @@ class _TriageTab extends ConsumerWidget {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Intro / callout cards
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+// Intro panel
+// ════════════════════════════════════════════════════════════════════════════
 
-enum _IntroTone { info, warning }
+enum _IntroTone { info, emergency }
 
-class _IntroCard extends StatelessWidget {
-  const _IntroCard({
-    required this.icon,
+class _IntroPanel extends StatelessWidget {
+  const _IntroPanel({
+    required this.tone,
     required this.title,
     required this.body,
-    required this.tone,
   });
-  final IconData icon;
+
+  final _IntroTone tone;
   final String title;
   final String body;
-  final _IntroTone tone;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    final Color tint = tone == _IntroTone.warning
-        ? AppColors.warning
-        : AppColors.action;
+    final bool isEmergency = tone == _IntroTone.emergency;
+
+    final Color bg = isEmergency
+        ? const Color(0xFFFFEBEE)
+        : scheme.surfaceContainerHighest;
+    final Color borderColor = isEmergency
+        ? const Color(0xFFFFCDD2)
+        : scheme.outline;
+    final Color titleColor = isEmergency ? AppColors.error : scheme.primary;
+    final Color bodyColor = isEmergency
+        ? const Color(0xFFB71C1C)
+        : scheme.onSurfaceVariant;
+
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: tint.withValues(alpha: 0.10),
-        borderRadius: AppRadii.radiusLg,
-        border: Border.all(color: tint.withValues(alpha: 0.45)),
+        color: bg,
+        borderRadius: AppRadii.radiusMd,
+        border: Border.all(color: borderColor),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Icon(icon, size: 20, color: tint),
-          const SizedBox(width: 10),
+          if (isEmergency) ...<Widget>[
+            const Icon(
+              LucideIcons.triangleAlert,
+              size: 20,
+              color: AppColors.error,
+            ),
+            const SizedBox(width: 12),
+          ],
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
                   title,
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w800),
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: titleColor,
+                    fontFamily: 'Cairo',
+                  ),
                 ),
-                const SizedBox(height: 2),
+                const SizedBox(height: 4),
                 Text(
                   body,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                        height: 1.5,
-                      ),
+                  style: TextStyle(
+                    fontSize: 13,
+                    height: 1.6,
+                    color: bodyColor,
+                    fontFamily: 'Cairo',
+                  ),
                 ),
               ],
             ),
@@ -476,171 +536,85 @@ class _IntroCard extends StatelessWidget {
   }
 }
 
-class _AmbulanceCallout extends StatelessWidget {
-  const _AmbulanceCallout();
-
-  Future<void> _dial() async {
-    await _dialAmbulance();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.warning.withValues(alpha: 0.12),
-        borderRadius: AppRadii.radiusLg,
-        border: Border.all(color: AppColors.warning.withValues(alpha: 0.55)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              const Icon(LucideIcons.triangleAlert,
-                  size: 20, color: AppColors.warning),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'الإسعاف الأولي الذكي',
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleSmall
-                      ?.copyWith(fontWeight: FontWeight.w800),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'في حالة الطوارئ الحقيقية، اتصل بالإسعاف فوراً.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  height: 1.5,
-                ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: <Widget>[
-              const Text(
-                'الرقم: ',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-              InkWell(
-                onTap: _dial,
-                borderRadius: AppRadii.radiusSm,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.warning.withValues(alpha: 0.20),
-                    borderRadius: AppRadii.radiusSm,
-                  ),
-                  child: const Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Icon(LucideIcons.phone,
-                          size: 14, color: AppColors.warning),
-                      SizedBox(width: 4),
-                      Text(
-                        _ambulanceNumber,
-                        textDirection: TextDirection.ltr,
-                        style: TextStyle(
-                          color: AppColors.warning,
-                          fontWeight: FontWeight.w800,
-                          fontFamily: 'Inter',
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// History
-// ═══════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+// History section
+// ════════════════════════════════════════════════════════════════════════════
 
 class _HistorySection extends StatelessWidget {
   const _HistorySection({required this.historyAsync});
+
   final AsyncValue<List<EmergencyReport>> historyAsync;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        Row(
-          children: <Widget>[
-            Icon(LucideIcons.clock, size: 18, color: scheme.onSurfaceVariant),
-            const SizedBox(width: 6),
-            Text(
-              'السجل السابق',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleSmall
-                  ?.copyWith(fontWeight: FontWeight.w800),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        historyAsync.when(
-          loading: () => const Padding(
-            padding: EdgeInsets.all(20),
-            child: Center(
-              child: SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: AppRadii.radiusLg,
+        border: Border.all(color: scheme.outline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Row(
+            children: <Widget>[
+              Icon(LucideIcons.clock, size: 18, color: scheme.primary),
+              const SizedBox(width: 8),
+              Text(
+                'السجل السابق',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.primary,
+                  fontFamily: 'Cairo',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          historyAsync.when(
+            loading: () => const Padding(
+              padding: EdgeInsets.all(20),
+              child: Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2.5),
+                ),
               ),
             ),
-          ),
-          error: (Object _, __) => Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Text(
-              'تعذر تحميل السجل.',
-              style: TextStyle(color: scheme.onSurfaceVariant),
+            error: (Object _, __) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'تعذر تحميل السجل.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: scheme.onSurfaceVariant),
+              ),
             ),
-          ),
-          data: (List<EmergencyReport> list) {
-            if (list.isEmpty) {
-              return Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: scheme.surfaceContainer,
-                  borderRadius: AppRadii.radiusLg,
-                  border: Border.all(color: scheme.outline),
-                ),
-                child: Text(
-                  'لا توجد بلاغات سابقة.',
-                  style: TextStyle(color: scheme.onSurfaceVariant),
-                ),
+            data: (List<EmergencyReport> list) {
+              if (list.isEmpty) {
+                return const EmptyState(
+                  icon: LucideIcons.clock,
+                  title: 'لا يوجد سجل',
+                  subtitle: 'ستظهر هنا تقاريرك السابقة بعد إرسال أول طلب.',
+                );
+              }
+              return Column(
+                children: <Widget>[
+                  for (final EmergencyReport r in list)
+                    EmergencyReportTile(
+                      report: r,
+                      onTap: () => ReportDetailSheet.show(context, r),
+                    ),
+                ],
               );
-            }
-            return Column(
-              children: <Widget>[
-                for (final EmergencyReport r in list)
-                  EmergencyReportTile(
-                    report: r,
-                    onTap: () => ReportDetailSheet.show(context, r),
-                  ),
-              ],
-            );
-          },
-        ),
-      ],
+            },
+          ),
+        ],
+      ),
     );
   }
 }
-

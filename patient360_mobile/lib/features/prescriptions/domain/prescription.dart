@@ -2,6 +2,20 @@ import 'package:flutter/foundation.dart';
 
 import 'medication_item.dart';
 
+/// Helper: extracts a string ID from a value that might be:
+/// - null
+/// - a String (already an ID)
+/// - a Map (populated object from MongoDB — extract _id)
+String? _idAsString(Object? v) {
+  if (v == null) return null;
+  if (v is String) return v.isEmpty ? null : v;
+  if (v is Map) {
+    final dynamic id = v['_id'] ?? v['id'];
+    return id?.toString();
+  }
+  return v.toString();
+}
+
 /// Mirrors the `prescriptions` collection. The mobile app reads (never
 /// writes) prescriptions; pharmacists do the dispensing on a separate
 /// surface.
@@ -39,22 +53,22 @@ class Prescription {
 
     final List<MedicationItem> meds =
         (json['medications'] as List<dynamic>?)
-                ?.map(
-                  (dynamic e) => MedicationItem.fromJson(
-                    (e as Map<dynamic, dynamic>).cast<String, dynamic>(),
-                  ),
-                )
-                .toList() ??
-            const <MedicationItem>[];
+            ?.map(
+              (dynamic e) => MedicationItem.fromJson(
+                (e as Map<dynamic, dynamic>).cast<String, dynamic>(),
+              ),
+            )
+            .toList() ??
+        const <MedicationItem>[];
 
     return Prescription(
       id: (json['_id'] ?? json['id']).toString(),
       prescriptionNumber: (json['prescriptionNumber'] as String?) ?? '',
-      patientPersonId: json['patientPersonId'] as String?,
-      patientChildId: json['patientChildId'] as String?,
-      doctorId: json['doctorId'] as String?,
-      dentistId: json['dentistId'] as String?,
-      visitId: json['visitId'] as String?,
+      patientPersonId: _idAsString(json['patientPersonId']),
+      patientChildId: _idAsString(json['patientChildId']),
+      doctorId: _idAsString(json['doctorId']),
+      dentistId: _idAsString(json['dentistId']),
+      visitId: _idAsString(json['visitId']),
       prescriptionDate: asDate(json['prescriptionDate']),
       expiryDate: asDateOrNull(json['expiryDate']),
       medications: meds,
@@ -62,7 +76,7 @@ class Prescription {
       verificationCode: json['verificationCode'] as String?,
       qrCode: json['qrCode'] as String?,
       printCount: (json['printCount'] as num?)?.toInt() ?? 0,
-      dispensingId: json['dispensingId'] as String?,
+      dispensingId: _idAsString(json['dispensingId']),
       prescriptionNotes: json['prescriptionNotes'] as String?,
       createdAt: asDate(json['createdAt'], fallback: DateTime.now()),
       updatedAt: asDate(json['updatedAt'], fallback: DateTime.now()),
@@ -101,16 +115,16 @@ class Prescription {
   /// Earliest non-null `dispensedAt` across the embedded meds — i.e. when
   /// the pharmacy first started fulfilling this prescription.
   DateTime? get firstDispensedAt {
-    final List<DateTime> dates = medications
-        .map((MedicationItem m) => m.dispensedAt)
-        .whereType<DateTime>()
-        .toList()
-      ..sort();
+    final List<DateTime> dates =
+        medications
+            .map((MedicationItem m) => m.dispensedAt)
+            .whereType<DateTime>()
+            .toList()
+          ..sort();
     return dates.isEmpty ? null : dates.first;
   }
 
-  bool get isActive =>
-      status == 'active' || status == 'partially_dispensed';
+  bool get isActive => status == 'active' || status == 'partially_dispensed';
 }
 
 /// UI bucket mapping for the 3-tab filter.
@@ -119,10 +133,10 @@ enum PrescriptionGroup { active, dispensed, expired }
 extension PrescriptionGrouping on PrescriptionGroup {
   static const Map<PrescriptionGroup, Set<String>> _statusSets =
       <PrescriptionGroup, Set<String>>{
-    PrescriptionGroup.active: <String>{'active', 'partially_dispensed'},
-    PrescriptionGroup.dispensed: <String>{'dispensed'},
-    PrescriptionGroup.expired: <String>{'expired', 'cancelled'},
-  };
+        PrescriptionGroup.active: <String>{'active', 'partially_dispensed'},
+        PrescriptionGroup.dispensed: <String>{'dispensed'},
+        PrescriptionGroup.expired: <String>{'expired', 'cancelled'},
+      };
 
   Set<String> get statuses => _statusSets[this]!;
 

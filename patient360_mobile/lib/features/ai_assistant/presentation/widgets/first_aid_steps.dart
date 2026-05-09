@@ -1,136 +1,164 @@
+// ════════════════════════════════════════════════════════════════════════════
+//  FirstAidSteps
+//  ──────────────────────────────────────────────────────────────────────────
+//  Numbered list of Arabic first-aid instructions. Mirrors the web's
+//  `frontend/src/components/ai/FirstAidSteps.jsx` plus the matching
+//  `.pd-ai-first-aid-step` and `.pd-ai-first-aid-step-number` CSS rules.
+//
+//  Each step is a card (background fill, border, radius-md) with a 28px
+//  filled circle showing the step number. Cards animate in with a 100ms
+//  stagger that matches the CSS rule:
+//      animation-delay: calc(var(--step-index, 0) * 100ms);
+//      animation: pd-step-fade-in 0.4s ease backwards;
+//  i.e. step N starts fading in at N×100ms.
+// ════════════════════════════════════════════════════════════════════════════
+
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_radii.dart';
 
-/// Numbered ordered list. Each step animates in with a 200 ms × index
-/// stagger. When the user has reduced motion enabled the stagger is
-/// skipped — every step appears instantly to keep the screen scannable.
 class FirstAidSteps extends StatelessWidget {
-  const FirstAidSteps({required this.steps, super.key});
+  const FirstAidSteps({super.key, required this.steps});
 
   final List<String> steps;
 
   @override
   Widget build(BuildContext context) {
-    if (steps.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Text(
-          'لا توجد خطوات إسعاف أولي.',
-          style: Theme.of(context)
-              .textTheme
-              .bodyMedium
-              ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
-        ),
-      );
-    }
+    if (steps.isEmpty) return const SizedBox.shrink();
 
-    final bool reduceMotion = MediaQuery.disableAnimationsOf(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        for (int i = 0; i < steps.length; i++)
-          _Step(
-            index: i,
-            text: steps[i],
-            reduceMotion: reduceMotion,
-          ),
-      ],
+    return Semantics(
+      label: 'خطوات الإسعاف الأولي',
+      container: true,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          for (int i = 0; i < steps.length; i++) ...<Widget>[
+            if (i > 0) const SizedBox(height: 10),
+            _StepCard(index: i, text: steps[i]),
+          ],
+        ],
+      ),
     );
   }
 }
 
-class _Step extends StatelessWidget {
-  const _Step({
-    required this.index,
-    required this.text,
-    required this.reduceMotion,
-  });
+// ─── Individual step card with stagger animation ─────────────────────────
+
+class _StepCard extends StatefulWidget {
+  const _StepCard({required this.index, required this.text});
+
   final int index;
   final String text;
-  final bool reduceMotion;
+
+  @override
+  State<_StepCard> createState() => _StepCardState();
+}
+
+class _StepCardState extends State<_StepCard>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctl;
+  late final Animation<double> _fade;
+  late final Animation<Offset> _slide;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    _fade = CurvedAnimation(parent: _ctl, curve: Curves.easeOut);
+    _slide = Tween<Offset>(
+      begin: const Offset(0, 0.18), // ~8px translate-y from CSS pd-step-fade-in
+      end: Offset.zero,
+    ).animate(_fade);
+
+    // Stagger start: index × 100ms.
+    Future<void>.delayed(
+      Duration(milliseconds: widget.index * 100),
+      () {
+        if (mounted) _ctl.forward();
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    final Widget row = Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Container(
-            width: 26,
-            height: 26,
-            decoration: BoxDecoration(
-              color: AppColors.action.withValues(alpha: 0.18),
-              borderRadius: AppRadii.radiusSm,
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              '${index + 1}',
-              textDirection: TextDirection.ltr,
-              style: const TextStyle(
-                color: AppColors.action,
-                fontWeight: FontWeight.w800,
-                fontSize: 13,
-              ),
-            ),
+    final bool isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return FadeTransition(
+      opacity: _fade,
+      child: SlideTransition(
+        position: _slide,
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.backgroundDark : AppColors.background,
+            border: Border.all(color: scheme.outline),
+            borderRadius: AppRadii.radiusMd,
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text(
-                text,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              _StepNumber(index: widget.index + 1),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    widget.text,
+                    style: TextStyle(
+                      fontSize: 14,
+                      height: 1.6,
                       color: scheme.onSurface,
-                      height: 1.5,
+                      fontFamily: 'Cairo',
                     ),
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
-        ],
-      ),
-    );
-
-    if (reduceMotion) return row;
-
-    final Duration delay = Duration(milliseconds: 200 * index);
-    return TweenAnimationBuilder<double>(
-      key: ValueKey<int>(index),
-      tween: Tween<double>(begin: 0.0, end: 1.0),
-      duration: const Duration(milliseconds: 320),
-      // The delay is approximated via a curve that holds at zero until the
-      // staggered window opens.
-      curve: _DelayedEaseOut(
-        delayFraction: delay.inMilliseconds / 320,
-      ),
-      builder: (BuildContext _, double t, Widget? child) => Opacity(
-        opacity: t.clamp(0.0, 1.0),
-        child: Transform.translate(
-          offset: Offset(0, (1 - t.clamp(0.0, 1.0)) * 8),
-          child: child,
         ),
       ),
-      child: row,
     );
   }
 }
 
-/// Curve that returns 0 until [delayFraction] of the duration has elapsed,
-/// then ease-outs from 0 to 1 over the remainder. Lets the parent express
-/// stagger without spawning N AnimationControllers.
-class _DelayedEaseOut extends Curve {
-  const _DelayedEaseOut({required this.delayFraction});
-  final double delayFraction;
+// ─── 28px filled action-color number badge ───────────────────────────────
+
+class _StepNumber extends StatelessWidget {
+  const _StepNumber({required this.index});
+
+  final int index;
 
   @override
-  double transformInternal(double t) {
-    if (t <= delayFraction) return 0;
-    if (delayFraction >= 1) return 1;
-    final double remapped = (t - delayFraction) / (1 - delayFraction);
-    return Curves.easeOut.transform(remapped.clamp(0.0, 1.0));
+  Widget build(BuildContext context) {
+    return Container(
+      width: 28,
+      height: 28,
+      alignment: Alignment.center,
+      decoration: const BoxDecoration(
+        color: AppColors.action,
+        shape: BoxShape.circle,
+      ),
+      child: Text(
+        '$index',
+        style: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          color: Colors.white,
+          fontFamily: 'Inter',
+          height: 1.0,
+        ),
+      ),
+    );
   }
 }

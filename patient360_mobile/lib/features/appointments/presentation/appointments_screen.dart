@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../shared/widgets/app_drawer.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/loading_spinner.dart';
 import '../../../shared/widgets/page_header.dart';
@@ -19,23 +20,19 @@ class AppointmentsScreen extends ConsumerStatefulWidget {
   const AppointmentsScreen({super.key});
 
   @override
-  ConsumerState<AppointmentsScreen> createState() =>
-      _AppointmentsScreenState();
+  ConsumerState<AppointmentsScreen> createState() => _AppointmentsScreenState();
 }
 
-class _AppointmentsScreenState
-    extends ConsumerState<AppointmentsScreen> {
+class _AppointmentsScreenState extends ConsumerState<AppointmentsScreen> {
   AppointmentGroup _tab = AppointmentGroup.upcoming;
 
   @override
   Widget build(BuildContext context) {
-    final AsyncValue<List<Appointment>> allAsync =
-        ref.watch(appointmentsProvider);
-    final int unread = ref
-            .watch(dashboardOverviewProvider)
-            .value
-            ?.unreadNotifications ??
-        0;
+    final AsyncValue<List<Appointment>> allAsync = ref.watch(
+      appointmentsProvider,
+    );
+    final int unread =
+        ref.watch(dashboardOverviewProvider).value?.unreadNotifications ?? 0;
 
     return Scaffold(
       appBar: PageHeader(
@@ -43,6 +40,7 @@ class _AppointmentsScreenState
         subtitle: 'إدارة المواعيد القادمة والسابقة',
         unreadCount: unread,
       ),
+      drawer: const AppDrawer(),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: AppColors.action,
         foregroundColor: Colors.white,
@@ -53,12 +51,10 @@ class _AppointmentsScreenState
       body: Column(
         children: <Widget>[
           Padding(
-            padding:
-                const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
             child: _TabBar(
               current: _tab,
-              onChange: (AppointmentGroup g) =>
-                  setState(() => _tab = g),
+              onChange: (AppointmentGroup g) => setState(() => _tab = g),
             ),
           ),
           Expanded(
@@ -71,11 +67,14 @@ class _AppointmentsScreenState
                     ref.read(appointmentsProvider.notifier).refresh(),
               ),
               data: (List<Appointment> list) {
-                final List<Appointment> bucket = list
-                    .where((Appointment a) => _tab.includes(a.status))
-                    .toList()
-                  ..sort((Appointment a, Appointment b) =>
-                      b.appointmentDate.compareTo(a.appointmentDate));
+                final List<Appointment> bucket =
+                    list
+                        .where((Appointment a) => _tab.includes(a.status))
+                        .toList()
+                      ..sort(
+                        (Appointment a, Appointment b) =>
+                            b.appointmentDate.compareTo(a.appointmentDate),
+                      );
                 if (bucket.isEmpty) {
                   return _EmptyForTab(
                     tab: _tab,
@@ -86,20 +85,16 @@ class _AppointmentsScreenState
                   onRefresh: () =>
                       ref.read(appointmentsProvider.notifier).refresh(),
                   child: ListView.builder(
-                    padding:
-                        const EdgeInsets.fromLTRB(16, 4, 16, 96),
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),
                     itemCount: bucket.length,
                     itemBuilder: (BuildContext c, int i) {
                       final Appointment a = bucket[i];
-                      final bool isUpcoming =
-                          AppointmentGroup.upcoming.includes(a.status);
+                      final bool isUpcoming = AppointmentGroup.upcoming
+                          .includes(a.status);
                       return AppointmentCard(
                         appointment: a,
                         onCancel: isUpcoming
-                            ? () => CancelSheet.show(
-                                  context,
-                                  appointment: a,
-                                )
+                            ? () => CancelSheet.show(context, appointment: a)
                             : null,
                       );
                     },
@@ -120,11 +115,12 @@ class _TabBar extends StatelessWidget {
   final AppointmentGroup current;
   final ValueChanged<AppointmentGroup> onChange;
 
-  static const List<(AppointmentGroup, String)> _tabs = <(AppointmentGroup, String)>[
-    (AppointmentGroup.upcoming, 'القادمة'),
-    (AppointmentGroup.past, 'السابقة'),
-    (AppointmentGroup.cancelled, 'الملغاة'),
-  ];
+  static const List<(AppointmentGroup, String)> _tabs =
+      <(AppointmentGroup, String)>[
+        (AppointmentGroup.upcoming, 'القادمة'),
+        (AppointmentGroup.past, 'السابقة'),
+        (AppointmentGroup.cancelled, 'الملغاة'),
+      ];
 
   @override
   Widget build(BuildContext context) {
@@ -179,8 +175,7 @@ class _TabButton extends StatelessWidget {
             label,
             style: TextStyle(
               color: selected ? Colors.white : scheme.onSurfaceVariant,
-              fontWeight:
-                  selected ? FontWeight.w700 : FontWeight.w500,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
               fontSize: 13,
             ),
           ),
@@ -210,8 +205,7 @@ class _EmptyForTab extends StatelessWidget {
           icon: LucideIcons.calendar,
           title: 'لا توجد مواعيد',
           subtitle: subtitle,
-          ctaLabel:
-              tab == AppointmentGroup.upcoming ? 'حجز موعد' : null,
+          ctaLabel: tab == AppointmentGroup.upcoming ? 'حجز موعد' : null,
           onCta: tab == AppointmentGroup.upcoming ? onBook : null,
         ),
       ),

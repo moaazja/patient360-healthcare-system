@@ -40,15 +40,14 @@ final AsyncNotifierProvider<SpecialistController, SpecialistResult?>
 );
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Triage
+// Triage — text / image / voice
 // ═══════════════════════════════════════════════════════════════════════════
 
 class TriageController extends AsyncNotifier<EmergencyReport?> {
   @override
   Future<EmergencyReport?> build() async => null;
 
-  /// Submit a free-text symptom description. Geolocation is attempted with
-  /// a 3s ceiling so a slow GPS lock never blocks the patient.
+  /// Submit a free-text symptom description.
   Future<EmergencyReport?> submitText(String text) async {
     return _submit(inputType: 'text', textDescription: text);
   }
@@ -68,10 +67,17 @@ class TriageController extends AsyncNotifier<EmergencyReport?> {
     );
   }
 
+  /// Submit a recorded WAV from InputAudio. Whisper-friendly format
+  /// (16 kHz mono PCM) — see lib/.../widgets/input_audio.dart.
+  Future<EmergencyReport?> submitVoice(XFile audio) async {
+    return _submit(inputType: 'voice', audioFile: audio);
+  }
+
   Future<EmergencyReport?> _submit({
     required String inputType,
     String? textDescription,
     XFile? imageFile,
+    XFile? audioFile,
   }) async {
     state = const AsyncValue<EmergencyReport?>.loading();
 
@@ -86,14 +92,12 @@ class TriageController extends AsyncNotifier<EmergencyReport?> {
             inputType: inputType,
             textDescription: textDescription,
             imageFile: imageFile,
+            audioFile: audioFile,
             location: loc,
           ),
     );
     final EmergencyReport? report = state.value;
     if (report != null) {
-      // Refresh the history so the new entry appears at the top. Don't
-      // await — the caller cares about the just-submitted report, not the
-      // background list refresh.
       // ignore: unawaited_futures
       ref.read(emergencyReportsProvider.notifier).refresh();
     }

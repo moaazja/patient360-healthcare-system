@@ -4,9 +4,10 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_radii.dart';
 
-/// Two-choice segmented control: text vs image. Mirrors the web atom
-/// `InputModeToggle.jsx`; voice is intentionally absent in v1 (deferred).
-enum AiInputMode { text, image }
+/// Three-choice segmented control: text / image / voice.
+/// Mirrors the web atom `InputModeToggle.jsx` — voice is now enabled
+/// because Redwan's FastAPI service includes Whisper transcription.
+enum AiInputMode { text, image, voice }
 
 class InputModeToggle extends StatelessWidget {
   const InputModeToggle({
@@ -34,7 +35,7 @@ class InputModeToggle extends StatelessWidget {
         children: <Widget>[
           Expanded(
             child: _ToggleButton(
-              label: 'كتابة',
+              label: 'نص',
               icon: LucideIcons.messageSquare,
               selected: current == AiInputMode.text,
               disabled: disabled,
@@ -48,6 +49,15 @@ class InputModeToggle extends StatelessWidget {
               selected: current == AiInputMode.image,
               disabled: disabled,
               onTap: () => onChanged(AiInputMode.image),
+            ),
+          ),
+          Expanded(
+            child: _ToggleButton(
+              label: 'صوت',
+              icon: LucideIcons.mic,
+              selected: current == AiInputMode.voice,
+              disabled: disabled,
+              onTap: () => onChanged(AiInputMode.voice),
             ),
           ),
         ],
@@ -86,7 +96,7 @@ class _ToggleButton extends StatelessWidget {
         borderRadius: AppRadii.radiusMd,
         onTap: disabled ? null : onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
           alignment: Alignment.center,
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -94,13 +104,17 @@ class _ToggleButton extends StatelessWidget {
             children: <Widget>[
               Icon(icon, size: 16, color: foreground),
               const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: foreground,
-                  fontWeight:
-                      selected ? FontWeight.w700 : FontWeight.w500,
-                  fontSize: 13,
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: foreground,
+                    fontWeight:
+                        selected ? FontWeight.w700 : FontWeight.w500,
+                    fontSize: 13,
+                  ),
                 ),
               ),
             ],

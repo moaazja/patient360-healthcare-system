@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/network/api_exception.dart';
+import '../../../shared/widgets/app_drawer.dart';
 import '../../../shared/widgets/error_snackbar.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../auth/domain/auth_session.dart';
@@ -18,20 +19,25 @@ class HomeScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final AsyncValue<Overview> overviewAsync =
-        ref.watch(dashboardOverviewProvider);
-    final AsyncValue<AuthSession?> authState =
-        ref.watch(authControllerProvider);
+    final AsyncValue<Overview> overviewAsync = ref.watch(
+      dashboardOverviewProvider,
+    );
+    final AsyncValue<AuthSession?> authState = ref.watch(
+      authControllerProvider,
+    );
     final AuthSession? session = authState.value;
     final String? firstName =
         session?.person?.firstName ?? session?.child?.firstName;
 
-    ref.listen<AsyncValue<Overview>>(dashboardOverviewProvider,
-        (AsyncValue<Overview>? prev, AsyncValue<Overview> next) {
+    ref.listen<AsyncValue<Overview>>(dashboardOverviewProvider, (
+      AsyncValue<Overview>? prev,
+      AsyncValue<Overview> next,
+    ) {
       if (next.hasError && prev?.hasError != true) {
         final Object err = next.error!;
-        final String msg =
-            err is ApiException ? err.toDisplayMessage() : err.toString();
+        final String msg = err is ApiException
+            ? err.toDisplayMessage()
+            : err.toString();
         ErrorSnackbar.show(
           context,
           'تعذر تحميل لوحة القيادة',
@@ -50,6 +56,7 @@ class HomeScreen extends ConsumerWidget {
         subtitle: 'نظرة عامة على صحتك',
         unreadCount: overview.unreadNotifications,
       ),
+      drawer: const AppDrawer(),
       body: RefreshIndicator(
         onRefresh: () async {
           ref.invalidate(dashboardOverviewProvider);

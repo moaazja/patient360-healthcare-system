@@ -3,6 +3,20 @@ import 'package:flutter/foundation.dart';
 import 'test_ordered.dart';
 import 'test_result_row.dart';
 
+/// Helper: extracts a string ID from a value that might be:
+/// - null
+/// - a String (already an ID)
+/// - a Map (populated object from MongoDB — extract _id)
+String? _idAsString(Object? v) {
+  if (v == null) return null;
+  if (v is String) return v.isEmpty ? null : v;
+  if (v is Map) {
+    final dynamic id = v['_id'] ?? v['id'];
+    return id?.toString();
+  }
+  return v.toString();
+}
+
 /// Mirrors the `lab_tests` collection. Read-only from the mobile app —
 /// the patient marks a completed test viewed but never modifies its
 /// results, status, or attached PDF.
@@ -49,28 +63,28 @@ class LabTest {
 
     final List<TestOrdered> testsOrdered =
         (json['testsOrdered'] as List<dynamic>?)
-                ?.whereType<Map<dynamic, dynamic>>()
-                .map((Map<dynamic, dynamic> m) => m.cast<String, dynamic>())
-                .map(TestOrdered.fromJson)
-                .toList() ??
-            const <TestOrdered>[];
+            ?.whereType<Map<dynamic, dynamic>>()
+            .map((Map<dynamic, dynamic> m) => m.cast<String, dynamic>())
+            .map(TestOrdered.fromJson)
+            .toList() ??
+        const <TestOrdered>[];
 
     final List<TestResultRow> testResults =
         (json['testResults'] as List<dynamic>?)
-                ?.whereType<Map<dynamic, dynamic>>()
-                .map((Map<dynamic, dynamic> m) => m.cast<String, dynamic>())
-                .map(TestResultRow.fromJson)
-                .toList() ??
-            const <TestResultRow>[];
+            ?.whereType<Map<dynamic, dynamic>>()
+            .map((Map<dynamic, dynamic> m) => m.cast<String, dynamic>())
+            .map(TestResultRow.fromJson)
+            .toList() ??
+        const <TestResultRow>[];
 
     return LabTest(
       id: (json['_id'] ?? json['id']).toString(),
       testNumber: (json['testNumber'] as String?) ?? '',
-      patientPersonId: json['patientPersonId'] as String?,
-      patientChildId: json['patientChildId'] as String?,
-      orderedBy: json['orderedBy'] as String?,
-      visitId: json['visitId'] as String?,
-      laboratoryId: json['laboratoryId'] as String?,
+      patientPersonId: _idAsString(json['patientPersonId']),
+      patientChildId: _idAsString(json['patientChildId']),
+      orderedBy: _idAsString(json['orderedBy']),
+      visitId: _idAsString(json['visitId']),
+      laboratoryId: _idAsString(json['laboratoryId']),
       orderDate: asDate(json['orderDate']),
       scheduledDate: asDateOrNull(json['scheduledDate']),
       testsOrdered: testsOrdered,
@@ -130,18 +144,16 @@ class LabTest {
 
   /// Count of result rows flagged abnormal (includes critical — critical
   /// is a *severity-amplified* form of abnormal in the schema).
-  int get abnormalCount =>
-      testResults.where((TestResultRow r) => r.isAbnormal || r.isCritical).length;
+  int get abnormalCount => testResults
+      .where((TestResultRow r) => r.isAbnormal || r.isCritical)
+      .length;
 
   /// Count of result rows flagged critical specifically. Drives the
   /// persistent SnackBar reminder on first expand.
   int get criticalCount =>
       testResults.where((TestResultRow r) => r.isCritical).length;
 
-  LabTest copyWith({
-    bool? isViewedByPatient,
-    DateTime? patientViewedAt,
-  }) {
+  LabTest copyWith({bool? isViewedByPatient, DateTime? patientViewedAt}) {
     return LabTest(
       id: id,
       testNumber: testNumber,

@@ -5,6 +5,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_radii.dart';
+import '../../../shared/widgets/app_drawer.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/loading_spinner.dart';
 import '../../../shared/widgets/page_header.dart';
@@ -35,8 +36,9 @@ class _LabResultsScreenState extends ConsumerState<LabResultsScreen> {
   void _onCriticalExpanded(LabTest t) {
     if (_criticalSnackShown.contains(t.id)) return;
     _criticalSnackShown.add(t.id);
-    final ScaffoldMessengerState? messenger =
-        ScaffoldMessenger.maybeOf(context);
+    final ScaffoldMessengerState? messenger = ScaffoldMessenger.maybeOf(
+      context,
+    );
     messenger?.removeCurrentSnackBar();
     messenger?.showSnackBar(
       SnackBar(
@@ -71,11 +73,8 @@ class _LabResultsScreenState extends ConsumerState<LabResultsScreen> {
   @override
   Widget build(BuildContext context) {
     final AsyncValue<List<LabTest>> async = ref.watch(labTestsProvider);
-    final int unread = ref
-            .watch(dashboardOverviewProvider)
-            .value
-            ?.unreadNotifications ??
-        0;
+    final int unread =
+        ref.watch(dashboardOverviewProvider).value?.unreadNotifications ?? 0;
 
     return Scaffold(
       appBar: PageHeader(
@@ -83,6 +82,7 @@ class _LabResultsScreenState extends ConsumerState<LabResultsScreen> {
         subtitle: 'نتائج الفحوصات المخبرية',
         unreadCount: unread,
       ),
+      drawer: const AppDrawer(),
       body: Column(
         children: <Widget>[
           Padding(
@@ -94,16 +94,14 @@ class _LabResultsScreenState extends ConsumerState<LabResultsScreen> {
           ),
           Expanded(
             child: async.when(
-              loading: () => const LoadingSpinner(
-                message: 'جاري تحميل نتائج المختبر...',
-              ),
+              loading: () =>
+                  const LoadingSpinner(message: 'جاري تحميل نتائج المختبر...'),
               error: (Object err, _) => _ErrorView(
                 error: err,
                 onRetry: () => ref.read(labTestsProvider.notifier).refresh(),
               ),
               data: (List<LabTest> all) {
-                final List<LabTest> bucket =
-                    all.where(_tab.includes).toList();
+                final List<LabTest> bucket = all.where(_tab.includes).toList();
                 if (bucket.isEmpty) {
                   return _EmptyForTab(tab: _tab);
                 }
@@ -208,12 +206,9 @@ class _EmptyForTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final String subtitle = switch (tab) {
-      LabTestGroup.all =>
-        'ستظهر هنا فحوصاتك المخبرية بعد طلبها من قبل الطبيب.',
-      LabTestGroup.pending =>
-        'لا توجد فحوصات بانتظار النتائج حالياً.',
-      LabTestGroup.completed =>
-        'لا توجد نتائج مخبرية مكتملة بعد.',
+      LabTestGroup.all => 'ستظهر هنا فحوصاتك المخبرية بعد طلبها من قبل الطبيب.',
+      LabTestGroup.pending => 'لا توجد فحوصات بانتظار النتائج حالياً.',
+      LabTestGroup.completed => 'لا توجد نتائج مخبرية مكتملة بعد.',
     };
     return Center(
       child: SingleChildScrollView(

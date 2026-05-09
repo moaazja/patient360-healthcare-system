@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_radii.dart';
+import '../../../shared/widgets/app_drawer.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../home/presentation/providers/home_providers.dart';
 import '../../prescriptions/presentation/prescriptions_screen.dart';
@@ -17,20 +18,20 @@ enum MedicationsTab { schedule, calendar, prescriptions }
 
 extension on MedicationsTab {
   String get label => switch (this) {
-        MedicationsTab.schedule => 'الجدول اليوم',
-        MedicationsTab.calendar => 'التقويم',
-        MedicationsTab.prescriptions => 'الوصفات',
-      };
+    MedicationsTab.schedule => 'الجدول اليوم',
+    MedicationsTab.calendar => 'التقويم',
+    MedicationsTab.prescriptions => 'الوصفات',
+  };
 }
 
 /// Parses the `?tab=` query value, falling back to `null` for any unknown
 /// or missing token so the caller can apply its own default.
 MedicationsTab? medicationsTabFromQuery(String? raw) => switch (raw) {
-      'schedule' => MedicationsTab.schedule,
-      'calendar' => MedicationsTab.calendar,
-      'prescriptions' => MedicationsTab.prescriptions,
-      _ => null,
-    };
+  'schedule' => MedicationsTab.schedule,
+  'calendar' => MedicationsTab.calendar,
+  'prescriptions' => MedicationsTab.prescriptions,
+  _ => null,
+};
 
 /// Parent screen for the bottom-nav "الأدوية" destination. Composes three
 /// sub-tabs (today's schedule, monthly calendar, prescriptions list) inside
@@ -44,8 +45,7 @@ class MedicationsScreen extends ConsumerStatefulWidget {
   const MedicationsScreen({super.key});
 
   @override
-  ConsumerState<MedicationsScreen> createState() =>
-      _MedicationsScreenState();
+  ConsumerState<MedicationsScreen> createState() => _MedicationsScreenState();
 }
 
 class _MedicationsScreenState extends ConsumerState<MedicationsScreen> {
@@ -99,11 +99,8 @@ class _MedicationsScreenState extends ConsumerState<MedicationsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final int unread = ref
-            .watch(dashboardOverviewProvider)
-            .value
-            ?.unreadNotifications ??
-        0;
+    final int unread =
+        ref.watch(dashboardOverviewProvider).value?.unreadNotifications ?? 0;
 
     return Scaffold(
       appBar: PageHeader(
@@ -111,6 +108,7 @@ class _MedicationsScreenState extends ConsumerState<MedicationsScreen> {
         subtitle: 'جرعاتك اليومية وأدويتك',
         unreadCount: unread,
       ),
+      drawer: const AppDrawer(),
       body: Column(
         children: <Widget>[
           Padding(
