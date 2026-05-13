@@ -72,6 +72,20 @@ router.post('/:id/cancel',
   labTestController.cancelLabTest
 );
 
+// ── Lab tech side: search pending tests by patient national ID ──────────────
+router.get('/pending/:nationalId',
+  protect,
+  authorize('lab_technician'),
+  labTestController.getPendingByPatient
+);
+
+// ── Lab tech side: claim a pending test (assigns lab + collects sample) ─────
+router.post('/:id/claim',
+  protect,
+  authorize('lab_technician'),
+  labTestController.claimLabTest
+);
+
 // ── Lab tech side: workflow steps ───────────────────────────────────────────
 router.post('/:id/collect-sample',
   protect,

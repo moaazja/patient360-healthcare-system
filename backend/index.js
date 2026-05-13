@@ -96,7 +96,8 @@ const UPLOAD_SUBDIRS = [
   'lab-results',
   'emergency',
   'profile-photos',
-  'visit-photos'
+  'visit-photos',
+  'xray'
 ];
 
 // Create upload directories if they don't exist (idempotent on every boot)
@@ -218,6 +219,12 @@ const notificationRoutes = require('./routes/notification');
 app.use('/api/emergency', emergencyRoutes);
 app.use('/api/notifications', notificationRoutes);
 
+// ── X-Ray fracture detection (Kinan model, FastAPI on port 8002) ────────────
+// Thin proxy: Express handles auth + multer, then forwards to FastAPI and
+// returns the model response unchanged. See routes/xray.js for details.
+const xrayRoutes = require('./routes/xray');
+app.use('/api/xray', xrayRoutes);
+
 // ── Medications admin CRUD (post-B6 addition) ───────────────────────────────
 const medicationRoutes = require('./routes/medication');
 app.use('/api/medications', medicationRoutes);
@@ -281,6 +288,11 @@ app.get('/', (req, res) => {
         analyze: 'POST   /api/ecg/analyze (multipart, cardiologist only)',
         test: 'GET    /api/ecg/test',
         getVisitECG: 'GET    /api/ecg/visit/:visitId'
+      },
+      xray: {
+        analyzeHand: 'POST   /api/xray/analyze-hand (multipart, doctor only)',
+        analyzeLeg: 'POST   /api/xray/analyze-leg (multipart, doctor only)',
+        health: 'GET    /api/xray/health (doctor/admin)'
       },
       prescriptions: {
         create: 'POST   /api/prescriptions',

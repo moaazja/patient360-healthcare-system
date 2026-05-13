@@ -212,8 +212,16 @@ const labTest = await LabTest.create({
       }
     });
 
-  } catch (error) {
+} catch (error) {
     console.error('❌ Create lab test error:', error);
+
+    // طباعة تفاصيل validation error من MongoDB (للديباغ)
+    if (error.code === 121 && error.errInfo) {
+      console.error('🔍 ========== VALIDATION DETAILS ==========');
+      console.error(JSON.stringify(error.errInfo.details, null, 2));
+      console.error('🔍 ==========================================');
+    }
+
     if (error.name === 'ValidationError') {
       const messages = Object.values(error.errors).map(e => e.message);
       return res.status(400).json({
@@ -918,6 +926,167 @@ exports.markViewed = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'حدث خطأ في تسجيل المشاهدة'
+    });
+  }
+};
+
+exports.getPendingByPatient = async (req, res) => {
+  console.log('🔵 ========== GET PENDING LAB TESTS BY PATIENT ==========');
+
+  try {
+    const { nationalId } = req.params;
+    console.log('🔍 Searching for patient:', nationalId);
+
+    // 1. Find patient (adult or child by nationalId, or child by CRN)
+    let patientRef = null;
+    let patientInfo = null;
+
+    const adult = await Person.findOne({ nationalId }).lean();
+    if (adult) {
+      patientRef = { patientPersonId: adult._id };
+      patientInfo = {
+        type: 'adult',
+        fullName: `${adult.firstName} ${adult.fatherName} ${adult.lastName}`,
+        nationalId: adult.nationalId,
+        dateOfBirth: adult.dateOfBirth,
+        gender: adult.gender,
+        phoneNumber: adult.phoneNumber
+      };
+    } else {
+      // Try children — first by nationalId (post-migration), then by CRN
+      let child = await Children.findOne({ nationalId }).lean();
+      if (!child) {
+        child = await Children.findOne({ childRegistrationNumber: nationalId }).lean();
+      }
+      if (child) {
+        patientRef = { patientChildId: child._id };
+        patientInfo = {
+          type: 'child',
+          fullName: `${child.firstName} ${child.fatherName} ${child.lastName}`,
+          childRegistrationNumber: child.childRegistrationNumber,
+          dateOfBirth: child.dateOfBirth,
+          gender: child.gender,
+          parentNationalId: child.parentNationalId
+        };
+      }
+    }
+
+    if (!patientRef) {
+      console.log('❌ Patient not found');
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على المريض بهذا الرقم'
+      });
+    }
+
+    console.log('✅ Patient found:', patientInfo.fullName);
+
+    // 2. Find pending lab tests for this patient
+    const labTests = await LabTest.find({
+      ...patientRef,
+      status: { $in: ['ordered', 'scheduled'] }
+    })
+      .populate('orderedBy', 'specialization medicalLicenseNumber')
+      .populate('visitId', 'visitDate chiefComplaint diagnosis')
+      .sort({ orderDate: -1 })
+      .lean();
+
+    console.log(`✅ Found ${labTests.length} pending test(s)`);
+
+    return res.json({
+      success: true,
+      patient: patientInfo,
+      count: labTests.length,
+      labTests
+    });
+  } catch (error) {
+    console.error('❌ Get pending lab tests error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في جلب التحاليل'
+    });
+  }
+};
+
+
+exports.claimLabTest = async (req, res) => {
+  console.log('🔵 ========== CLAIM LAB TEST ==========');
+
+  try {
+    const { id } = req.params;
+    const { sampleId, notes } = req.body;
+
+    const labTech = await getLabTechFromAccount(req.account);
+
+    const labTest = await LabTest.findById(id);
+    if (!labTest) {
+      return res.status(404).json({
+        success: false,
+        message: 'الفحص غير موجود'
+      });
+    }
+
+    // Status gate — only pending tests can be claimed
+    if (!['ordered', 'scheduled'].includes(labTest.status)) {
+      return res.status(400).json({
+        success: false,
+        message: `لا يمكن استلام فحص حالته "${labTest.status}"`
+      });
+    }
+
+    // If already claimed by another lab, refuse
+    if (labTest.laboratoryId && String(labTest.laboratoryId) !== String(labTech.laboratoryId)) {
+      return res.status(403).json({
+        success: false,
+        message: 'هذا الفحص تم استلامه من مختبر آخر بالفعل'
+      });
+    }
+
+    // Claim it: set lab + collect sample in one step
+    labTest.laboratoryId = labTech.laboratoryId;
+    labTest.status = 'sample_collected';
+    labTest.sampleCollectedAt = new Date();
+    labTest.sampleCollectedBy = labTech._id;
+    if (sampleId) labTest.sampleId = sampleId.trim();
+    if (notes) labTest.labNotes = notes.trim();
+    await labTest.save();
+
+    console.log('✅ Lab test claimed:', labTest.testNumber);
+
+    AuditLog.record({
+      userId: req.user._id,
+      userEmail: req.user.email,
+      action: 'CLAIM_LAB_TEST',
+      description: `Claimed ${labTest.testNumber}`,
+      resourceType: 'lab_test',
+      resourceId: labTest._id,
+      patientPersonId: labTest.patientPersonId,
+      patientChildId: labTest.patientChildId,
+      ipAddress: req.ip || 'unknown',
+      success: true,
+      metadata: {
+        testNumber: labTest.testNumber,
+        sampleId,
+        laboratoryId: labTech.laboratoryId
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: 'تم استلام الفحص بنجاح',
+      labTest: {
+        _id: labTest._id,
+        testNumber: labTest.testNumber,
+        status: labTest.status,
+        sampleId: labTest.sampleId,
+        sampleCollectedAt: labTest.sampleCollectedAt
+      }
+    });
+  } catch (error) {
+    console.error('❌ Claim lab test error:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'حدث خطأ في استلام الفحص'
     });
   }
 };

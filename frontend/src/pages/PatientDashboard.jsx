@@ -1197,18 +1197,26 @@ export default function PatientDashboard() {
   // Auth / navigation
   // ════════════════════════════════════════════════════════════════════
 
-  const handleLogout = useCallback(() => {
-    openConfirm(
-      'warning',
-      'تسجيل الخروج',
-      'هل أنت متأكد من رغبتك في تسجيل الخروج؟',
-      () => {
+const handleLogout = useCallback(() => {
+  openConfirm(
+    'warning',
+    'تسجيل الخروج',
+    'هل أنت متأكد من رغبتك في تسجيل الخروج؟',
+    () => {
+    
+      try {
         authAPI.logout();
-        navigate('/');
-      },
-      'تسجيل الخروج'
-    );
-  }, [navigate, openConfirm]);
+      } catch {
+        
+      }
+      localStorage.clear();
+      sessionStorage.clear();
+
+      window.location.replace('/');
+    },
+    'تسجيل الخروج'
+  );
+}, [openConfirm]);
 
 
   // ════════════════════════════════════════════════════════════════════

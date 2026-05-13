@@ -1388,17 +1388,30 @@ const DoctorDashboard = () => {
     setXrayAnalyzing(true);
     try {
       const formData = new FormData();
+      // Field name MUST match the multer config in backend/routes/xray.js
       formData.append('xray_image', xrayFile);
+
       const data = xrayModel === 'hand'
         ? await doctorAPI.analyzeXRayHand(formData)
         : await doctorAPI.analyzeXRayLeg(formData);
-      setXrayResult(data);
+
+      // Defensive: backend always echoes bodyPart, but fall back to the
+      // currently-selected model so the UI never shows a blank label.
+      const enriched = { ...data, bodyPart: data?.bodyPart || xrayModel };
+
+      console.log('[DoctorDashboard] X-Ray model output:', enriched);
+      setXrayResult(enriched);
+
       setTimeout(() => {
         aiResultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 100);
     } catch (error) {
       console.error('[DoctorDashboard] X-Ray analysis error:', error);
-      openModal('error', 'فشل التحليل', error.message || 'حدث خطأ في تحليل صورة الأشعة');
+      openModal(
+        'error',
+        'فشل التحليل',
+        error.message || 'حدث خطأ في تحليل صورة الأشعة'
+      );
     } finally {
       setXrayAnalyzing(false);
     }
@@ -4251,14 +4264,32 @@ const DoctorDashboard = () => {
    * renderXRayTool — orthopedist X-Ray fracture detection tool
    */
   function renderXRayTool() {
-    const fractureDetected = xrayResult?.fractureDetected || xrayResult?.fracture_detected;
+    // ── Read Kinan's exact response shape ────────────────────────────
+    // {
+    //   "success": true,
+    //   "diagnosis": "Fractured" | "Not Fractured",
+    //   "confidence_percent": <0..100>,
+    //   "scores": { "Fractured": <num>, "Not Fractured": <num> },
+    //   "filename": "...",
+    //   "bodyPart": "hand" | "leg"   ← added by Express proxy
+    // }
+    const fractureDetected =
+      xrayResult?.diagnosis === 'Fractured'
+      || xrayResult?.fractureDetected
+      || xrayResult?.fracture_detected;
+
     const confidence = parseFloat(
-      xrayResult?.confidence_percentage
-      || xrayResult?.confidence
-      || (xrayResult?.confidence ? xrayResult.confidence * 100 : 0)
-      || 0
-    );
+      xrayResult?.confidence_percent      // ← Kinan's field
+      ?? xrayResult?.confidence_percentage
+      ?? xrayResult?.confidence
+      ?? 0
+    ) || 0;
+
+    const fracturedScore    = parseFloat(xrayResult?.scores?.Fractured ?? 0)        || 0;
+    const notFracturedScore = parseFloat(xrayResult?.scores?.['Not Fractured'] ?? 0) || 0;
+
     const severity = fractureDetected ? 'critical' : 'normal';
+    const bodyPart = xrayResult?.bodyPart || xrayModel;
 
     return (
       <>
@@ -4392,7 +4423,7 @@ const DoctorDashboard = () => {
                   {fractureDetected ? 'تم اكتشاف كسر' : 'لم يتم اكتشاف كسر'}
                 </h2>
                 <p className="dd-ai-result-subtitle">
-                  {xrayModel === 'hand' ? 'تحليل عظام اليد' : 'تحليل عظام القدم'}
+                  {bodyPart === 'hand' ? 'تحليل عظام اليد' : 'تحليل عظام القدم'}
                 </p>
               </div>
               <ConfidenceRing percent={confidence} />
@@ -4422,6 +4453,45 @@ const DoctorDashboard = () => {
                     <div className="dd-xray-stat-value">{confidence.toFixed(1)}%</div>
                   </div>
                 </div>
+              </div>
+
+              {/* Per-class probability breakdown — mirrors the model output 1:1 */}
+              <div>
+                <h3 className="dd-ai-section-title">
+                  <Activity size={18} strokeWidth={2} />
+                  مخرجات النموذج التفصيلية
+                </h3>
+                <div className="dd-xray-scores">
+                  <div className="dd-xray-score-row fracture">
+                    <div className="dd-xray-score-head">
+                      <span className="dd-xray-score-label">احتمال وجود كسر</span>
+                      <span className="dd-xray-score-value">{fracturedScore.toFixed(2)}%</span>
+                    </div>
+                    <div className="dd-xray-score-bar">
+                      <div
+                        className="dd-xray-score-fill fracture"
+                        style={{ width: `${Math.min(100, fracturedScore)}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="dd-xray-score-row normal">
+                    <div className="dd-xray-score-head">
+                      <span className="dd-xray-score-label">احتمال السلامة</span>
+                      <span className="dd-xray-score-value">{notFracturedScore.toFixed(2)}%</span>
+                    </div>
+                    <div className="dd-xray-score-bar">
+                      <div
+                        className="dd-xray-score-fill normal"
+                        style={{ width: `${Math.min(100, notFracturedScore)}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+                {xrayResult.filename && (
+                  <p className="dd-ai-description" style={{ marginTop: 8, opacity: 0.75 }}>
+                    اسم الملف: <bdi>{xrayResult.filename}</bdi>
+                  </p>
+                )}
               </div>
 
               {xrayResult.region && (

@@ -40,19 +40,18 @@ api.interceptors.request.use(
   }
 );
 
-// Add response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Don't redirect during login attempt itself
     if (error.response?.status === 401) {
       const isLoginAttempt = error.config?.url?.includes('/auth/login');
+      const isOnLoginPage  = window.location.pathname === '/';
 
-      if (!isLoginAttempt && localStorage.getItem('token')) {
-        // Only redirect if it's NOT a login attempt and user has a token
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        window.location.href = '/login';
+      if (!isLoginAttempt && !isOnLoginPage) {
+        // 🔒 الجلسة انتهت أو التوكن غير صالح — تنظيف شامل
+        localStorage.clear();
+        sessionStorage.clear();
+        window.location.replace('/');
       }
     }
     return Promise.reject(error);
@@ -92,13 +91,12 @@ export const authAPI = {
     }
   },
 
-  // Logout
-  logout: () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    window.location.href = '/login';
-  },
 
+  logout: () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    window.location.replace('/');
+  },
   // Get current user
   getCurrentUser: () => {
     const userStr = localStorage.getItem('user');
