@@ -46,8 +46,9 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final AsyncValue<List<AppNotification>> async =
-        ref.watch(notificationsProvider);
+    final AsyncValue<List<AppNotification>> async = ref.watch(
+      notificationsProvider,
+    );
     final int unread = ref.watch(unreadNotificationsCountProvider);
 
     return Scaffold(
@@ -68,7 +69,7 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
           Expanded(
             child: async.when(
               loading: () =>
-                  const LoadingSpinner(message: 'جاري تحميل الإشعارات...'),
+                  const LoadingSpinner(message: 'جاري تحميل الإشعارات....'),
               error: (Object err, _) => _ErrorView(
                 error: err,
                 onRetry: () =>
@@ -87,8 +88,7 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
                   child: ListView.builder(
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
                     itemCount: bucket.length,
-                    itemBuilder: (BuildContext _, int i) =>
-                        NotificationItem(
+                    itemBuilder: (BuildContext _, int i) => NotificationItem(
                       notification: bucket[i],
                       onTap: () => _onTap(bucket[i]),
                     ),
@@ -192,8 +192,9 @@ class NotificationItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    final NotificationTypeMeta meta =
-        NotificationTypeMeta.metaFor(notification.type);
+    final NotificationTypeMeta meta = NotificationTypeMeta.metaFor(
+      notification.type,
+    );
     final bool unread = !notification.isRead;
     final String? route = routeForRelatedType(notification.relatedType);
 
@@ -239,9 +240,7 @@ class NotificationItem extends StatelessWidget {
                         Flexible(
                           child: Text(
                             meta.arabicLabel,
-                            style: Theme.of(context)
-                                .textTheme
-                                .labelMedium
+                            style: Theme.of(context).textTheme.labelMedium
                                 ?.copyWith(
                                   color: meta.color,
                                   fontWeight: FontWeight.w700,
@@ -259,8 +258,8 @@ class NotificationItem extends StatelessWidget {
                       Text(
                         notification.title,
                         style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     if (notification.message.isNotEmpty) ...<Widget>[
                       const SizedBox(height: 2),
@@ -272,25 +271,25 @@ class NotificationItem extends StatelessWidget {
                     const SizedBox(height: 8),
                     Row(
                       children: <Widget>[
-                        Icon(LucideIcons.clock,
-                            size: 12, color: scheme.onSurfaceVariant),
+                        Icon(
+                          LucideIcons.clock,
+                          size: 12,
+                          color: scheme.onSurfaceVariant,
+                        ),
                         const SizedBox(width: 4),
                         Text(
-                          intl.DateFormat('yyyy-MM-dd HH:mm')
-                              .format(notification.createdAt),
+                          intl.DateFormat(
+                            'yyyy-MM-dd HH:mm',
+                          ).format(notification.createdAt),
                           textDirection: TextDirection.ltr,
-                          style: Theme.of(context)
-                              .textTheme
-                              .labelSmall
+                          style: Theme.of(context).textTheme.labelSmall
                               ?.copyWith(color: scheme.onSurfaceVariant),
                         ),
                         if (route != null) ...<Widget>[
                           const Spacer(),
                           Text(
                             'اضغط لعرض التفاصيل',
-                            style: Theme.of(context)
-                                .textTheme
-                                .labelSmall
+                            style: Theme.of(context).textTheme.labelSmall
                                 ?.copyWith(color: AppColors.action),
                           ),
                           const SizedBox(width: 4),

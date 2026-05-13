@@ -37,7 +37,7 @@ Future<void> main() async {
 
   // Loads month/day names for the Arabic locale so TableCalendar (calendar
   // sub-tab on /medications) and intl.DateFormat('...', 'ar') work without
-  // throwing LocaleDataException.
+
   await initializeDateFormatting('ar', null);
 
   // Preload SharedPreferences so ThemeController.build() can resolve the

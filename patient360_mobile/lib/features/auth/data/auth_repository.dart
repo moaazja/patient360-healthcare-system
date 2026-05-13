@@ -17,8 +17,8 @@ const String _patientRole = 'patient';
 
 class AuthRepository {
   AuthRepository({required Dio dio, required SecureStorage storage})
-      : _dio = dio,
-        _storage = storage;
+    : _dio = dio,
+      _storage = storage;
 
   final Dio _dio;
   final SecureStorage _storage;
@@ -38,8 +38,8 @@ class AuthRepository {
         data: <String, dynamic>{'email': email, 'password': password},
       );
 
-      final Map<String, dynamic> body =
-          (response.data as Map<dynamic, dynamic>).cast<String, dynamic>();
+      final Map<String, dynamic> body = (response.data as Map<dynamic, dynamic>)
+          .cast<String, dynamic>();
       final String? token = body['token'] as String?;
       final Map<String, dynamic>? userJson =
           (body['user'] as Map<dynamic, dynamic>?)?.cast<String, dynamic>();
@@ -58,10 +58,7 @@ class AuthRepository {
       }
 
       await _storage.write(SecureStorageKeys.jwt, token);
-      await _storage.write(
-        SecureStorageKeys.user,
-        jsonEncode(user.toJson()),
-      );
+      await _storage.write(SecureStorageKeys.user, jsonEncode(user.toJson()));
 
       return _buildSession(jwt: token, user: user);
     } on DioException catch (e, st) {
@@ -101,7 +98,6 @@ class AuthRepository {
     }
   }
 
-  /// Clears cached auth state. FCM unregistration is added in prompt 10.
   Future<void> logout() async {
     await _storage.clearAuth();
   }
@@ -155,11 +151,12 @@ class AuthRepository {
     required String jwt,
     required User user,
   }) async {
-    final Response<dynamic> response =
-        await _dio.get<dynamic>('/patient/profile');
+    final Response<dynamic> response = await _dio.get<dynamic>(
+      '/patient/profile',
+    );
 
-    final Map<String, dynamic> body =
-        (response.data as Map<dynamic, dynamic>).cast<String, dynamic>();
+    final Map<String, dynamic> body = (response.data as Map<dynamic, dynamic>)
+        .cast<String, dynamic>();
 
     final bool isMinor = (body['isMinor'] as bool?) ?? (user.childId != null);
 
@@ -183,8 +180,8 @@ class AuthRepository {
 
 final Provider<AuthRepository> authRepositoryProvider =
     Provider<AuthRepository>(
-  (Ref ref) => AuthRepository(
-    dio: ref.watch(dioProvider),
-    storage: ref.watch(secureStorageProvider),
-  ),
-);
+      (Ref ref) => AuthRepository(
+        dio: ref.watch(dioProvider),
+        storage: ref.watch(secureStorageProvider),
+      ),
+    );
