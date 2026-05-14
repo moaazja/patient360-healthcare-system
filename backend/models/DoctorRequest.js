@@ -25,7 +25,22 @@
  *  See original comment block — plaintext stored intentionally per team
  *  agreement for admin credential handoff workflow.
  *  ───────────────────────────────────────────────────────────────────────
- * ═══════════════════════════════════════════════════════════════════════════
+ *
+ *  ═══════════════════════════════════════════════════════════════════════
+ *  v3 — Calendly-style schedule template (May 2026)
+ *  ─────────────────────────────────────────────────────────────────────
+ *  Doctor applicants now submit a full weekly schedule at signup time:
+ *    • weeklyPattern        — per-day time periods (morning + afternoon, etc.)
+ *    • slotDuration         — minutes per appointment
+ *    • bufferTime           — gap between consecutive slots
+ *    • bookingWindowDays    — how far ahead patients can book
+ *
+ *  On admin approval, the template is copied to the new Doctor document
+ *  AND `availability_slots` are auto-generated for the booking window.
+ *
+ *  Field is OPTIONAL (sparse) because pharmacist + lab_technician requests
+ *  don't have a schedule template. Only validate when requestType==='doctor'.
+ *  ═══════════════════════════════════════════════════════════════════════
  */
 
 const mongoose = require('mongoose');
@@ -104,6 +119,87 @@ const UploadedDocumentSchema = new Schema(
     mimeType: { type: String, trim: true },
     fileSize: { type: Number, min: 0 },
     uploadedAt: { type: Date, default: Date.now },
+  },
+  { _id: false },
+);
+
+// ── Sub-schemas: Calendly-style schedule template ───────────────────────────
+// Mirrors the structure in Doctor.js so the template can be copied 1:1
+// during approveDoctorRequest. Keep these two definitions in sync.
+
+const TimePeriodSchema = new Schema(
+  {
+    startTime: {
+      type: String,
+      required: true,
+      match: [/^\d{2}:\d{2}$/, 'وقت البداية يجب أن يكون بصيغة HH:MM'],
+    },
+    endTime: {
+      type: String,
+      required: true,
+      match: [/^\d{2}:\d{2}$/, 'وقت النهاية يجب أن يكون بصيغة HH:MM'],
+    },
+  },
+  { _id: false },
+);
+
+const ScheduleExceptionSchema = new Schema(
+  {
+    date: { type: Date, required: true },
+    type: {
+      type: String,
+      enum: ['blocked', 'modified'],
+      default: 'blocked',
+    },
+    reason: { type: String, trim: true, maxlength: 200 },
+    periods: { type: [TimePeriodSchema], default: [] },
+  },
+  { _id: false },
+);
+
+const WeeklyPatternSchema = new Schema(
+  {
+    Sunday:    { type: [TimePeriodSchema], default: [] },
+    Monday:    { type: [TimePeriodSchema], default: [] },
+    Tuesday:   { type: [TimePeriodSchema], default: [] },
+    Wednesday: { type: [TimePeriodSchema], default: [] },
+    Thursday:  { type: [TimePeriodSchema], default: [] },
+    Friday:    { type: [TimePeriodSchema], default: [] },
+    Saturday:  { type: [TimePeriodSchema], default: [] },
+  },
+  { _id: false },
+);
+
+const ScheduleTemplateSchema = new Schema(
+  {
+    weeklyPattern: {
+      type: WeeklyPatternSchema,
+      default: () => ({}),
+    },
+    slotDuration: {
+      type: Number,
+      default: 20,
+      min: [5, 'مدة الموعد يجب أن تكون 5 دقائق على الأقل'],
+      max: [240, 'مدة الموعد يجب ألا تتجاوز 240 دقيقة'],
+    },
+    bufferTime: {
+      type: Number,
+      default: 0,
+      min: [0, 'الفاصل الزمني لا يمكن أن يكون سالب'],
+      max: [60, 'الفاصل الزمني يجب ألا يتجاوز 60 دقيقة'],
+    },
+    bookingWindowDays: {
+      type: Number,
+      default: 30,
+      min: [1, 'نافذة الحجز يجب أن تكون يوم واحد على الأقل'],
+      max: [90, 'نافذة الحجز يجب ألا تتجاوز 90 يوم'],
+    },
+    exceptions: {
+      type: [ScheduleExceptionSchema],
+      default: [],
+    },
+    isActive: { type: Boolean, default: true },
+    updatedAt: { type: Date, default: Date.now },
   },
   { _id: false },
 );
@@ -244,7 +340,20 @@ const DoctorRequestSchema = new Schema(
       min: 0,
     },
     currency: { type: String, enum: CURRENCIES, default: 'SYP' },
+
+    // Legacy flat list of day names — kept for backward compatibility.
+    // The new scheduleTemplate below is the authoritative source.
     availableDays: { type: [String], default: [] },
+
+    // ── NEW: Calendly-style schedule template (doctor-only) ───────────────
+    // Captures the doctor's full weekly schedule (per-day time periods plus
+    // slot duration, buffer, booking window). Optional at the schema level
+    // because pharmacists + lab techs don't have schedules; enforced at the
+    // controller level when requestType === 'doctor'.
+    scheduleTemplate: {
+      type: ScheduleTemplateSchema,
+      default: undefined,
+    },
 
     // ══════════════════════════════════════════════════════════════════════
     // PHARMACIST-SPECIFIC FIELDS (used when requestType = 'pharmacist')
@@ -354,6 +463,22 @@ DoctorRequestSchema.virtual('isPending').get(function () {
   return this.status === 'pending';
 });
 
+/**
+ * Derive a flat array of weekday names from the schedule template.
+ * Used by the admin UI / list view to show "أيام العمل" without parsing
+ * the full template tree.
+ */
+DoctorRequestSchema.virtual('scheduleDays').get(function () {
+  if (!this.scheduleTemplate || !this.scheduleTemplate.weeklyPattern) {
+    return this.availableDays || [];
+  }
+  const wp = this.scheduleTemplate.weeklyPattern;
+  return [
+    'Sunday', 'Monday', 'Tuesday', 'Wednesday',
+    'Thursday', 'Friday', 'Saturday',
+  ].filter((day) => Array.isArray(wp[day]) && wp[day].length > 0);
+});
+
 // ── Static helpers ──────────────────────────────────────────────────────────
 
 DoctorRequestSchema.statics.generateRequestId = async function generateRequestId() {
@@ -383,6 +508,24 @@ DoctorRequestSchema.pre('save', async function autoGenerateRequestId(next) {
     }
   }
   return next();
+});
+
+// ── Pre-save: sync legacy availableDays from scheduleTemplate ───────────────
+// Keep the flat availableDays array in sync so the existing AdminDashboard
+// rendering (which reads availableDays directly) continues to work.
+DoctorRequestSchema.pre('save', function syncAvailableDays(next) {
+  if (this.isModified('scheduleTemplate') && this.scheduleTemplate) {
+    const wp = this.scheduleTemplate.weeklyPattern || {};
+    const derived = [
+      'Sunday', 'Monday', 'Tuesday', 'Wednesday',
+      'Thursday', 'Friday', 'Saturday',
+    ].filter((day) => Array.isArray(wp[day]) && wp[day].length > 0);
+    if (derived.length > 0) {
+      this.availableDays = derived;
+    }
+    this.scheduleTemplate.updatedAt = new Date();
+  }
+  next();
 });
 
 // ── Query helpers ───────────────────────────────────────────────────────────

@@ -596,7 +596,8 @@ exports.registerDoctorRequest = async (req, res) => {
       phoneNumber, address, governorate, city,
       email, password,
       medicalLicenseNumber, specialization, subSpecialization,
-      yearsOfExperience, hospitalAffiliation, availableDays, consultationFee
+      yearsOfExperience, hospitalAffiliation, availableDays, consultationFee,
+      scheduleTemplate
     } = req.body;
 
     const required = [
@@ -624,6 +625,47 @@ exports.registerDoctorRequest = async (req, res) => {
           success: false,
           message: 'صيغة أيام العمل غير صحيحة'
         });
+      }
+    }
+
+    // ── Parse Calendly-style schedule template (v2) ─────────────────────
+    // Arrives as a JSON string because the SignUp form uses multipart/form-data.
+    // Optional — older clients may not send it; in that case we just fall
+    // back to availableDays for backward compatibility.
+    let parsedScheduleTemplate = null;
+    if (scheduleTemplate) {
+      if (typeof scheduleTemplate === 'string') {
+        try {
+          parsedScheduleTemplate = JSON.parse(scheduleTemplate);
+        } catch (e) {
+          return res.status(400).json({
+            success: false,
+            message: 'صيغة جدول العمل غير صحيحة'
+          });
+        }
+      } else if (typeof scheduleTemplate === 'object') {
+        parsedScheduleTemplate = scheduleTemplate;
+      }
+
+      // Basic structural validation — must have weeklyPattern object and
+      // at least one day with at least one period.
+      if (parsedScheduleTemplate) {
+        const wp = parsedScheduleTemplate.weeklyPattern;
+        if (!wp || typeof wp !== 'object') {
+          return res.status(400).json({
+            success: false,
+            message: 'النمط الأسبوعي مفقود من جدول العمل'
+          });
+        }
+        const totalPeriods = ['Sunday', 'Monday', 'Tuesday', 'Wednesday',
+          'Thursday', 'Friday', 'Saturday']
+          .reduce((sum, day) => sum + ((wp[day] || []).length), 0);
+        if (totalPeriods === 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'يجب تحديد فترة عمل واحدة على الأقل في جدول العمل'
+          });
+        }
       }
     }
 
@@ -687,6 +729,7 @@ exports.registerDoctorRequest = async (req, res) => {
       yearsOfExperience: parseInt(yearsOfExperience, 10),
       hospitalAffiliation: hospitalAffiliation.trim(),
       availableDays: parsedAvailableDays || [],
+      ...(parsedScheduleTemplate && { scheduleTemplate: parsedScheduleTemplate }),
       consultationFee: parseFloat(consultationFee) || 0,
       ...fileData,
       status: 'pending'

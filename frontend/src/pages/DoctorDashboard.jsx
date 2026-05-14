@@ -137,6 +137,7 @@ import Navbar from '../components/common/Navbar';
 import { logout as logoutService } from '../services/authService';
 import { useTheme } from '../context/ThemeProvider';
 import { doctorAPI } from '../services/api';
+import WeeklyScheduleEditor, { createDefaultScheduleTemplate } from '../components/WeeklyScheduleEditor';
 import '../styles/DoctorDashboard.css';
 
 
@@ -151,6 +152,7 @@ import '../styles/DoctorDashboard.css';
 const SIDEBAR_NAV_BASE = [
   { id: 'home',         labelAr: 'الرئيسية',          Icon: Home },
   { id: 'appointments', labelAr: 'مواعيدي',            Icon: CalendarDays },
+  { id: 'schedule',     labelAr: 'جدول العمل',         Icon: Clock },
   { id: 'lookup',       labelAr: 'البحث عن مريض',     Icon: Search },
 ];
 
@@ -888,6 +890,11 @@ const DoctorDashboard = () => {
      ───────────────────────────────────────────────────────────────── */
 
   const [weekStart, setWeekStart] = useState(getWeekStart(new Date()));
+  // ── Hybrid Toggle (Week | Agenda | Day) state ────────────────────
+  const [calView, setCalView] = useState('week');         // 'week' | 'agenda' | 'day'
+  const [calSearch, setCalSearch] = useState('');
+  const [calStatusFilter, setCalStatusFilter] = useState('all'); // 'all' | 'available' | 'booked' | 'blocked'
+  const [calCurrentDay, setCalCurrentDay] = useState(new Date());
   const [appointments, setAppointments] = useState([]);
   const [availabilitySlots, setAvailabilitySlots] = useState([]);
   const [appointmentsLoading, setAppointmentsLoading] = useState(false);
@@ -910,6 +917,23 @@ const DoctorDashboard = () => {
   const [showSlotDetails, setShowSlotDetails] = useState(false);
   const [selectedSlotDetails, setSelectedSlotDetails] = useState(null);
   const [deletingSlot, setDeletingSlot] = useState(false);
+
+  /* ─────────────────────────────────────────────────────────────────
+     STATE — SCHEDULE TEMPLATE (Calendly-style — v2)
+     Lives in the new "جدول العمل" sidebar section.
+     The template is the source of truth for what days/hours the doctor
+     works. Saving it auto-regenerates the doctor's availability_slots.
+     ───────────────────────────────────────────────────────────────── */
+
+  const [scheduleTemplate, setScheduleTemplate] = useState(null);
+  const [scheduleOriginal, setScheduleOriginal] = useState(null);  // for "dirty" detection
+  const [scheduleLoading, setScheduleLoading] = useState(false);
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [scheduleRegenerating, setScheduleRegenerating] = useState(false);
+  const [scheduleErrors, setScheduleErrors] = useState({});
+  const [scheduleLastSyncResult, setScheduleLastSyncResult] = useState(null);
+  // ↑ shape: { deleted, inserted, kept } — shown as a confirmation banner
+  //   after a successful save or regenerate so the doctor knows what changed.
 
   // Today's metrics (KPI cards on home)
   const [kpis, setKpis] = useState({
@@ -1717,6 +1741,189 @@ const DoctorDashboard = () => {
   }, [selectedSlotDetails, closeSlotDetails, openModal]);
 
   /* ─────────────────────────────────────────────────────────────────
+     SCHEDULE TEMPLATE HANDLERS (Calendly-style — v2)
+     ───────────────────────────────────────────────────────────────── */
+
+  /**
+   * Load the doctor's schedule template from the backend. Called when
+   * the "جدول العمل" sidebar section becomes active. If the doctor has
+   * never saved a template, the backend returns an empty default so
+   * the editor UI can mount without any null checks.
+   */
+  const loadScheduleTemplate = useCallback(async () => {
+    setScheduleLoading(true);
+    setScheduleErrors({});
+    try {
+      const data = await doctorAPI.getScheduleTemplate();
+      const tpl = data.scheduleTemplate || createDefaultScheduleTemplate();
+      setScheduleTemplate(tpl);
+      // Snapshot for "dirty" detection — a dumb JSON-compare on save
+      setScheduleOriginal(JSON.parse(JSON.stringify(tpl)));
+      setScheduleLastSyncResult(null);
+    } catch (error) {
+      console.error('[DoctorDashboard] Load schedule error:', error);
+      openModal(
+        'error',
+        'فشل التحميل',
+        error.message || 'حدث خطأ في تحميل جدول العمل',
+      );
+      // Mount with a sensible default so the UI still works
+      setScheduleTemplate(createDefaultScheduleTemplate());
+      setScheduleOriginal(createDefaultScheduleTemplate());
+    } finally {
+      setScheduleLoading(false);
+    }
+  }, [openModal]);
+
+  /**
+   * onChange handler for the WeeklyScheduleEditor. Pure state update —
+   * the save is explicit via the toolbar button so we don't bombard
+   * the backend with every keystroke.
+   */
+  const handleScheduleChange = useCallback((nextTemplate) => {
+    setScheduleTemplate(nextTemplate);
+    setScheduleErrors((prev) => {
+      if (!prev || Object.keys(prev).length === 0) return prev;
+      return {};
+    });
+    // Clear the last-sync banner — it's no longer accurate once edits happen
+    setScheduleLastSyncResult(null);
+  }, []);
+
+  /**
+   * Save the current schedule template AND regenerate availability_slots.
+   * Booked + blocked slots are preserved by the backend; only future
+   * unbooked slots are deleted and replaced from the new template.
+   */
+  const handleSaveSchedule = useCallback(async () => {
+    if (!scheduleTemplate) return;
+
+    // Pre-flight: at least one period across the week
+    const WEEKDAY_IDS = [
+      'Sunday', 'Monday', 'Tuesday', 'Wednesday',
+      'Thursday', 'Friday', 'Saturday',
+    ];
+    const totalPeriods = WEEKDAY_IDS.reduce((sum, day) => {
+      const periods = scheduleTemplate.weeklyPattern?.[day];
+      return sum + (Array.isArray(periods) ? periods.length : 0);
+    }, 0);
+
+    if (totalPeriods === 0) {
+      setScheduleErrors({
+        weeklyPattern: 'يجب تحديد فترة عمل واحدة على الأقل قبل الحفظ',
+      });
+      return;
+    }
+
+    setScheduleSaving(true);
+    setScheduleErrors({});
+    try {
+      const result = await doctorAPI.updateScheduleTemplate(scheduleTemplate);
+      // Backend echoes the saved template back — keep state in sync
+      if (result.scheduleTemplate) {
+        setScheduleTemplate(result.scheduleTemplate);
+        setScheduleOriginal(JSON.parse(JSON.stringify(result.scheduleTemplate)));
+      }
+      setScheduleLastSyncResult(result.slots || null);
+
+      // Refresh the appointments calendar in the background so the new
+      // slots show up immediately if the doctor switches tabs.
+      doctorAPI.getMyAvailabilitySlots()
+        .then((refreshed) => {
+          if (refreshed?.slots) setAvailabilitySlots(refreshed.slots);
+        })
+        .catch(() => null);
+
+      openModal(
+        'success',
+        'تم الحفظ',
+        result.message || 'تم حفظ جدول العمل وإعادة توليد المواعيد بنجاح',
+      );
+    } catch (error) {
+      console.error('[DoctorDashboard] Save schedule error:', error);
+      openModal(
+        'error',
+        'فشل الحفظ',
+        error.message || 'حدث خطأ في حفظ جدول العمل',
+      );
+    } finally {
+      setScheduleSaving(false);
+    }
+  }, [scheduleTemplate, openModal]);
+
+  /**
+   * Regenerate availability_slots from the CURRENT template without
+   * changing it. Useful for extending the booking window forward
+   * after a chunk of time has passed.
+   */
+  const handleRegenerateSchedule = useCallback(async () => {
+    const confirmed = window.confirm(
+      'سيتم إعادة توليد المواعيد المتاحة من جدول العمل الحالي. ' +
+      'المواعيد المحجوزة لن تتأثّر. هل تريد المتابعة؟'
+    );
+    if (!confirmed) return;
+
+    setScheduleRegenerating(true);
+    try {
+      const result = await doctorAPI.regenerateScheduleSlots();
+      setScheduleLastSyncResult(result.slots || null);
+
+      doctorAPI.getMyAvailabilitySlots()
+        .then((refreshed) => {
+          if (refreshed?.slots) setAvailabilitySlots(refreshed.slots);
+        })
+        .catch(() => null);
+
+      openModal(
+        'success',
+        'تم التجديد',
+        result.message || 'تم إعادة توليد المواعيد بنجاح',
+      );
+    } catch (error) {
+      console.error('[DoctorDashboard] Regenerate schedule error:', error);
+      openModal(
+        'error',
+        'فشل التجديد',
+        error.message || 'حدث خطأ في إعادة توليد المواعيد',
+      );
+    } finally {
+      setScheduleRegenerating(false);
+    }
+  }, [openModal]);
+
+  /**
+   * Has the doctor edited the template since it was loaded/saved?
+   * Used to enable the "حفظ" button and warn on navigation away.
+   */
+  const scheduleDirty = useMemo(() => {
+    if (!scheduleTemplate || !scheduleOriginal) return false;
+    try {
+      return JSON.stringify(scheduleTemplate) !== JSON.stringify(scheduleOriginal);
+    } catch {
+      return false;
+    }
+  }, [scheduleTemplate, scheduleOriginal]);
+
+  /* ─────────────────────────────────────────────────────────────────
+     LAZY-LOAD SCHEDULE TEMPLATE
+     Only fetch when the doctor actually opens the "جدول العمل" section,
+     and only the first time per mount. Subsequent visits use the cached
+     state — they explicitly hit "تجديد" if they want fresh data.
+
+     ⚠️  Position-critical: this useEffect MUST come AFTER the declaration
+        of `loadScheduleTemplate` above. If it appears earlier in the
+        component body, evaluating the deps array hits a Temporal Dead
+        Zone error ("Cannot access 'loadScheduleTemplate' before
+        initialization") and the whole dashboard crashes on mount.
+     ───────────────────────────────────────────────────────────────── */
+
+  useEffect(() => {
+    if (activeSection === 'schedule' && scheduleTemplate === null && !scheduleLoading) {
+      loadScheduleTemplate();
+    }
+  }, [activeSection, scheduleTemplate, scheduleLoading, loadScheduleTemplate]);
+
+  /* ─────────────────────────────────────────────────────────────────
      NOTIFICATION HANDLERS
      ───────────────────────────────────────────────────────────────── */
 
@@ -2191,88 +2398,104 @@ const DoctorDashboard = () => {
             </>
           )}
 
-          {/* ───────────────────────────────────────────────────
-              APPOINTMENTS SECTION
-              ─────────────────────────────────────────────────── */}
-          {activeSection === 'appointments' && (
-            <>
-              <div className="dd-page-header">
-                <div className="dd-page-title">
-                  <button
-                    type="button"
-                    className="dd-btn dd-btn-icon dd-mobile-toggle"
-                    onClick={() => setSidebarOpen(true)}
-                    aria-label="فتح القائمة"
-                  >
-                    <Menu size={20} strokeWidth={2.2} />
-                  </button>
-                  <div className="dd-page-title-icon">
-                    <CalendarDays size={24} strokeWidth={2} />
-                  </div>
-                  <div>
-                    <h1>مواعيدي</h1>
-                    <p>إدارة جدولك الأسبوعي والمواعيد المتاحة</p>
-                  </div>
-                </div>
-                <div className="dd-page-actions">
-                  <button
-                    type="button"
-                    className="dd-btn dd-btn-primary"
-                    onClick={() => openSlotModal()}
-                  >
-                    <Plus size={18} strokeWidth={2.2} />
-                    <span>إضافة موعد متاح</span>
-                  </button>
-                </div>
-              </div>
+          {/* ═══════════════════════════════════════════════════════════════
+              APPOINTMENTS SECTION — Hybrid Toggle (Week | Agenda | Day)
+              Inspired by Google Calendar / Outlook / SimplePractice. Three
+              view modes share the same filter bar (search + status chips)
+              so doctors can switch perspectives without losing context.
+              ═══════════════════════════════════════════════════════════════ */}
+          {activeSection === 'appointments' && (() => {
 
-              {/* Calendar toolbar */}
-              <div className="dd-cal-toolbar">
-                <div className="dd-cal-nav">
-                  <button
-                    type="button"
-                    className="dd-cal-nav-btn"
-                    onClick={handleWeekPrev}
-                    aria-label="الأسبوع السابق"
-                  >
-                    <ChevronRight size={18} strokeWidth={2.5} />
-                  </button>
-                  <span className="dd-cal-current-range">{formatWeekRange(weekStart)}</span>
-                  <button
-                    type="button"
-                    className="dd-cal-nav-btn"
-                    onClick={handleWeekNext}
-                    aria-label="الأسبوع التالي"
-                  >
-                    <ChevronLeft size={18} strokeWidth={2.5} />
-                  </button>
-                </div>
-                <button type="button" className="dd-cal-today-btn" onClick={handleWeekToday}>
-                  اليوم
-                </button>
-              </div>
+            // ── Pure helpers, scoped to this section ───────────────────────
+            const todayStart = new Date();
+            todayStart.setHours(0, 0, 0, 0);
 
-              {/* Calendar grid */}
+            // Normalize a slot/appointment date string to YYYY-MM-DD
+            const dStr = (d) => new Date(d).toISOString().split('T')[0];
+
+            // Time arithmetic — adds N minutes to "HH:MM"
+            const addMinutes = (t, mins) => {
+              if (!t || !t.includes(':')) return t;
+              const [h, m] = t.split(':').map(Number);
+              const total = h * 60 + m + (mins || 0);
+              const newH = Math.floor((total % 1440) / 60);
+              const newM = total % 60;
+              return `${String(newH).padStart(2, '0')}:${String(newM).padStart(2, '0')}`;
+            };
+
+            // Defensive end-time resolver — fixes the "08:00 - 08:00" bug.
+            // If endTime is missing or equals startTime, recompute it from
+            // slotDuration (default 30 min) instead of showing the bug.
+            const resolveEndTime = (slot) => {
+              const start = slot.startTime || '';
+              const end = slot.endTime || '';
+              if (end && end !== start) return end;
+              return addMinutes(start, slot.slotDuration || 30);
+            };
+
+            // ── Status filter applied to slots ─────────────────────────────
+            const passesStatus = (kind) => {
+              if (calStatusFilter === 'all') return true;
+              return kind === calStatusFilter;
+            };
+
+            // ── Text search — matches patient name + reason ────────────────
+            const passesSearch = (item, isAppt) => {
+              if (!calSearch.trim()) return true;
+              const q = calSearch.trim().toLowerCase();
+              if (isAppt) {
+                const p = item.patientPersonId || item.patientChildId || {};
+                const name = [p.firstName, p.lastName, item.patientName, item.reasonForVisit]
+                  .filter(Boolean).join(' ').toLowerCase();
+                return name.includes(q);
+              }
+              return false; // empty slots have no searchable content
+            };
+
+            // ── Date range filter (active in Week + Agenda views) ──────────
+            // For Week view we always use weekStart. For Agenda, the filter
+            // determines which days to render.
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekEnd.getDate() + 6);
+            weekEnd.setHours(23, 59, 59, 999);
+
+            // ── Aggregate counts for the legend footer ─────────────────────
+            const visibleSlots = availabilitySlots.filter((s) => {
+              const sd = new Date(s.date);
+              if (sd < weekStart || sd > weekEnd) return false;
+              const kind = s.status === 'blocked' ? 'blocked' : 'available';
+              if (!passesStatus(kind)) return false;
+              return s.status === 'available' || s.status === 'blocked';
+            });
+            const visibleAppts = appointments.filter((a) => {
+              if (a.status === 'cancelled' || a.status === 'no_show') return false;
+              const ad = new Date(a.appointmentDate);
+              if (ad < weekStart || ad > weekEnd) return false;
+              if (!passesStatus('booked')) return false;
+              if (!passesSearch(a, true)) return false;
+              return true;
+            });
+            const availCount = visibleSlots.filter((s) => s.status !== 'blocked').length;
+            const blockedCount = visibleSlots.filter((s) => s.status === 'blocked').length;
+            const bookedCount = visibleAppts.length;
+
+            // ───────────────────────────────────────────────────────────────
+            //  VIEW RENDERERS
+            // ───────────────────────────────────────────────────────────────
+
+            const renderWeekGrid = () => (
               <div className="dd-cal-grid" role="grid" aria-label="جدول المواعيد الأسبوعي">
-                {/* Empty top-left corner */}
                 <div className="dd-cal-day-header first" aria-hidden="true" />
-
-                {/* Day headers */}
                 {weekDays.map((day, idx) => {
                   const isToday = day.toDateString() === new Date().toDateString();
                   const dayName = day.toLocaleDateString('ar-EG', { weekday: 'short' });
                   return (
-                    <div
-                      key={idx}
-                      className={`dd-cal-day-header ${isToday ? 'today' : ''}`}
-                    >
+                    <div key={idx} className={`dd-cal-day-header ${isToday ? 'today' : ''}`}>
                       <div className="dd-cal-day-name">{dayName}</div>
                       <div className="dd-cal-day-num">{day.getDate()}</div>
                     </div>
                   );
                 })}
-
-                {/* Hour rows */}
                 {calendarHours.map((hour) => (
                   <React.Fragment key={hour}>
                     <div className="dd-cal-time-label">
@@ -2280,39 +2503,31 @@ const DoctorDashboard = () => {
                     </div>
                     {weekDays.map((day, dayIdx) => {
                       const isToday = day.toDateString() === new Date().toDateString();
-                      const isPast = day < new Date(new Date().setHours(0, 0, 0, 0));
+                      const isPast = day < todayStart;
+                      const cellDateStr = dStr(day);
 
-                      // Find slots/appointments for this cell
-                      const cellDateStr = day.toISOString().split('T')[0];
                       const cellSlots = availabilitySlots.filter((s) => {
-                        // Hide expired and booked slots — expired slots are
-                        // historical records (auto-marked by the schema once
-                        // their time passed) and booked slots are already
-                        // represented by the appointment chip in the same
-                        // cell. Show only slots the doctor can still act on.
                         if (s.status !== 'available' && s.status !== 'blocked') return false;
                         if (s.isAvailable === false && s.status !== 'blocked') return false;
-                        const sDate = new Date(s.date).toISOString().split('T')[0];
+                        if (dStr(s.date) !== cellDateStr) return false;
                         const startHour = parseInt((s.startTime || '').split(':')[0], 10);
-                        return sDate === cellDateStr && startHour === hour;
+                        if (startHour !== hour) return false;
+                        const kind = s.status === 'blocked' ? 'blocked' : 'available';
+                        return passesStatus(kind);
                       });
-                      // Only show LIVE appointments — exclude cancelled + no-show so
-                      // the doctor's calendar stays in sync with what patients see.
                       const cellAppts = appointments.filter((a) => {
                         if (a.status === 'cancelled' || a.status === 'no_show') return false;
-                        const aDate = new Date(a.appointmentDate).toISOString().split('T')[0];
+                        if (dStr(a.appointmentDate) !== cellDateStr) return false;
                         const aHour = parseInt((a.appointmentTime || '').split(':')[0], 10);
-                        return aDate === cellDateStr && aHour === hour;
+                        if (aHour !== hour) return false;
+                        if (!passesStatus('booked')) return false;
+                        if (!passesSearch(a, true)) return false;
+                        return true;
                       });
 
-                      // The outer cell opens the "add slot" modal — but ONLY
-                      // when the cell is truly empty (no appointments AND no
-                      // availability slots). If there's already content, the
-                      // chip's own onClick handles the interaction.
-                      const handleCellClick = () => {
+                      const onCellClick = () => {
                         if (isPast) return;
-                        if (cellAppts.length > 0) return; // booked chip handles it
-                        if (cellSlots.length > 0) return; // available chip handles it
+                        if (cellAppts.length > 0 || cellSlots.length > 0) return;
                         openSlotModal(day, hour);
                       };
 
@@ -2321,7 +2536,7 @@ const DoctorDashboard = () => {
                           key={`${hour}-${dayIdx}`}
                           type="button"
                           className={`dd-cal-cell ${isToday ? 'today' : ''} ${isPast ? 'past' : ''}`}
-                          onClick={handleCellClick}
+                          onClick={onCellClick}
                           disabled={isPast}
                           aria-label={`${day.toLocaleDateString('ar-EG')} ${hour}:00`}
                         >
@@ -2330,16 +2545,12 @@ const DoctorDashboard = () => {
                               key={appt._id}
                               role="button"
                               tabIndex={0}
-                              className={`dd-cal-slot ${appt.priority === 'emergency' ? 'emergency' : 'booked'}`}
-                              style={{ top: 4, height: 'calc(100% - 8px)', cursor: 'pointer' }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openApptDetails(appt);
-                              }}
+                              className="dd-cal-slot bk"
+                              style={{ top: 4, height: 'calc(100% - 8px)' }}
+                              onClick={(e) => { e.stopPropagation(); openApptDetails(appt); }}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
-                                  e.preventDefault();
-                                  e.stopPropagation();
+                                  e.preventDefault(); e.stopPropagation();
                                   openApptDetails(appt);
                                 }
                               }}
@@ -2352,65 +2563,579 @@ const DoctorDashboard = () => {
                                   ? `${appt.patientChildId.firstName} ${appt.patientChildId.lastName || ''}`.trim()
                                   : appt.patientName || 'مريض'}
                               </span>
-                              <span className="dd-cal-slot-time">{appt.appointmentTime}</span>
-                            </div>
-                          ))}
-                          {cellSlots.length > 0 && cellAppts.length === 0 && cellSlots.map((slot) => (
-                            <div
-                              key={slot._id}
-                              role="button"
-                              tabIndex={0}
-                              className={`dd-cal-slot ${slot.status === 'blocked' ? 'blocked' : 'available'}`}
-                              style={{ top: 4, height: 'calc(100% - 8px)', cursor: 'pointer' }}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openSlotDetails(slot);
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  openSlotDetails(slot);
-                                }
-                              }}
-                              title="انقر لعرض تفاصيل الموعد المتاح"
-                            >
-                              <span className="dd-cal-slot-name">
-                                {slot.status === 'blocked' ? 'محجوز' : 'متاح'}
-                              </span>
                               <span className="dd-cal-slot-time">
-                                {slot.startTime} - {slot.endTime}
+                                {appt.appointmentTime}
                               </span>
                             </div>
                           ))}
+                          {cellSlots.length > 0 && cellAppts.length === 0 && cellSlots.map((slot) => {
+                            const endT = resolveEndTime(slot);
+                            const cls = slot.status === 'blocked' ? 'bl' : (isPast ? 'past' : 'av');
+                            return (
+                              <div
+                                key={slot._id}
+                                role="button"
+                                tabIndex={0}
+                                className={`dd-cal-slot ${cls}`}
+                                style={{ top: 4, height: 'calc(100% - 8px)' }}
+                                onClick={(e) => { e.stopPropagation(); openSlotDetails(slot); }}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault(); e.stopPropagation();
+                                    openSlotDetails(slot);
+                                  }
+                                }}
+                                title="انقر لعرض تفاصيل الموعد المتاح"
+                              >
+                                <span className="dd-cal-slot-name">
+                                  {slot.status === 'blocked' ? 'محجوب' : 'متاح'}
+                                </span>
+                                <span className="dd-cal-slot-time">
+                                  {slot.startTime} — {endT}
+                                </span>
+                              </div>
+                            );
+                          })}
                         </button>
                       );
                     })}
                   </React.Fragment>
                 ))}
               </div>
+            );
 
-              {/* Legend */}
-              <div className="dd-cal-toolbar" style={{ marginTop: 8 }}>
-                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', fontFamily: 'Cairo, sans-serif', fontSize: '0.825rem', color: 'var(--tm-text-secondary)' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 14, height: 14, borderRadius: 4, background: 'var(--tm-success-light)', border: '1px dashed rgba(0, 137, 123, 0.30)' }} />
-                    متاح
+            const renderAgendaView = () => {
+              // Group visible events by day across the current week
+              const byDay = weekDays.map((day) => {
+                const ds = dStr(day);
+                const dayAppts = appointments
+                  .filter((a) => {
+                    if (a.status === 'cancelled' || a.status === 'no_show') return false;
+                    if (dStr(a.appointmentDate) !== ds) return false;
+                    if (!passesStatus('booked')) return false;
+                    if (!passesSearch(a, true)) return false;
+                    return true;
+                  })
+                  .map((a) => ({ kind: 'appt', sortKey: a.appointmentTime || '00:00', data: a }));
+                const daySlots = availabilitySlots
+                  .filter((s) => {
+                    if (s.status !== 'available' && s.status !== 'blocked') return false;
+                    if (dStr(s.date) !== ds) return false;
+                    const kind = s.status === 'blocked' ? 'blocked' : 'available';
+                    return passesStatus(kind);
+                  })
+                  .map((s) => ({
+                    kind: s.status === 'blocked' ? 'blocked' : 'available',
+                    sortKey: s.startTime || '00:00',
+                    data: s,
+                  }));
+                const events = [...dayAppts, ...daySlots].sort((a, b) =>
+                  a.sortKey.localeCompare(b.sortKey)
+                );
+                return { day, events };
+              });
+
+              return (
+                <div className="dd-cal-agenda">
+                  {byDay.every((d) => d.events.length === 0) ? (
+                    <div className="dd-empty">
+                      <div className="dd-empty-icon"><CalendarDays size={28} strokeWidth={1.8} /></div>
+                      <h3>لا توجد مواعيد بهذه الفلاتر</h3>
+                      <p>جرّب تغيير الفلتر أو الانتقال لأسبوع آخر</p>
+                    </div>
+                  ) : (
+                    byDay.map(({ day, events }, idx) => {
+                      const isToday = day.toDateString() === new Date().toDateString();
+                      if (events.length === 0) return null;
+                      return (
+                        <section key={idx} className={`dd-agenda-day ${isToday ? 'today' : ''}`}>
+                          <header className="dd-agenda-day-head">
+                            <span className="dd-agenda-day-num">{day.getDate()}</span>
+                            <div className="dd-agenda-day-info">
+                              <span className="dd-agenda-day-name">
+                                {day.toLocaleDateString('ar-EG', { weekday: 'long' })}
+                              </span>
+                              <span className="dd-agenda-day-date">
+                                {day.toLocaleDateString('ar-EG', { month: 'long', year: 'numeric' })}
+                              </span>
+                            </div>
+                            <span className="dd-agenda-day-count">{events.length}</span>
+                          </header>
+                          <div className="dd-agenda-events">
+                            {events.map((evt, eIdx) => {
+                              if (evt.kind === 'appt') {
+                                const a = evt.data;
+                                const patient = a.patientPersonId || a.patientChildId || {};
+                                const name = [patient.firstName, patient.lastName, a.patientName]
+                                  .filter(Boolean).join(' ') || 'مريض';
+                                return (
+                                  <button
+                                    key={`${a._id}-${eIdx}`}
+                                    type="button"
+                                    className="dd-agenda-event bk"
+                                    onClick={() => openApptDetails(a)}
+                                  >
+                                    <span className="dd-agenda-event-time">{a.appointmentTime}</span>
+                                    <div className="dd-agenda-event-body">
+                                      <strong>{name}</strong>
+                                      {a.reasonForVisit && (
+                                        <span className="dd-agenda-event-reason">
+                                          <ClipboardList size={12} strokeWidth={2.2} />
+                                          {a.reasonForVisit}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className="dd-agenda-event-badge">محجوز</span>
+                                  </button>
+                                );
+                              }
+                              const s = evt.data;
+                              const endT = resolveEndTime(s);
+                              const cls = evt.kind === 'blocked' ? 'bl' : 'av';
+                              return (
+                                <button
+                                  key={`${s._id}-${eIdx}`}
+                                  type="button"
+                                  className={`dd-agenda-event ${cls}`}
+                                  onClick={() => openSlotDetails(s)}
+                                >
+                                  <span className="dd-agenda-event-time">{s.startTime}</span>
+                                  <div className="dd-agenda-event-body">
+                                    <strong>{evt.kind === 'blocked' ? 'موعد محجوب' : 'موعد متاح للحجز'}</strong>
+                                    <span className="dd-agenda-event-reason">
+                                      <Clock size={12} strokeWidth={2.2} />
+                                      {s.startTime} — {endT} ({s.slotDuration || 30} دقيقة)
+                                    </span>
+                                  </div>
+                                  <span className="dd-agenda-event-badge">
+                                    {evt.kind === 'blocked' ? 'محجوب' : 'متاح'}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      );
+                    })
+                  )}
+                </div>
+              );
+            };
+
+            const renderDayView = () => {
+              const day = new Date(calCurrentDay);
+              day.setHours(0, 0, 0, 0);
+              const ds = dStr(day);
+              const isToday = day.toDateString() === new Date().toDateString();
+
+              const dayAppts = appointments
+                .filter((a) => {
+                  if (a.status === 'cancelled' || a.status === 'no_show') return false;
+                  if (dStr(a.appointmentDate) !== ds) return false;
+                  if (!passesStatus('booked')) return false;
+                  if (!passesSearch(a, true)) return false;
+                  return true;
+                })
+                .map((a) => ({ kind: 'appt', sortKey: a.appointmentTime || '00:00', data: a }));
+              const daySlots = availabilitySlots
+                .filter((s) => {
+                  if (s.status !== 'available' && s.status !== 'blocked') return false;
+                  if (dStr(s.date) !== ds) return false;
+                  const kind = s.status === 'blocked' ? 'blocked' : 'available';
+                  return passesStatus(kind);
+                })
+                .map((s) => ({
+                  kind: s.status === 'blocked' ? 'blocked' : 'available',
+                  sortKey: s.startTime || '00:00',
+                  data: s,
+                }));
+              const events = [...dayAppts, ...daySlots].sort((a, b) =>
+                a.sortKey.localeCompare(b.sortKey)
+              );
+
+              return (
+                <div className="dd-cal-day-view">
+                  <header className={`dd-day-head ${isToday ? 'today' : ''}`}>
+                    <div className="dd-day-head-info">
+                      <span className="dd-day-head-name">
+                        {day.toLocaleDateString('ar-EG', { weekday: 'long' })}
+                      </span>
+                      <span className="dd-day-head-date">
+                        {day.toLocaleDateString('ar-EG', { day: 'numeric', month: 'long', year: 'numeric' })}
+                      </span>
+                    </div>
+                    <div className="dd-day-head-count">
+                      <span className="dd-day-head-num">{events.length}</span>
+                      <span className="dd-day-head-label">حدث</span>
+                    </div>
+                  </header>
+
+                  {events.length === 0 ? (
+                    <div className="dd-empty">
+                      <div className="dd-empty-icon"><Clock size={28} strokeWidth={1.8} /></div>
+                      <h3>لا توجد مواعيد بهذا اليوم</h3>
+                      <p>جرّب الانتقال ليوم آخر أو إضافة موعد متاح</p>
+                    </div>
+                  ) : (
+                    <div className="dd-day-events">
+                      {events.map((evt, idx) => {
+                        if (evt.kind === 'appt') {
+                          const a = evt.data;
+                          const patient = a.patientPersonId || a.patientChildId || {};
+                          const name = [patient.firstName, patient.lastName, a.patientName]
+                            .filter(Boolean).join(' ') || 'مريض';
+                          return (
+                            <button
+                              key={`${a._id}-${idx}`}
+                              type="button"
+                              className="dd-day-event bk"
+                              onClick={() => openApptDetails(a)}
+                            >
+                              <div className="dd-day-event-time">
+                                <span className="dd-day-event-time-main">{a.appointmentTime}</span>
+                                <span className="dd-day-event-time-sub">موعد محجوز</span>
+                              </div>
+                              <div className="dd-day-event-body">
+                                <strong>{name}</strong>
+                                {a.reasonForVisit && (
+                                  <span><ClipboardList size={13} strokeWidth={2.2} />{a.reasonForVisit}</span>
+                                )}
+                                {(patient.phoneNumber || a.patientPhone) && (
+                                  <span dir="ltr" style={{ fontFamily: 'Inter, sans-serif' }}>
+                                    <Phone size={13} strokeWidth={2.2} />
+                                    {patient.phoneNumber || a.patientPhone}
+                                  </span>
+                                )}
+                              </div>
+                              <ChevronLeft size={18} strokeWidth={2.2} className="dd-day-event-chev" />
+                            </button>
+                          );
+                        }
+                        const s = evt.data;
+                        const endT = resolveEndTime(s);
+                        const cls = evt.kind === 'blocked' ? 'bl' : 'av';
+                        return (
+                          <button
+                            key={`${s._id}-${idx}`}
+                            type="button"
+                            className={`dd-day-event ${cls}`}
+                            onClick={() => openSlotDetails(s)}
+                          >
+                            <div className="dd-day-event-time">
+                              <span className="dd-day-event-time-main">{s.startTime}</span>
+                              <span className="dd-day-event-time-sub">— {endT}</span>
+                            </div>
+                            <div className="dd-day-event-body">
+                              <strong>{evt.kind === 'blocked' ? 'موعد محجوب' : 'متاح للحجز'}</strong>
+                              <span>
+                                <Clock size={13} strokeWidth={2.2} />
+                                مدة {s.slotDuration || 30} دقيقة
+                              </span>
+                              <span>
+                                <Users size={13} strokeWidth={2.2} />
+                                {s.currentBookings || 0} / {s.maxBookings || 1}
+                              </span>
+                            </div>
+                            <ChevronLeft size={18} strokeWidth={2.2} className="dd-day-event-chev" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            };
+
+            // Date navigation — moves week or day depending on active view
+            const handlePrev = () => {
+              if (calView === 'day') {
+                const d = new Date(calCurrentDay);
+                d.setDate(d.getDate() - 1);
+                setCalCurrentDay(d);
+              } else {
+                handleWeekPrev();
+              }
+            };
+            const handleNext = () => {
+              if (calView === 'day') {
+                const d = new Date(calCurrentDay);
+                d.setDate(d.getDate() + 1);
+                setCalCurrentDay(d);
+              } else {
+                handleWeekNext();
+              }
+            };
+            const handleToday = () => {
+              setCalCurrentDay(new Date());
+              handleWeekToday();
+            };
+
+            const headerLabel = calView === 'day'
+              ? calCurrentDay.toLocaleDateString('ar-EG', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+              : formatWeekRange(weekStart);
+
+            return (
+              <>
+                {/* Page header */}
+                <div className="dd-page-header">
+                  <div className="dd-page-title">
+                    <button
+                      type="button"
+                      className="dd-btn dd-btn-icon dd-mobile-toggle"
+                      onClick={() => setSidebarOpen(true)}
+                      aria-label="فتح القائمة"
+                    >
+                      <Menu size={20} strokeWidth={2.2} />
+                    </button>
+                    <div className="dd-page-title-icon">
+                      <CalendarDays size={24} strokeWidth={2} />
+                    </div>
+                    <div>
+                      <h1>مواعيدي</h1>
+                      <p>إدارة جدولك الأسبوعي والمواعيد المتاحة</p>
+                    </div>
+                  </div>
+                  <div className="dd-page-actions">
+                    <button
+                      type="button"
+                      className="dd-btn dd-btn-primary"
+                      onClick={() => openSlotModal()}
+                    >
+                      <Plus size={18} strokeWidth={2.2} />
+                      <span>إضافة موعد متاح</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* ── Hybrid Toolbar: view toggle + date navigation ───── */}
+                <div className="dd-cal-hybrid-toolbar">
+                  <div className="dd-cal-view-toggle" role="tablist" aria-label="نمط العرض">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={calView === 'week'}
+                      className={`dd-cal-view-btn ${calView === 'week' ? 'active' : ''}`}
+                      onClick={() => setCalView('week')}
+                    >
+                      <CalendarDays size={14} strokeWidth={2.4} />
+                      <span>أسبوع</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={calView === 'agenda'}
+                      className={`dd-cal-view-btn ${calView === 'agenda' ? 'active' : ''}`}
+                      onClick={() => setCalView('agenda')}
+                    >
+                      <ClipboardList size={14} strokeWidth={2.4} />
+                      <span>قائمة</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={calView === 'day'}
+                      className={`dd-cal-view-btn ${calView === 'day' ? 'active' : ''}`}
+                      onClick={() => setCalView('day')}
+                    >
+                      <Clock size={14} strokeWidth={2.4} />
+                      <span>يوم</span>
+                    </button>
+                  </div>
+
+                  <div className="dd-cal-nav-group">
+                    <button
+                      type="button"
+                      className="dd-cal-nav-btn"
+                      onClick={handlePrev}
+                      aria-label={calView === 'day' ? 'اليوم السابق' : 'الأسبوع السابق'}
+                    >
+                      <ChevronRight size={18} strokeWidth={2.5} />
+                    </button>
+                    <button type="button" className="dd-cal-today-btn" onClick={handleToday}>
+                      اليوم
+                    </button>
+                    <button
+                      type="button"
+                      className="dd-cal-nav-btn"
+                      onClick={handleNext}
+                      aria-label={calView === 'day' ? 'اليوم التالي' : 'الأسبوع التالي'}
+                    >
+                      <ChevronLeft size={18} strokeWidth={2.5} />
+                    </button>
+                    <span className="dd-cal-current-label">{headerLabel}</span>
+                  </div>
+                </div>
+
+                {/* ── Filter bar: search + status chips ──────────────── */}
+                <div className="dd-cal-filter-bar">
+                  <div className="dd-cal-search">
+                    <Search size={16} strokeWidth={2.2} />
+                    <input
+                      type="text"
+                      className="dd-cal-search-input"
+                      placeholder="ابحث باسم المريض أو السبب..."
+                      value={calSearch}
+                      onChange={(e) => setCalSearch(e.target.value)}
+                    />
+                    {calSearch && (
+                      <button
+                        type="button"
+                        className="dd-cal-search-clear"
+                        onClick={() => setCalSearch('')}
+                        aria-label="مسح البحث"
+                      >
+                        <X size={14} strokeWidth={2.5} />
+                      </button>
+                    )}
+                  </div>
+                  <div className="dd-cal-chips" role="group" aria-label="فلتر الحالة">
+                    {[
+                      { id: 'all',       labelAr: 'الكل',    cls: '' },
+                      { id: 'available', labelAr: 'متاح',    cls: 'av' },
+                      { id: 'booked',    labelAr: 'محجوز',   cls: 'bk' },
+                      { id: 'blocked',   labelAr: 'محجوب',   cls: 'bl' },
+                    ].map((chip) => (
+                      <button
+                        key={chip.id}
+                        type="button"
+                        className={`dd-cal-chip ${chip.cls} ${calStatusFilter === chip.id ? 'active' : ''}`}
+                        onClick={() => setCalStatusFilter(chip.id)}
+                      >
+                        {chip.labelAr}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ── View body ─────────────────────────────────────────── */}
+                {calView === 'week'   && renderWeekGrid()}
+                {calView === 'agenda' && renderAgendaView()}
+                {calView === 'day'    && renderDayView()}
+
+                {/* ── Legend footer with live counts ────────────────────── */}
+                <div className="dd-cal-legend">
+                  <span className="dd-cal-legend-item">
+                    <span className="dd-cal-legend-swatch av" />
+                    {availCount} متاح
                   </span>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 14, height: 14, borderRadius: 4, background: 'var(--tm-gradient)' }} />
-                    محجوز
+                  <span className="dd-cal-legend-sep">·</span>
+                  <span className="dd-cal-legend-item">
+                    <span className="dd-cal-legend-swatch bk" />
+                    {bookedCount} محجوز
                   </span>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 14, height: 14, borderRadius: 4, background: 'linear-gradient(135deg, var(--tm-error) 0%, #B71C1C 100%)' }} />
-                    طوارئ
-                  </span>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ width: 14, height: 14, borderRadius: 4, background: 'rgba(var(--tm-primary-rgb), 0.08)' }} />
-                    مغلق
+                  <span className="dd-cal-legend-sep">·</span>
+                  <span className="dd-cal-legend-item">
+                    <span className="dd-cal-legend-swatch bl" />
+                    {blockedCount} محجوب
                   </span>
                 </div>
+              </>
+            );
+          })()}
+
+          {/* ═══════════════════════════════════════════════════════════════
+              SCHEDULE TEMPLATE SECTION — Calendly-style weekly schedule
+              The doctor sees their saved weekly working pattern and can
+              edit it. Saving regenerates availability_slots automatically.
+              ═══════════════════════════════════════════════════════════════ */}
+          {activeSection === 'schedule' && (
+            <>
+              <div className="dd-page-header">
+                <div className="dd-page-title">
+                  <button
+                    type="button"
+                    className="dd-btn dd-btn-icon dd-mobile-toggle"
+                    onClick={() => setSidebarOpen(true)}
+                    aria-label="فتح القائمة"
+                  >
+                    <Menu size={20} strokeWidth={2.2} />
+                  </button>
+                  <div className="dd-page-title-icon">
+                    <Clock size={24} strokeWidth={2} />
+                  </div>
+                  <div>
+                    <h1>جدول العمل</h1>
+                    <p>حدّد ساعات عملك الأسبوعية — يتم توليد المواعيد المتاحة للمرضى تلقائياً</p>
+                  </div>
+                </div>
+                <div className="dd-page-actions dd-schedule-actions">
+                  <button
+                    type="button"
+                    className="dd-btn dd-btn-secondary"
+                    onClick={handleRegenerateSchedule}
+                    disabled={scheduleLoading || scheduleSaving || scheduleRegenerating || !scheduleTemplate}
+                    title="إعادة توليد المواعيد من الجدول الحالي بدون تعديل"
+                  >
+                    <RotateCcw size={18} strokeWidth={2.2} />
+                    <span>{scheduleRegenerating ? 'جارٍ التجديد...' : 'تجديد المواعيد'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="dd-btn dd-btn-primary"
+                    onClick={handleSaveSchedule}
+                    disabled={scheduleLoading || scheduleSaving || !scheduleDirty}
+                    title={scheduleDirty ? 'حفظ التغييرات وإعادة توليد المواعيد' : 'لا تغييرات للحفظ'}
+                  >
+                    <CheckCircle2 size={18} strokeWidth={2.2} />
+                    <span>{scheduleSaving ? 'جارٍ الحفظ...' : 'حفظ التغييرات'}</span>
+                  </button>
+                </div>
               </div>
+
+              {/* Loading state */}
+              {scheduleLoading && (
+                <div className="dd-schedule-loading">
+                  <Loader2 size={28} className="dd-spin" strokeWidth={2.2} />
+                  <span>جارٍ تحميل جدول العمل...</span>
+                </div>
+              )}
+
+              {/* Dirty-state banner — shows when there are unsaved changes */}
+              {!scheduleLoading && scheduleDirty && (
+                <div className="dd-schedule-banner dd-schedule-banner--warning">
+                  <AlertCircle size={18} strokeWidth={2.2} />
+                  <div className="dd-schedule-banner-text">
+                    <strong>لديك تغييرات غير محفوظة</strong>
+                    <span>اضغط "حفظ التغييرات" لتطبيق الجدول وإعادة توليد المواعيد المتاحة.</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Last-sync result banner — shows after a successful save/regenerate */}
+              {!scheduleLoading && scheduleLastSyncResult && !scheduleDirty && (
+                <div className="dd-schedule-banner dd-schedule-banner--success">
+                  <CheckCircle2 size={18} strokeWidth={2.2} />
+                  <div className="dd-schedule-banner-text">
+                    <strong>تمت المزامنة بنجاح</strong>
+                    <span>
+                      تم إنشاء {scheduleLastSyncResult.inserted || 0} موعد جديد
+                      {scheduleLastSyncResult.deleted > 0 && `، حذف ${scheduleLastSyncResult.deleted} موعد قديم`}
+                      {scheduleLastSyncResult.kept > 0 && `، الاحتفاظ بـ ${scheduleLastSyncResult.kept} موعد محجوز`}.
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Validation error banner */}
+              {scheduleErrors.weeklyPattern && (
+                <div className="dd-schedule-banner dd-schedule-banner--error">
+                  <AlertCircle size={18} strokeWidth={2.2} />
+                  <span>{scheduleErrors.weeklyPattern}</span>
+                </div>
+              )}
+
+              {/* The actual editor */}
+              {!scheduleLoading && scheduleTemplate && (
+                <div className="dd-schedule-editor-wrap">
+                  <WeeklyScheduleEditor
+                    mode="edit"
+                    value={scheduleTemplate}
+                    onChange={handleScheduleChange}
+                    errors={scheduleErrors}
+                    disabled={scheduleSaving}
+                  />
+                </div>
+              )}
             </>
           )}
 

@@ -15,7 +15,7 @@
      4. User type selection page
      5. Wizard shell (back button, progress bar, header, side panel)
      6. Form primitives (groups, inputs, labels, errors, hints)
-     7. Specialized inputs (radio, checkbox, weekday, file upload)
+     7. Specialized inputs (radio, checkbox, schedule editor container, file upload)
      8. Specialization picker grid
      9. Patient form sections (age indicator, emergency, password)
     10. Doctor form sections (notice, ECG badge, review)
@@ -1284,40 +1284,24 @@ textarea.form-input {
   border-radius: 14px;
 }
 
-/* ── Weekday picker ── */
+/* ── Schedule editor wrapper ──────────────────────────────────────────
+   The doctor SignUp step uses the <WeeklyScheduleEditor /> component
+   instead of a simple weekday button grid. The component brings its
+   OWN styling (see WeeklyScheduleEditor.css with the .wse-* namespace),
+   so we only need to give the wrapping .form-group some breathing room
+   because the editor is a large composite control that should feel
+   distinct from the surrounding single-line form fields.
+*/
 
-.weekdays-grid {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 8px;
+.form-group-schedule {
+  margin-top: 22px;
+  margin-bottom: 22px;
+  /* The editor renders its own header + summary cards; suppress the
+     default form-group label rules in case anything bleeds in. */
 }
 
-.weekday-btn {
-  padding: 14px 8px;
-  border: 1.5px solid var(--tm-input-border);
-  border-radius: 12px;
-  background: var(--tm-input-bg);
-  color: var(--tm-text-secondary);
-  font-family: 'Cairo', sans-serif;
-  font-size: 0.825rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  text-align: center;
-}
-
-.weekday-btn:hover {
-  border-color: var(--tm-accent);
-  color: var(--tm-primary);
-  background: rgba(var(--tm-action-rgb), 0.04);
-}
-
-.weekday-btn.selected {
-  background: var(--tm-gradient);
-  border-color: transparent;
-  color: #FFFFFF;
-  box-shadow: 0 4px 14px var(--tm-glow);
-  transform: translateY(-1px);
+.form-group-schedule > .error-message {
+  margin-top: 10px;
 }
 
 /* ── File upload ── */
@@ -2608,7 +2592,6 @@ textarea.form-input {
 
 .user-type-card:focus-visible,
 .spec-card:focus-visible,
-.weekday-btn:focus-visible,
 .btn-primary:focus-visible,
 .btn-secondary:focus-visible,
 .modal-button:focus-visible,
@@ -2660,9 +2643,6 @@ textarea.form-input {
     height: 38px;
     font-size: 13px;
   }
-  .weekdays-grid {
-    grid-template-columns: repeat(4, 1fr);
-  }
   .review-grid {
     grid-template-columns: 1fr;
   }
@@ -2712,9 +2692,6 @@ textarea.form-input {
     width: 34px;
     height: 34px;
     font-size: 12px;
-  }
-  .weekdays-grid {
-    grid-template-columns: repeat(3, 1fr);
   }
   .selection-icon-main {
     width: 64px;

@@ -2,25 +2,31 @@
  * ═══════════════════════════════════════════════════════════════════════════
  *  Notification Controller — Patient 360°
  *  ─────────────────────────────────────────────────────────────────────────
- *  In-app notifications + FCM push token management.
- *  Mounted at /api/notifications.
+ *  In-app notifications + FCM push token management + FCM dispatch.
+ *  Mounted at /api/notifications (plus aliases at /api/auth and /api/patient).
  *
  *  Architecture:
- *    - Notifications are persisted in the `notifications` collection
- *    - Each notification has channels: push, in_app, sms
- *    - "in_app" delivery happens by the client polling/WebSocket-ing this API
- *    - "push" delivery requires firebase-admin SDK + FCM tokens stored on
- *      the Account document. The FCM dispatch step is stubbed here — wire
- *      up firebase-admin in a separate step when ready.
- *    - "sms" delivery requires a Twilio/local SMS gateway integration —
- *      also stubbed here.
+ *    - Notifications are persisted in the `notifications` collection.
+ *    - Each notification has channels: push, in_app, sms.
+ *    - "in_app" delivery happens by the client polling/WebSocket-ing this API.
+ *    - "push" delivery is handled by services/fcmService.js — invoked
+ *      automatically inside createNotification() when channels includes 'push'.
+ *    - "sms" delivery is still stubbed (no SMS gateway integration yet).
  *
- *  Dispatcher pattern:
- *    A separate service function `dispatchCriticalLabResults()` is exposed
- *    that any cron job, controller, or webhook can call. It scans for
- *    completed-but-unviewed critical lab tests and creates notifications
- *    for the doctors who ordered them. This decouples "what triggered the
- *    notification" from "creating the notification record."
+ *  CENTRAL ENTRY POINT for other controllers:
+ *      const { createNotification } = require('./notificationController');
+ *      await createNotification({
+ *        recipientAccountId: doctorAccount._id,
+ *        recipientType: 'doctor',
+ *        notificationType: 'lab_results_critical',
+ *        title: 'نتيجة فحص حرجة',
+ *        body: 'رقم الفحص LAB-20260514-00012',
+ *        channels: ['push', 'in_app'],
+ *        relatedType: 'lab_test',
+ *        relatedId: test._id,
+ *        deepLinkRoute: '/lab',
+ *        priority: 'urgent'
+ *      });
  *
  *  Functions:
  *    1. getMyNotifications         — List notifications for current user
@@ -29,7 +35,8 @@
  *    4. markAllAsRead              — All for current user → read
  *    5. registerPushToken          — Add FCM token to account
  *    6. removePushToken            — Remove FCM token
- *    7. dispatchCriticalLabResults — Service function (also exposed as endpoint for testing)
+ *    7. createNotification         — Internal helper (DB + FCM push)
+ *    8. dispatchCriticalLabResults — Service function (also exposed as endpoint)
  *
  *  Conventions kept:
  *    - Arabic error messages, emoji-marked console logs
@@ -42,6 +49,8 @@ const {
   Notification, Account, LabTest, Doctor, AuditLog
 } = require('../models');
 
+const fcmService = require('../services/fcmService');
+
 // ============================================================================
 // HELPER: Build the "recipient" query for the current user
 // ============================================================================
@@ -51,7 +60,6 @@ const {
  * identified by either accountId or by personId/childId.
  */
 function buildRecipientQuery(account) {
-  // Prefer accountId targeting
   return {
     $or: [
       { recipientAccountId: account._id },
@@ -175,7 +183,14 @@ exports.markAsRead = async (req, res) => {
       });
     }
 
-    await notification.markRead();
+    // Use the model method if it exists, else fallback to direct update.
+    if (typeof notification.markRead === 'function') {
+      await notification.markRead();
+    } else {
+      notification.status = 'read';
+      notification.readAt = new Date();
+      await notification.save();
+    }
 
     return res.json({
       success: true,
@@ -233,14 +248,16 @@ exports.markAllAsRead = async (req, res) => {
 
 /**
  * @route   POST /api/notifications/push-token
+ * @route   POST /api/auth/fcm-token   (mobile-compatible alias)
  * @desc    Mobile app calls this on login to register its FCM device token
  * @access  Private
  *
- * Body: { token: string, platform?: 'ios' | 'android' | 'web' }
+ * Body: { token: string, platform?: 'ios' | 'android' | 'web',
+ *         deviceName?: string, appVersion?: string }
  */
 exports.registerPushToken = async (req, res) => {
   try {
-    const { token, platform } = req.body;
+    const { token, platform, deviceName, appVersion } = req.body;
 
     if (!token || token.trim().length === 0) {
       return res.status(400).json({
@@ -257,9 +274,39 @@ exports.registerPushToken = async (req, res) => {
       });
     }
 
-    await account.addPushToken(token.trim(), platform);
+    // Prefer model method if it exists (preserves existing behavior).
+     if (typeof account.addPushToken === 'function') {
+      await account.addPushToken({ token: token.trim(), platform, deviceName, appVersion });
+    } else {
+      // Fallback: manual upsert into pushNotificationTokens[] array.
+      const cleanToken = token.trim();
+      const existingIdx = (account.pushNotificationTokens || [])
+        .findIndex(t => t.token === cleanToken);
 
-    console.log('✅ Push token registered for account', account._id);
+      if (existingIdx >= 0) {
+        // Refresh existing entry
+        account.pushNotificationTokens[existingIdx].lastUsedAt = new Date();
+        account.pushNotificationTokens[existingIdx].isActive = true;
+        if (platform)    account.pushNotificationTokens[existingIdx].platform = platform;
+        if (deviceName)  account.pushNotificationTokens[existingIdx].deviceName = deviceName;
+        if (appVersion)  account.pushNotificationTokens[existingIdx].appVersion = appVersion;
+      } else {
+        // Add new entry
+        account.pushNotificationTokens = account.pushNotificationTokens || [];
+        account.pushNotificationTokens.push({
+          token: cleanToken,
+          platform: platform || 'android',
+          deviceName: deviceName || '',
+          appVersion: appVersion || '',
+          addedAt:   new Date(),
+          lastUsedAt: new Date(),
+          isActive:  true
+        });
+      }
+      await account.save();
+    }
+
+    console.log(`✅ FCM token registered for account ${account._id} (platform: ${platform || 'unknown'})`);
 
     return res.json({
       success: true,
@@ -280,6 +327,7 @@ exports.registerPushToken = async (req, res) => {
 
 /**
  * @route   DELETE /api/notifications/push-token
+ * @route   DELETE /api/auth/fcm-token   (mobile-compatible alias)
  * @desc    Mobile app calls this on logout or when FCM rotates the token
  * @access  Private
  *
@@ -304,12 +352,13 @@ exports.removePushToken = async (req, res) => {
       });
     }
 
-    // Filter token out of pushNotificationTokens array
     const before = account.pushNotificationTokens?.length || 0;
     account.pushNotificationTokens = (account.pushNotificationTokens || [])
       .filter(t => t.token !== token);
     await account.save();
     const after = account.pushNotificationTokens.length;
+
+    console.log(`🗑️  FCM token removed from account ${account._id} (${before - after} removed)`);
 
     return res.json({
       success: true,
@@ -326,27 +375,148 @@ exports.removePushToken = async (req, res) => {
 };
 
 // ============================================================================
-// 7. DISPATCHER: critical lab results
+// 7. CREATE NOTIFICATION — internal helper (DB + FCM push)
+// ============================================================================
+
+/**
+ * Central function for creating a notification AND dispatching the push.
+ * Call from any controller that needs to notify a user.
+ *
+ *   const { createNotification } = require('./notificationController');
+ *
+ *   await createNotification({
+ *     recipientAccountId: doctorAccount._id,    // ← preferred
+ *     recipientPersonId: doctorAccount.personId, // ← optional fallback
+ *     recipientType: 'doctor',
+ *     notificationType: 'lab_results_critical',
+ *     title: 'نتيجة فحص حرجة',
+ *     body: 'رقم الفحص LAB-20260514-00012',
+ *     channels: ['push', 'in_app'],
+ *     relatedType: 'lab_test',
+ *     relatedId: test._id,
+ *     deepLinkRoute: '/lab',       // ← used by mobile to navigate on tap
+ *     priority: 'urgent'
+ *   });
+ *
+ * @param {object} options — see jsdoc above for the full shape
+ * @returns {Promise<{ notification: object, pushResult: object }>}
+ */
+async function createNotification(options) {
+  if (!options || (!options.recipientAccountId && !options.recipientPersonId && !options.recipientChildId)) {
+    console.warn('⚠️  createNotification: missing recipient — skipped');
+    return { notification: null, pushResult: { sent: 0, failed: 0, skipped: true } };
+  }
+
+  const {
+    recipientAccountId,
+    recipientPersonId,
+    recipientChildId,
+    recipientType,
+    notificationType,
+    title,
+    titleArabic,
+    body,
+    channels = ['push', 'in_app'],
+    relatedType,
+    relatedId,
+    deepLinkRoute,
+    priority = 'normal',
+    metadata = {}
+  } = options;
+
+  // ── 1) Save notification record in DB ─────────────────────────────────────
+  let notification;
+  try {
+    notification = await Notification.create({
+      recipientAccountId,
+      recipientPersonId,
+      recipientChildId,
+      recipientType,
+      notificationType,
+      title,
+      titleArabic: titleArabic || title,
+      body,
+      channels,
+      status: 'pending',
+      relatedType,
+      relatedId,
+      priority,
+      metadata
+    });
+  } catch (error) {
+    console.error('❌ createNotification: DB save failed', error);
+    return { notification: null, pushResult: { sent: 0, failed: 0, skipped: true } };
+  }
+
+  // ── 2) Dispatch push if 'push' is in channels ─────────────────────────────
+  let pushResult = { sent: 0, failed: 0, skipped: true };
+
+  if (Array.isArray(channels) && channels.includes('push')) {
+    try {
+      // Resolve target accountId — prefer direct, else lookup by personId
+      let targetAccountId = recipientAccountId;
+      if (!targetAccountId && recipientPersonId) {
+        const acc = await Account.findOne({ personId: recipientPersonId }).select('_id').lean();
+        targetAccountId = acc?._id;
+      }
+      if (!targetAccountId && recipientChildId) {
+        const acc = await Account.findOne({ childId: recipientChildId }).select('_id').lean();
+        targetAccountId = acc?._id;
+      }
+
+      if (targetAccountId) {
+        const pushData = {
+          notificationId: String(notification._id),
+          notificationType: notificationType || '',
+          relatedType:      relatedType || '',
+          relatedId:        relatedId ? String(relatedId) : '',
+        };
+        if (deepLinkRoute) pushData.route = deepLinkRoute;
+
+        pushResult = await fcmService.sendToAccount(targetAccountId, {
+          title: titleArabic || title || 'إشعار',
+          body:  body || '',
+          data:  pushData,
+        });
+
+        // Reflect push delivery state back on the notification.
+        if (!pushResult.skipped) {
+          notification.status = pushResult.sent > 0 ? 'sent' : 'failed';
+          notification.sentAt = new Date();
+          if (pushResult.sent === 0 && pushResult.failed > 0) {
+            notification.errorMessage = 'فشل إرسال الإشعار الفوري';
+          }
+          await notification.save();
+        }
+      }
+    } catch (error) {
+      console.error('❌ createNotification: push dispatch failed', error.message);
+      // Notification is still saved — push failure is non-fatal.
+    }
+  }
+
+  return { notification, pushResult };
+}
+
+// Expose for other controllers to import directly.
+exports.createNotification = createNotification;
+
+// ============================================================================
+// 8. DISPATCHER: critical lab results
 // ============================================================================
 
 /**
  * Service function: scan for completed-but-unviewed critical lab tests and
- * create notifications for the doctors who ordered them.
+ * create notifications (with push) for the doctors who ordered them.
  *
  * Idempotent: uses notification.relatedId to avoid duplicate notifications
  * for the same test.
  *
- * Can be called by:
- *   - A cron job (e.g., every 5 minutes)
- *   - Right after labTestController.completeLabTest fires
- *   - Manually via POST /api/notifications/dispatch/critical-labs (for testing)
- *
- * @returns {Promise<{ created: number, skipped: number }>}
+ * @returns {Promise<{ created: number, skipped: number, pushedSuccessfully: number }>}
  */
 async function dispatchCriticalLabResults() {
   console.log('🔄 Dispatching critical lab result notifications...');
 
-  // Find completed critical tests not yet viewed by doctor
   const tests = await LabTest.find({
     status: 'completed',
     isCritical: true,
@@ -357,6 +527,7 @@ async function dispatchCriticalLabResults() {
 
   let created = 0;
   let skipped = 0;
+  let pushedSuccessfully = 0;
 
   for (const test of tests) {
     if (!test.orderedBy?.personId) {
@@ -364,7 +535,7 @@ async function dispatchCriticalLabResults() {
       continue;
     }
 
-    // Idempotency check: have we already notified for this test?
+    // Idempotency check
     const existing = await Notification.findOne({
       notificationType: 'lab_results_critical',
       relatedType: 'lab_test',
@@ -375,36 +546,42 @@ async function dispatchCriticalLabResults() {
       continue;
     }
 
-    // Find the ordering doctor's account
     const doctorAccount = await Account.findOne({
       personId: test.orderedBy.personId
-    }).lean();
+    }).select('_id personId').lean();
 
     if (!doctorAccount) {
       skipped += 1;
       continue;
     }
 
-    await Notification.create({
+    const result = await createNotification({
       recipientAccountId: doctorAccount._id,
-      recipientPersonId: doctorAccount.personId,
-      recipientType: 'doctor',
-      notificationType: 'lab_results_critical',
-      title: 'نتيجة فحص حرجة',
-      titleArabic: 'نتيجة فحص حرجة',
-      body: `يوجد نتيجة فحص حرجة للمراجعة — رقم الفحص ${test.testNumber}`,
-      channels: ['push', 'in_app'],
-      status: 'pending',
-      relatedType: 'lab_test',
-      relatedId: test._id,
-      priority: 'urgent'
+      recipientPersonId:  doctorAccount.personId,
+      recipientType:      'doctor',
+      notificationType:   'lab_results_critical',
+      title:        'نتيجة فحص حرجة',
+      titleArabic:  'نتيجة فحص حرجة',
+      body:         `يوجد نتيجة فحص حرجة للمراجعة — رقم الفحص ${test.testNumber}`,
+      channels:     ['push', 'in_app'],
+      relatedType:  'lab_test',
+      relatedId:    test._id,
+      deepLinkRoute:'/lab',
+      priority:     'urgent'
     });
 
-    created += 1;
+    if (result.notification) {
+      created += 1;
+      if (result.pushResult && result.pushResult.sent > 0) {
+        pushedSuccessfully += 1;
+      }
+    }
   }
 
-  console.log(`✅ Dispatch done: ${created} created, ${skipped} skipped`);
-  return { created, skipped };
+  console.log(
+    `✅ Dispatch done: ${created} created, ${pushedSuccessfully} pushed, ${skipped} skipped`
+  );
+  return { created, skipped, pushedSuccessfully };
 }
 
 // Expose the service function as a controller for manual triggering
@@ -425,5 +602,5 @@ exports.dispatchCriticalLabResults = async (req, res) => {
   }
 };
 
-// Also export the raw service function so other controllers can call it
+// Also export the raw service function for other internal callers
 exports._dispatchCriticalLabResults = dispatchCriticalLabResults;

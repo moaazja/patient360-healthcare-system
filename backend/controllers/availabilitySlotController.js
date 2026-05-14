@@ -4,29 +4,31 @@
  *  ─────────────────────────────────────────────────────────────────────────
  *  Time slot management for doctors, dentists, labs. Mounted at /api/slots.
  *
- *  Workflow:
- *    1. Doctor sets their weekly schedule (Doctor.availableDays)
- *    2. Doctor calls POST /api/slots/generate to create slots for next N days
- *       based on their availableDays + a daily time range
+ *  Workflow (v2 — Calendly-style):
+ *    1. Doctor defines their schedule template (weeklyPattern + slotDuration
+ *       + bookingWindowDays) at sign-up OR from their dashboard.
+ *    2. Admin approval auto-runs `regenerateSlotsForDoctor()` so the doctor's
+ *       calendar is populated from day one.
  *    3. Patient calls GET /api/slots/available?doctorId=...&date=... to see
- *       open slots
- *    4. Patient books → atomicReserve happens via the appointment controller
- *    5. Doctor can manually create individual slots, block slots (vacation),
- *       or unblock them
+ *       open slots.
+ *    4. Patient books → atomicReserve happens via the appointment controller.
+ *    5. Doctor can edit their template anytime from the dashboard — the
+ *       controller deletes future UNBOOKED slots and regenerates from the
+ *       new template. Booked slots are NEVER touched.
+ *    6. Doctor can still manually create individual slots, block slots
+ *       (vacation), or unblock them — legacy v1 behaviour preserved.
  *
  *  Functions:
- *    1. createSlot              — Create a single slot manually
- *    2. generateSlots           — Bulk-generate slots for next N days
- *    3. getAvailableSlots       — Patient-facing: available slots for a provider
- *    4. getMySlots              — Provider's own slot list
- *    5. blockSlot               — Doctor blocks a slot (vacation, sick day)
- *    6. unblockSlot             — Reverse blockSlot
- *    7. deleteSlot              — Delete a slot (only if no bookings)
- *
- *  Why bulk generation matters:
- *    A doctor seeing 8 patients/day Sunday-Thursday for a month would need
- *    8 × 5 × 4 = 160 slots. Manual creation is unrealistic — bulk gen with
- *    sensible defaults gets them up and running in one call.
+ *    1. createSlot                — Create a single slot manually (legacy)
+ *    2. generateSlots             — Bulk-generate from availableDays (legacy v1)
+ *    3. getAvailableSlots         — Patient-facing: available slots for a provider
+ *    4. getMySlots                — Provider's own slot list
+ *    5. blockSlot                 — Doctor blocks a slot (vacation, sick day)
+ *    6. unblockSlot               — Reverse blockSlot
+ *    7. deleteSlot                — Delete a slot (only if no bookings)
+ *    8. getScheduleTemplate       — NEW (v2): get my schedule template
+ *    9. updateScheduleTemplate    — NEW (v2): save template + regenerate slots
+ *   10. regenerateFromTemplate    — NEW (v2): regenerate without changing template
  *
  *  Conventions kept:
  *    - Arabic error messages, emoji-marked console logs
@@ -94,6 +96,127 @@ function addMinutes(hhmm, minutes) {
   return `${hh}:${mm}`;
 }
 
+/**
+ * Core regeneration routine — used by:
+ *   • updateScheduleTemplate (after the template changes)
+ *   • regenerateFromTemplate (manual button on the dashboard)
+ *   • adminController.approveDoctorRequest (initial generation on approval)
+ *
+ * Algorithm:
+ *   1. Compute today's midnight (boundary between past and future slots).
+ *   2. Delete future slots that are NOT booked (currentBookings === 0)
+ *      AND are NOT manually blocked (status !== 'blocked').
+ *        - Booked slots are preserved so patients keep their appointments.
+ *        - Blocked slots are preserved (those represent manual overrides).
+ *   3. Call doctor.generateSlotsFromTemplate() to compute the new slot docs.
+ *   4. Bulk-insert them with ordered: false so individual conflicts don't
+ *      abort the whole batch (e.g. duplicate-key on rare race conditions).
+ *
+ * @param {Object} doctor         — populated Doctor mongoose document
+ * @param {Object} [options]
+ * @param {number} [options.daysAhead]  — override the template's window
+ * @returns {Promise<{deleted: number, inserted: number, kept: number}>}
+ */
+async function regenerateSlotsForDoctor(doctor, options = {}) {
+  if (!doctor || !doctor._id) {
+    throw new Error('وثيقة الطبيب غير صالحة');
+  }
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  // ── Step 1: count booked slots we'll preserve (for the response) ─────────
+  const keptCount = await AvailabilitySlot.countDocuments({
+    doctorId: doctor._id,
+    date: { $gte: todayStart },
+    $or: [
+      { currentBookings: { $gt: 0 } },
+      { status: 'blocked' }
+    ]
+  });
+
+  // ── Step 2: delete future unbooked, non-blocked slots ────────────────────
+  const deleteResult = await AvailabilitySlot.deleteMany({
+    doctorId: doctor._id,
+    date: { $gte: todayStart },
+    currentBookings: { $lte: 0 },
+    status: { $ne: 'blocked' }
+  });
+
+  console.log(
+    `🗑️  Regenerate: deleted ${deleteResult.deletedCount} unbooked slots, ` +
+    `kept ${keptCount} booked/blocked slots`
+  );
+
+  // ── Step 3: generate fresh slots from the template ───────────────────────
+  const newSlots = doctor.generateSlotsFromTemplate(options);
+
+  if (newSlots.length === 0) {
+    console.log('ℹ️  Regenerate: template has no working periods, nothing to insert');
+    return { deleted: deleteResult.deletedCount, inserted: 0, kept: keptCount };
+  }
+
+  // ── Step 4: filter out any slots that would overlap with kept (booked)
+  // slots so we don't accidentally create a duplicate appointment time.
+  // Index booked/blocked slots by date+startTime for O(1) lookup.
+  const protectedSlots = await AvailabilitySlot.find({
+    doctorId: doctor._id,
+    date: { $gte: todayStart },
+    $or: [
+      { currentBookings: { $gt: 0 } },
+      { status: 'blocked' }
+    ]
+  }).select('date startTime').lean();
+
+  const protectedKeys = new Set();
+  protectedSlots.forEach((s) => {
+    const dateKey = new Date(s.date).toISOString().split('T')[0];
+    protectedKeys.add(`${dateKey}|${s.startTime}`);
+  });
+
+  const slotsToInsert = newSlots.filter((slot) => {
+    const dateKey = new Date(slot.date).toISOString().split('T')[0];
+    return !protectedKeys.has(`${dateKey}|${slot.startTime}`);
+  });
+
+  if (slotsToInsert.length === 0) {
+    console.log('ℹ️  Regenerate: all generated slots conflict with booked/blocked, nothing to insert');
+    return { deleted: deleteResult.deletedCount, inserted: 0, kept: keptCount };
+  }
+
+  // ── Step 5: bulk insert ──────────────────────────────────────────────────
+  let insertedCount = 0;
+  try {
+    const inserted = await AvailabilitySlot.insertMany(slotsToInsert, {
+      ordered: false
+    });
+    insertedCount = inserted.length;
+  } catch (err) {
+    // insertMany with ordered:false may throw a BulkWriteError that still
+    // contains insertedDocs — count what actually made it in.
+    if (err && Array.isArray(err.insertedDocs)) {
+      insertedCount = err.insertedDocs.length;
+      console.warn(
+        `⚠️  Regenerate: ${err.writeErrors?.length || 0} insert errors, ` +
+        `${insertedCount} succeeded`
+      );
+    } else {
+      throw err;
+    }
+  }
+
+  console.log(`✅ Regenerate: inserted ${insertedCount} new slots`);
+
+  return {
+    deleted: deleteResult.deletedCount,
+    inserted: insertedCount,
+    kept: keptCount
+  };
+}
+
+// Export the helper so adminController can call it during approval
+exports.regenerateSlotsForDoctor = regenerateSlotsForDoctor;
+
 // ============================================================================
 // 1. CREATE SLOT (single)
 // ============================================================================
@@ -157,7 +280,7 @@ exports.createSlot = async (req, res) => {
 };
 
 // ============================================================================
-// 2. GENERATE SLOTS (bulk for next N days)
+// 2. GENERATE SLOTS (bulk for next N days — LEGACY v1)
 // ============================================================================
 
 /**
@@ -167,6 +290,10 @@ exports.createSlot = async (req, res) => {
  *          a series of slots from startTime to endTime at slotDuration intervals.
  *
  *          Skips days that already have slots to avoid duplicates.
+ *
+ *          ⚠️  LEGACY: kept for backwards compatibility. New code should use
+ *              POST /api/doctor/schedule-template/regenerate which sources
+ *              from the structured scheduleTemplate.
  * @access  Private (doctor, dentist, lab_technician, admin)
  *
  * Body:
@@ -180,7 +307,7 @@ exports.createSlot = async (req, res) => {
  *   skipExisting?     — default true; skips days that already have slots
  */
 exports.generateSlots = async (req, res) => {
-  console.log('🔵 ========== GENERATE SLOTS ==========');
+  console.log('🔵 ========== GENERATE SLOTS (legacy v1) ==========');
 
   try {
     const owners = resolveOwner(req.body);
@@ -592,6 +719,314 @@ exports.deleteSlot = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'حدث خطأ في حذف الموعد'
+    });
+  }
+};
+
+// ============================================================================
+// 8. GET MY SCHEDULE TEMPLATE — NEW v2 (Calendly-style)
+// ============================================================================
+
+/**
+ * @route   GET /api/doctor/schedule-template
+ * @desc    Return the logged-in doctor's structured schedule template.
+ *          If the doctor has never set one, returns a sane empty default
+ *          so the editor UI can mount without crashing.
+ * @access  Private (Doctor only) — uses injectDoctorContext middleware
+ */
+exports.getScheduleTemplate = async (req, res) => {
+  try {
+    const doctorId = req.doctorId || req.body.doctorId;
+    if (!doctorId) {
+      return res.status(403).json({
+        success: false,
+        message: 'لم يتم تحديد هوية الطبيب'
+      });
+    }
+
+    const doctor = await Doctor.findById(doctorId)
+      .select('scheduleTemplate availableDays')
+      .lean();
+
+    if (!doctor) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على ملف الطبيب'
+      });
+    }
+
+    // Empty-state default — mirrors what the model's default factory would
+    // produce, so the editor renders the same shape whether the doctor has
+    // saved a template before or not.
+    const fallback = {
+      weeklyPattern: {
+        Sunday: [], Monday: [], Tuesday: [], Wednesday: [],
+        Thursday: [], Friday: [], Saturday: []
+      },
+      slotDuration: 20,
+      bufferTime: 0,
+      bookingWindowDays: 30,
+      exceptions: [],
+      isActive: true
+    };
+
+    return res.json({
+      success: true,
+      scheduleTemplate: doctor.scheduleTemplate || fallback,
+      legacyAvailableDays: doctor.availableDays || []
+    });
+  } catch (error) {
+    console.error('❌ getScheduleTemplate error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في جلب جدول العمل'
+    });
+  }
+};
+
+// ============================================================================
+// 9. UPDATE SCHEDULE TEMPLATE — NEW v2
+// ============================================================================
+
+/**
+ * @route   PUT /api/doctor/schedule-template
+ * @desc    Save a new schedule template for the logged-in doctor AND
+ *          regenerate the availability_slots collection from it.
+ *
+ *          Booked + blocked slots are preserved. Only future, unbooked,
+ *          non-blocked slots are deleted and replaced.
+ *
+ * @access  Private (Doctor only) — uses injectDoctorContext middleware
+ *
+ * Body: { scheduleTemplate: {...} } — matches the Doctor.scheduleTemplate
+ *                                     sub-schema shape exactly
+ */
+exports.updateScheduleTemplate = async (req, res) => {
+  console.log('🔵 ========== UPDATE SCHEDULE TEMPLATE ==========');
+
+  try {
+    const doctorId = req.doctorId || req.body.doctorId;
+    if (!doctorId) {
+      return res.status(403).json({
+        success: false,
+        message: 'لم يتم تحديد هوية الطبيب'
+      });
+    }
+
+    const { scheduleTemplate } = req.body;
+    if (!scheduleTemplate || typeof scheduleTemplate !== 'object') {
+      return res.status(400).json({
+        success: false,
+        message: 'بيانات جدول العمل غير صحيحة'
+      });
+    }
+
+    // ── Basic structural validation ──────────────────────────────────────
+    if (!scheduleTemplate.weeklyPattern || typeof scheduleTemplate.weeklyPattern !== 'object') {
+      return res.status(400).json({
+        success: false,
+        message: 'النمط الأسبوعي مفقود من جدول العمل'
+      });
+    }
+
+    const VALID_DAYS = [
+      'Sunday', 'Monday', 'Tuesday', 'Wednesday',
+      'Thursday', 'Friday', 'Saturday'
+    ];
+
+    // Validate each day's periods (HH:MM format + endTime > startTime)
+    const timePattern = /^\d{2}:\d{2}$/;
+    for (const day of VALID_DAYS) {
+      const periods = scheduleTemplate.weeklyPattern[day];
+      if (periods && !Array.isArray(periods)) {
+        return res.status(400).json({
+          success: false,
+          message: `فترات ${day} يجب أن تكون مصفوفة`
+        });
+      }
+      if (Array.isArray(periods)) {
+        for (let i = 0; i < periods.length; i += 1) {
+          const p = periods[i];
+          if (!p || !timePattern.test(p.startTime) || !timePattern.test(p.endTime)) {
+            return res.status(400).json({
+              success: false,
+              message: `صيغة الوقت غير صحيحة في يوم ${day}`
+            });
+          }
+          if (p.endTime <= p.startTime) {
+            return res.status(400).json({
+              success: false,
+              message: `وقت النهاية يجب أن يكون بعد وقت البداية في يوم ${day}`
+            });
+          }
+        }
+      }
+    }
+
+    // Sanity-clamp the numeric settings (defence in depth — the model
+    // schema also enforces these but we want a clear error response)
+    const slotDuration = Math.max(5, Math.min(240, parseInt(scheduleTemplate.slotDuration, 10) || 20));
+    const bufferTime = Math.max(0, Math.min(60, parseInt(scheduleTemplate.bufferTime, 10) || 0));
+    const bookingWindowDays = Math.max(1, Math.min(90, parseInt(scheduleTemplate.bookingWindowDays, 10) || 30));
+
+    // ── Load and update the doctor ───────────────────────────────────────
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على ملف الطبيب'
+      });
+    }
+
+    doctor.scheduleTemplate = {
+      weeklyPattern: scheduleTemplate.weeklyPattern,
+      slotDuration,
+      bufferTime,
+      bookingWindowDays,
+      exceptions: Array.isArray(scheduleTemplate.exceptions) ? scheduleTemplate.exceptions : [],
+      isActive: scheduleTemplate.isActive !== false,
+      updatedAt: new Date()
+    };
+
+    await doctor.save(); // pre-save hook will sync availableDays for backward compat
+
+    console.log(`✅ Template saved for doctor ${doctor._id}`);
+
+    // ── Regenerate slots from the new template ───────────────────────────
+    const result = await regenerateSlotsForDoctor(doctor);
+
+    AuditLog.record({
+      userId: req.user._id,
+      userEmail: req.user.email,
+      action: 'UPDATE_SCHEDULE_TEMPLATE',
+      description: `Updated schedule template and regenerated slots`,
+      resourceType: 'doctor',
+      resourceId: doctor._id,
+      ipAddress: req.ip || 'unknown',
+      success: true,
+      metadata: {
+        slotDuration,
+        bufferTime,
+        bookingWindowDays,
+        slotsDeleted: result.deleted,
+        slotsInserted: result.inserted,
+        slotsKept: result.kept
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: 'تم حفظ جدول العمل وإعادة توليد المواعيد بنجاح',
+      scheduleTemplate: doctor.scheduleTemplate,
+      slots: {
+        deleted: result.deleted,
+        inserted: result.inserted,
+        kept: result.kept
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ updateScheduleTemplate error:', error);
+
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({
+        success: false,
+        message: messages[0] || 'بيانات جدول العمل غير صحيحة'
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'حدث خطأ في حفظ جدول العمل'
+    });
+  }
+};
+
+// ============================================================================
+// 10. REGENERATE SLOTS FROM TEMPLATE — NEW v2
+// ============================================================================
+
+/**
+ * @route   POST /api/doctor/schedule-template/regenerate
+ * @desc    Regenerate the doctor's availability_slots from their CURRENT
+ *          schedule template, without changing the template itself.
+ *
+ *          Useful when the doctor wants to extend the booking window
+ *          forward without editing other settings, or after deleting
+ *          mistaken manual slots.
+ *
+ * @access  Private (Doctor only) — uses injectDoctorContext middleware
+ *
+ * Body (optional): { daysAhead?: number }
+ */
+exports.regenerateFromTemplate = async (req, res) => {
+  console.log('🔵 ========== REGENERATE FROM TEMPLATE ==========');
+
+  try {
+    const doctorId = req.doctorId || req.body.doctorId;
+    if (!doctorId) {
+      return res.status(403).json({
+        success: false,
+        message: 'لم يتم تحديد هوية الطبيب'
+      });
+    }
+
+    const doctor = await Doctor.findById(doctorId);
+    if (!doctor) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على ملف الطبيب'
+      });
+    }
+
+    if (!doctor.scheduleTemplate || !doctor.scheduleTemplate.isActive) {
+      return res.status(400).json({
+        success: false,
+        message: 'لم يتم تعريف جدول عمل فعّال. الرجاء حفظ جدول أولاً.'
+      });
+    }
+
+    // Optional override on the booking window for this regeneration
+    const opts = {};
+    if (req.body && req.body.daysAhead !== undefined) {
+      opts.daysAhead = Math.max(1, Math.min(90, parseInt(req.body.daysAhead, 10)));
+    }
+
+    const result = await regenerateSlotsForDoctor(doctor, opts);
+
+    AuditLog.record({
+      userId: req.user._id,
+      userEmail: req.user.email,
+      action: 'REGENERATE_SLOTS_FROM_TEMPLATE',
+      description: `Regenerated availability slots from existing schedule template`,
+      resourceType: 'doctor',
+      resourceId: doctor._id,
+      ipAddress: req.ip || 'unknown',
+      success: true,
+      metadata: {
+        slotsDeleted: result.deleted,
+        slotsInserted: result.inserted,
+        slotsKept: result.kept,
+        daysAheadOverride: opts.daysAhead || null
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: `تم إعادة توليد ${result.inserted} موعد`,
+      slots: {
+        deleted: result.deleted,
+        inserted: result.inserted,
+        kept: result.kept
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ regenerateFromTemplate error:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'حدث خطأ في إعادة توليد المواعيد'
     });
   }
 };

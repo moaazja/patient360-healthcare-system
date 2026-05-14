@@ -36,6 +36,8 @@ const {
   Hospital, Visit, Person, Children, Patient, AuditLog
 } = require('../models');
 
+const { createNotification } = require('./notificationController');
+
 // ============================================================================
 // HELPERS
 // ============================================================================
@@ -413,6 +415,29 @@ exports.cancelAppointment = async (req, res) => {
       metadata: { reason, notes }
     });
 
+    // ── PUSH NOTIFICATION TO PATIENT ────────────────────────────────────────
+    try {
+      const dateStr = appointment.appointmentDate
+        ? new Date(appointment.appointmentDate).toLocaleDateString('ar-EG')
+        : '';
+      createNotification({
+        recipientPersonId: appointment.patientPersonId,
+        recipientChildId:  appointment.patientChildId,
+        recipientType: 'patient',
+        notificationType: 'appointment_cancelled',
+        title:       'تم إلغاء موعدك',
+        titleArabic: 'تم إلغاء موعدك',
+        body: `تم إلغاء موعدك بتاريخ ${dateStr} الساعة ${appointment.appointmentTime || ''}. يرجى حجز موعد جديد.`,
+        channels: ['push', 'in_app'],
+        relatedType: 'appointment',
+        relatedId:   appointment._id,
+        deepLinkRoute: '/appointments',
+        priority: 'high'
+      }).catch(err => console.warn('⚠️  Notification failed:', err.message));
+    } catch (notifError) {
+      console.warn('⚠️  Notification dispatch error (non-fatal):', notifError.message);
+    }
+
     return res.json({
       success: true,
       message: 'تم إلغاء الموعد'
@@ -454,6 +479,29 @@ exports.confirmAppointment = async (req, res) => {
         success: false,
         message: modelError.message
       });
+    }
+
+    // ── PUSH NOTIFICATION TO PATIENT ────────────────────────────────────────
+    try {
+      const dateStr = appointment.appointmentDate
+        ? new Date(appointment.appointmentDate).toLocaleDateString('ar-EG')
+        : '';
+      createNotification({
+        recipientPersonId: appointment.patientPersonId,
+        recipientChildId:  appointment.patientChildId,
+        recipientType: 'patient',
+        notificationType: 'appointment_confirmed',
+        title:       'تم تأكيد موعدك',
+        titleArabic: 'تم تأكيد موعدك',
+        body: `تم تأكيد موعدك بتاريخ ${dateStr} الساعة ${appointment.appointmentTime || ''}.`,
+        channels: ['push', 'in_app'],
+        relatedType: 'appointment',
+        relatedId:   appointment._id,
+        deepLinkRoute: '/appointments',
+        priority: 'normal'
+      }).catch(err => console.warn('⚠️  Notification failed:', err.message));
+    } catch (notifError) {
+      console.warn('⚠️  Notification dispatch error (non-fatal):', notifError.message);
     }
 
     return res.json({

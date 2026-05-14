@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+/// location
 /// Captured GPS reading attached to an emergency submission. Mirrors the
 /// schema's GeoJSON `location` document but flattens it into a value
 /// type the UI can render directly.
@@ -47,7 +48,7 @@ class EmergencyLocation {
   final String? address;
 
   Map<String, dynamic> toCoordsJson() => <String, dynamic>{
-        'lat': lat,
-        'lng': lng,
-      };
+    'lat': lat,
+    'lng': lng,
+  };
 }

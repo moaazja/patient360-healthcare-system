@@ -227,6 +227,146 @@ function buildFullName(identity) {
 
 
 // ══════════════════════════════════════════════════════════════════════
+// Medical Records System (pdmr-*) — shared helpers
+// ──────────────────────────────────────────────────────────────────────
+// These power the new Search + Filter + Date-grouping pattern used by
+// the appointments / visits / prescriptions / lab-results sections.
+// All four sections share the same toolbar UX and grouping logic, so
+// the helpers are kept generic (pass in the date field name + search
+// field names per section).
+// ══════════════════════════════════════════════════════════════════════
+
+// Smart period filter — keep records whose date falls inside the window.
+// Returns a millisecond cutoff or null for 'all'.
+function getPeriodCutoff(period) {
+  if (!period || period === 'all') return null;
+  const now = Date.now();
+  const day = 24 * 60 * 60 * 1000;
+  switch (period) {
+    case 'week':    return now - 7 * day;
+    case 'month':   return now - 30 * day;
+    case '3months': return now - 90 * day;
+    case 'year':    return now - 365 * day;
+    default:        return null;
+  }
+}
+
+// Generic filter + sort. Pure function, safe inside useMemo.
+//   items         — array
+//   search        — user-typed query (case-insensitive, Arabic-aware)
+//   searchFields  — list of property paths to scan inside each item
+//                   e.g. ['reasonForVisit', 'doctor.firstName']
+//   period        — 'all'|'week'|'month'|'3months'|'year'
+//   dateField     — property name to read for date-based comparisons
+//   sortOrder     — 'newest'|'oldest'
+function filterAndSortItems({
+  items,
+  search,
+  searchFields,
+  period,
+  dateField,
+  sortOrder = 'newest',
+}) {
+  if (!Array.isArray(items)) return [];
+
+  const q = (search || '').trim().toLowerCase();
+  const cutoff = getPeriodCutoff(period);
+
+  // Resolve a possibly-nested path like "a.b.c" off an object.
+  const readPath = (obj, path) => {
+    if (!obj || !path) return '';
+    return path.split('.').reduce(
+      (acc, key) => (acc == null ? acc : acc[key]),
+      obj
+    );
+  };
+
+  const filtered = items.filter((it) => {
+    // Period gate
+    if (cutoff && dateField) {
+      const raw = it?.[dateField];
+      const t = raw ? new Date(raw).getTime() : 0;
+      if (!t || t < cutoff) return false;
+    }
+
+    // Search gate
+    if (q && Array.isArray(searchFields) && searchFields.length > 0) {
+      const hit = searchFields.some((field) => {
+        const v = readPath(it, field);
+        if (v == null) return false;
+        return String(v).toLowerCase().includes(q);
+      });
+      if (!hit) return false;
+    }
+
+    return true;
+  });
+
+  // Sort by date (newest/oldest)
+  if (dateField) {
+    filtered.sort((a, b) => {
+      const ta = a?.[dateField] ? new Date(a[dateField]).getTime() : 0;
+      const tb = b?.[dateField] ? new Date(b[dateField]).getTime() : 0;
+      return sortOrder === 'oldest' ? ta - tb : tb - ta;
+    });
+  }
+
+  return filtered;
+}
+
+// Smart date bucketing. Returns ordered groups so the caller can render
+// each one with its own header ("اليوم"، "غداً"، ...). Empty groups are
+// dropped before return so the UI never renders an empty section.
+function groupByDate(items, dateField) {
+  const buckets = {
+    today:     [],
+    tomorrow:  [],
+    thisWeek:  [],
+    thisMonth: [],
+    older:     [],
+  };
+
+  if (!Array.isArray(items)) return [];
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfTomorrow = startOfToday + 24 * 60 * 60 * 1000;
+  const startOfDayAfter = startOfTomorrow + 24 * 60 * 60 * 1000;
+  const startOfWeekAhead = startOfToday + 7 * 24 * 60 * 60 * 1000;
+  const startOfMonthAhead = startOfToday + 30 * 24 * 60 * 60 * 1000;
+
+  items.forEach((it) => {
+    const raw = it?.[dateField];
+    const t = raw ? new Date(raw).getTime() : 0;
+    if (!t) {
+      buckets.older.push(it);
+      return;
+    }
+    if (t >= startOfToday && t < startOfTomorrow)       buckets.today.push(it);
+    else if (t >= startOfTomorrow && t < startOfDayAfter) buckets.tomorrow.push(it);
+    else if (t >= startOfDayAfter && t < startOfWeekAhead) buckets.thisWeek.push(it);
+    else if (t >= startOfWeekAhead && t < startOfMonthAhead) buckets.thisMonth.push(it);
+    else                                                  buckets.older.push(it);
+  });
+
+  // Order matters — present soonest first.
+  const order = ['today', 'tomorrow', 'thisWeek', 'thisMonth', 'older'];
+  return order
+    .filter((key) => buckets[key].length > 0)
+    .map((key) => ({ key, items: buckets[key] }));
+}
+
+// Human-facing Arabic labels for the smart date buckets.
+const DATE_GROUP_LABELS = {
+  today:     'اليوم',
+  tomorrow:  'غداً',
+  thisWeek:  'هذا الأسبوع',
+  thisMonth: 'هذا الشهر',
+  older:     'سابق',
+};
+
+
+// ══════════════════════════════════════════════════════════════════════
 // Modal primitive
 // ══════════════════════════════════════════════════════════════════════
 
@@ -883,11 +1023,35 @@ export default function PatientDashboard() {
   const navigate = useNavigate();
 
   // ── Layout state ────────────────────────────────────────────────────
-  const [activeSection, setActiveSection] = useState('home');
+  // activeSection is persisted in sessionStorage so that:
+  //   1. The back button from detail pages (visit / appointment / Rx / lab)
+  //      lands back on the SAME section the patient was browsing, not on
+  //      'home'. Without this, React remounts the dashboard fresh on the
+  //      browser-back and resets activeSection to the default.
+  //   2. A page refresh within the same tab keeps the user in place.
+  //   3. Logout clears sessionStorage, so the next login starts on 'home'.
+  const [activeSection, setActiveSection] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('pd-active-section');
+      if (saved && SECTION_META[saved]) return saved;
+    } catch {
+      /* sessionStorage may be unavailable in some private-browsing modes */
+    }
+    return 'home';
+  });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(
     () => localStorage.getItem('pd-theme') === 'dark'
   );
+
+  // Persist the section so the back-button + page-refresh both restore it.
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('pd-active-section', activeSection);
+    } catch {
+      /* silent — section restoration is a nice-to-have */
+    }
+  }, [activeSection]);
 
   // ── Profile + overview (loaded on mount, in parallel) ───────────────
   const [profile, setProfile] = useState(null);
@@ -900,23 +1064,45 @@ export default function PatientDashboard() {
   const [appointmentsLoading, setAppointmentsLoading] = useState(false);
   const [appointmentsLoaded, setAppointmentsLoaded] = useState(false);
   const [appointmentTab, setAppointmentTab] = useState('upcoming');
+  // ── Universal Medical Records System (pdmr-*) — per-section filter state
+  // search:  user-typed query
+  // view:    'list' | 'cards'  (Hybrid Toggle simplified to 2 views)
+  // period:  'all' | 'week' | 'month' | '3months' | 'year'
+  // sort:    'newest' | 'oldest'
+  const [apptSearch, setApptSearch] = useState('');
+  const [apptView,   setApptView]   = useState('list');
+  const [apptPeriod, setApptPeriod] = useState('all');
+  const [apptSort,   setApptSort]   = useState('newest');
 
   const [visits, setVisits] = useState([]);
   const [visitsLoading, setVisitsLoading] = useState(false);
   const [visitsLoaded, setVisitsLoaded] = useState(false);
-  const [expandedVisits, setExpandedVisits] = useState(() => new Set());
+  // Universal Medical Records System (pdmr-*) state — same shape as appointments.
+  const [visitTab,    setVisitTab]    = useState('all');
+  const [visitSearch, setVisitSearch] = useState('');
+  const [visitView,   setVisitView]   = useState('list');
+  const [visitPeriod, setVisitPeriod] = useState('all');
+  const [visitSort,   setVisitSort]   = useState('newest');
 
   const [prescriptions, setPrescriptions] = useState([]);
   const [prescriptionsLoading, setPrescriptionsLoading] = useState(false);
   const [prescriptionsLoaded, setPrescriptionsLoaded] = useState(false);
-  const [prescriptionTab, setPrescriptionTab] = useState('active');
-  const [expandedPrescriptions, setExpandedPrescriptions] = useState(() => new Set());
+  // Universal Medical Records System state — same shape as visits/appointments.
+  const [prescriptionTab,    setPrescriptionTab]    = useState('active');
+  const [prescriptionSearch, setPrescriptionSearch] = useState('');
+  const [prescriptionView,   setPrescriptionView]   = useState('list');
+  const [prescriptionPeriod, setPrescriptionPeriod] = useState('all');
+  const [prescriptionSort,   setPrescriptionSort]   = useState('newest');
 
   const [labTests, setLabTests] = useState([]);
   const [labTestsLoading, setLabTestsLoading] = useState(false);
   const [labTestsLoaded, setLabTestsLoaded] = useState(false);
-  const [labTestTab, setLabTestTab] = useState('results');
-  const [expandedLabTests, setExpandedLabTests] = useState(() => new Set());
+  // Universal Medical Records System state — same shape as other sections.
+  const [labTestTab,    setLabTestTab]    = useState('results');
+  const [labTestSearch, setLabTestSearch] = useState('');
+  const [labTestView,   setLabTestView]   = useState('list');
+  const [labTestPeriod, setLabTestPeriod] = useState('all');
+  const [labTestSort,   setLabTestSort]   = useState('newest');
 
   const [notifications, setNotifications] = useState([]);
   const [notificationsLoading, setNotificationsLoading] = useState(false);
@@ -1649,11 +1835,79 @@ const handleLogout = useCallback(() => {
     cancelled: ['cancelled', 'no_show', 'rescheduled'],
   };
 
+  // Maps backend enum → Arabic label. The old version showed raw
+  // English enums in the status badge (visible bug in screenshot #1).
+  const APPOINTMENT_STATUS_LABELS = {
+    scheduled:    'مجدول',
+    confirmed:    'مؤكد',
+    checked_in:   'تم الحضور',
+    in_progress:  'جارٍ',
+    completed:    'مكتمل',
+    cancelled:    'ملغى',
+    no_show:      'لم يحضر',
+    rescheduled:  'أُعيد جدولته',
+  };
+
+  // Maps appointment status → status-badge color variant (pdmr-status--*)
+  const APPOINTMENT_STATUS_VARIANTS = {
+    scheduled:    'info',
+    confirmed:    'success',
+    checked_in:   'info',
+    in_progress:  'warning',
+    completed:    'success',
+    cancelled:    'danger',
+    no_show:      'danger',
+    rescheduled:  'muted',
+  };
+
+  const APPOINTMENT_TABS = [
+    { key: 'upcoming',  label: 'القادمة' },
+    { key: 'past',      label: 'السابقة' },
+    { key: 'cancelled', label: 'الملغاة' },
+  ];
+
+  const APPOINTMENT_PERIODS = [
+    { key: 'all',     label: 'كل الفترات' },
+    { key: 'week',    label: 'آخر أسبوع' },
+    { key: 'month',   label: 'آخر شهر' },
+    { key: '3months', label: 'آخر 3 أشهر' },
+    { key: 'year',    label: 'آخر سنة' },
+  ];
+
   const renderAppointments = () => {
-    const filteredAppointments = appointments.filter((appt) =>
+    // 1) Apply tab (status group) filter first.
+    const inTab = appointments.filter((appt) =>
       APPOINTMENT_STATUS_GROUPS[appointmentTab]?.includes(appt.status)
     );
 
+    // 2) Per-tab counts (rendered as small badges on each tab).
+    const tabCounts = {
+      upcoming:  appointments.filter((a) => APPOINTMENT_STATUS_GROUPS.upcoming.includes(a.status)).length,
+      past:      appointments.filter((a) => APPOINTMENT_STATUS_GROUPS.past.includes(a.status)).length,
+      cancelled: appointments.filter((a) => APPOINTMENT_STATUS_GROUPS.cancelled.includes(a.status)).length,
+    };
+
+    // 3) Then apply search + period + sort.
+    const filtered = filterAndSortItems({
+      items:        inTab,
+      search:       apptSearch,
+      searchFields: ['reasonForVisit', 'doctorName', 'doctor.firstName', 'doctor.lastName', 'doctor.specialization'],
+      period:       apptPeriod,
+      dateField:    'appointmentDate',
+      sortOrder:    apptSort,
+    });
+
+    // 4) Group by date bucket for the list view header dividers.
+    const grouped = groupByDate(filtered, 'appointmentDate');
+
+    // 5) Active-filter chips ("Period: آخر شهر  ×") — show only when not default.
+    const activeFilters = [];
+    if (apptSearch.trim())            activeFilters.push({ key: 'search', label: `بحث: ${apptSearch.trim()}`, clear: () => setApptSearch('') });
+    if (apptPeriod !== 'all')         activeFilters.push({ key: 'period', label: APPOINTMENT_PERIODS.find((p) => p.key === apptPeriod)?.label || apptPeriod, clear: () => setApptPeriod('all') });
+    if (apptSort !== 'newest')        activeFilters.push({ key: 'sort',   label: 'الأقدم أولاً', clear: () => setApptSort('newest') });
+    const clearAllFilters = () => { setApptSearch(''); setApptPeriod('all'); setApptSort('newest'); };
+
+    // 6) Booking + cancellation handlers (unchanged from the original).
     const openBookingFlow = () => {
       openCustomModal('حجز موعد جديد', (
         <AppointmentBookingFlow
@@ -1694,92 +1948,260 @@ const handleLogout = useCallback(() => {
       ));
     };
 
+    // 7) Open the detail page — pass the appointment via location.state
+    //    so it renders instantly without an extra round-trip.
+    const openDetail = (appt) => {
+      navigate(`/patient-dashboard/appointments/${appt._id}`, { state: { appointment: appt } });
+    };
+
+    // 8) Single-card renderer. Used in both list and card views; the
+    //    parent container's layout class (.pdmr-list / .pdmr-grid)
+    //    controls grid vs vertical stack.
+    const renderAppointmentCard = (appt) => {
+      const isUpcoming = APPOINTMENT_STATUS_GROUPS.upcoming.includes(appt.status);
+      const statusLabel  = APPOINTMENT_STATUS_LABELS[appt.status]   || appt.status;
+      const statusVariant = APPOINTMENT_STATUS_VARIANTS[appt.status] || 'muted';
+      const priorityLabel = appt.priority === 'emergency' ? 'طارئ' : appt.priority === 'urgent' ? 'عاجل' : null;
+
+      return (
+        <li key={appt._id} className="pdmr-card">
+          <button
+            type="button"
+            className="pdmr-card-head"
+            onClick={() => openDetail(appt)}
+            aria-label={`عرض تفاصيل: ${appt.reasonForVisit || 'موعد طبي'}`}
+          >
+            <div className="pdmr-card-icon" aria-hidden="true">
+              <Calendar size={20} />
+            </div>
+
+            <div className="pdmr-card-body">
+              <div className="pdmr-card-title-row">
+                <h3 className="pdmr-card-title" dir="auto">
+                  {appt.reasonForVisit || 'موعد طبي'}
+                </h3>
+                <span className={`pdmr-status pdmr-status--${statusVariant}`}>
+                  {statusLabel}
+                </span>
+              </div>
+
+              <div className="pdmr-card-meta">
+                <span className="pdmr-card-meta-item" dir="ltr">
+                  <Calendar size={13} aria-hidden="true" />
+                  <time dateTime={appt.appointmentDate}>{formatDate(appt.appointmentDate)}</time>
+                </span>
+                {appt.appointmentTime && (
+                  <span className="pdmr-card-meta-item" dir="ltr">
+                    <Clock size={13} aria-hidden="true" />
+                    <span>{appt.appointmentTime}</span>
+                  </span>
+                )}
+                {priorityLabel && (
+                  <span className={`pdmr-priority pdmr-priority--${appt.priority}`}>
+                    <AlertTriangle size={11} aria-hidden="true" />
+                    <span>{priorityLabel}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <ChevronLeft className="pdmr-card-chevron" size={18} aria-hidden="true" />
+          </button>
+
+          {isUpcoming && (
+            <div className="pdmr-card-actions">
+              <button
+                type="button"
+                className="pdmr-action pdmr-action--danger"
+                onClick={(e) => { e.stopPropagation(); openCancelFlow(appt); }}
+              >
+                <XCircle size={14} aria-hidden="true" />
+                <span>إلغاء الموعد</span>
+              </button>
+            </div>
+          )}
+        </li>
+      );
+    };
+
     return (
-      <div className="pd-appointments">
-        <div className="pd-section-toolbar">
-          <div className="pd-tabs" role="tablist">
-            {[
-              { key: 'upcoming',  label: 'القادمة'  },
-              { key: 'past',      label: 'السابقة'   },
-              { key: 'cancelled', label: 'الملغاة'   },
-            ].map(({ key, label }) => (
+      <div className="pd-appointments pdmr-section">
+
+        {/* ── Universal toolbar — search + view + filters + sort ───── */}
+        <div className="pdmr-toolbar" role="toolbar" aria-label="أدوات تصفية المواعيد">
+          {/* Row 1: Search + view-toggle + sort + new-appointment CTA */}
+          <div className="pdmr-toolbar-main">
+            <div className="pdmr-search">
+              <Search size={16} aria-hidden="true" className="pdmr-search-icon" />
+              <input
+                type="search"
+                className="pdmr-search-input"
+                placeholder="ابحث في المواعيد..."
+                value={apptSearch}
+                onChange={(e) => setApptSearch(e.target.value)}
+                dir="auto"
+                aria-label="بحث"
+              />
+              {apptSearch && (
+                <button
+                  type="button"
+                  className="pdmr-search-clear"
+                  onClick={() => setApptSearch('')}
+                  aria-label="مسح البحث"
+                >
+                  <X size={14} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+
+            <div className="pdmr-view-toggle" role="group" aria-label="طريقة العرض">
+              <button
+                type="button"
+                className={`pdmr-view-btn${apptView === 'list' ? ' is-active' : ''}`}
+                onClick={() => setApptView('list')}
+                aria-pressed={apptView === 'list'}
+                title="عرض قائمة"
+              >
+                <Menu size={15} aria-hidden="true" />
+                <span>قائمة</span>
+              </button>
+              <button
+                type="button"
+                className={`pdmr-view-btn${apptView === 'cards' ? ' is-active' : ''}`}
+                onClick={() => setApptView('cards')}
+                aria-pressed={apptView === 'cards'}
+                title="عرض بطاقات"
+              >
+                <FileText size={15} aria-hidden="true" />
+                <span>بطاقات</span>
+              </button>
+            </div>
+
+            <select
+              className="pdmr-sort"
+              value={apptSort}
+              onChange={(e) => setApptSort(e.target.value)}
+              aria-label="ترتيب"
+            >
+              <option value="newest">الأحدث أولاً</option>
+              <option value="oldest">الأقدم أولاً</option>
+            </select>
+
+            <button type="button" className="pd-btn pd-btn--primary pdmr-cta" onClick={openBookingFlow}>
+              <Plus size={16} aria-hidden="true" />
+              <span>حجز موعد جديد</span>
+            </button>
+          </div>
+
+          {/* Row 2: Status tabs (counts) */}
+          <div className="pdmr-chips" role="tablist" aria-label="حالة الموعد">
+            {APPOINTMENT_TABS.map(({ key, label }) => (
               <button
                 key={key}
                 type="button"
                 role="tab"
                 aria-selected={appointmentTab === key}
-                className={`pd-tab${appointmentTab === key ? ' is-active' : ''}`}
+                className={`pdmr-chip${appointmentTab === key ? ' is-active' : ''}`}
                 onClick={() => setAppointmentTab(key)}
+              >
+                <span>{label}</span>
+                <span className="pdmr-chip-count" aria-label={`${tabCounts[key]} موعد`}>
+                  {tabCounts[key]}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* Row 3: Period filter */}
+          <div className="pdmr-chips pdmr-chips--secondary" role="group" aria-label="الفترة الزمنية">
+            {APPOINTMENT_PERIODS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                className={`pdmr-chip pdmr-chip--ghost${apptPeriod === key ? ' is-active' : ''}`}
+                onClick={() => setApptPeriod(key)}
+                aria-pressed={apptPeriod === key}
               >
                 {label}
               </button>
             ))}
           </div>
-          <button type="button" className="pd-btn pd-btn--primary" onClick={openBookingFlow}>
-            <Plus size={16} aria-hidden="true" />
-            <span>حجز موعد جديد</span>
-          </button>
+
+          {/* Row 4: Active filters (only when non-default) */}
+          {activeFilters.length > 0 && (
+            <div className="pdmr-active-filters" aria-label="الفلاتر المُفعّلة">
+              <span className="pdmr-active-filters-label">
+                <Filter size={13} aria-hidden="true" />
+                <span>الفلاتر:</span>
+              </span>
+              {activeFilters.map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  className="pdmr-active-filter"
+                  onClick={f.clear}
+                  aria-label={`إزالة فلتر: ${f.label}`}
+                >
+                  <span>{f.label}</span>
+                  <X size={12} aria-hidden="true" />
+                </button>
+              ))}
+              <button
+                type="button"
+                className="pdmr-clear-all"
+                onClick={clearAllFilters}
+              >
+                مسح الكل
+              </button>
+            </div>
+          )}
         </div>
 
+        {/* ── Content — loading / empty / grouped list / card grid ── */}
         {appointmentsLoading ? (
           <div className="pd-section-loading">
             <LoadingSpinner message="جاري تحميل المواعيد..." />
           </div>
-        ) : filteredAppointments.length === 0 ? (
-          <EmptyState
-            icon={Calendar}
-            title="لا توجد مواعيد"
-            subtitle={
-              appointmentTab === 'upcoming'
-                ? 'احجز موعدك الأول من الزر أعلاه.'
-                : 'ستظهر هنا عند توفرها.'
-            }
-            cta={appointmentTab === 'upcoming' ? { label: 'حجز موعد', onClick: openBookingFlow } : undefined}
-          />
+        ) : filtered.length === 0 ? (
+          inTab.length === 0 ? (
+            <EmptyState
+              icon={Calendar}
+              title="لا توجد مواعيد"
+              subtitle={
+                appointmentTab === 'upcoming'
+                  ? 'احجز موعدك الأول من الزر أعلاه.'
+                  : 'ستظهر هنا عند توفرها.'
+              }
+              cta={appointmentTab === 'upcoming' ? { label: 'حجز موعد', onClick: openBookingFlow } : undefined}
+            />
+          ) : (
+            <EmptyState
+              icon={Search}
+              title="لا نتائج مطابقة"
+              subtitle="جرّب تغيير الفلاتر أو مصطلح البحث."
+              cta={{ label: 'مسح الفلاتر', onClick: clearAllFilters }}
+            />
+          )
+        ) : apptView === 'list' ? (
+          // ── List view: grouped by smart date buckets ─────────────
+          <div className="pdmr-groups">
+            {grouped.map((group) => (
+              <section key={group.key} className="pdmr-group">
+                <h3 className="pdmr-group-header">
+                  <Calendar size={14} aria-hidden="true" />
+                  <span>{DATE_GROUP_LABELS[group.key]}</span>
+                  <span className="pdmr-group-count">{group.items.length}</span>
+                </h3>
+                <ul className="pdmr-list">
+                  {group.items.map(renderAppointmentCard)}
+                </ul>
+              </section>
+            ))}
+          </div>
         ) : (
-          <ul className="pd-appointment-list">
-            {filteredAppointments.map((appt) => {
-              const isUpcoming = APPOINTMENT_STATUS_GROUPS.upcoming.includes(appt.status);
-              return (
-                <li key={appt._id} className="pd-appointment-card">
-                  <div className="pd-appointment-card-head">
-                    <div className="pd-appointment-card-icon" aria-hidden="true">
-                      <Calendar size={20} />
-                    </div>
-                    <div className="pd-appointment-card-title">
-                      <h3 dir="auto">{appt.reasonForVisit || 'موعد طبي'}</h3>
-                      <span className={`pd-appointment-status pd-appointment-status--${appt.status}`}>
-                        {appt.status}
-                      </span>
-                    </div>
-                    {appt.priority && appt.priority !== 'routine' && (
-                      <span className={`pd-appointment-priority pd-appointment-priority--${appt.priority}`}>
-                        {appt.priority === 'emergency' ? 'طارئ' : 'عاجل'}
-                      </span>
-                    )}
-                  </div>
-                  <div className="pd-appointment-card-body">
-                    <p className="pd-appointment-meta">
-                      <Clock size={14} aria-hidden="true" />
-                      <span dir="ltr">{formatDate(appt.appointmentDate)}</span>
-                      <span dir="ltr">{appt.appointmentTime}</span>
-                    </p>
-                  </div>
-                  {isUpcoming && (
-                    <div className="pd-appointment-card-actions">
-                      <button
-                        type="button"
-                        className="pd-btn pd-btn--ghost pd-btn--danger"
-                        onClick={() => openCancelFlow(appt)}
-                      >
-                        <XCircle size={16} aria-hidden="true" />
-                        <span>إلغاء الموعد</span>
-                      </button>
-                    </div>
-                  )}
-                </li>
-              );
-            })}
+          // ── Cards view: simple grid, no grouping ────────────────
+          <ul className="pdmr-grid">
+            {filtered.map(renderAppointmentCard)}
           </ul>
         )}
       </div>
@@ -1790,15 +2212,6 @@ const handleLogout = useCallback(() => {
   // ════════════════════════════════════════════════════════════════════
   // Visits section
   // ════════════════════════════════════════════════════════════════════
-
-  const toggleVisit = (visitId) => {
-    setExpandedVisits((prev) => {
-      const next = new Set(prev);
-      if (next.has(visitId)) next.delete(visitId);
-      else next.add(visitId);
-      return next;
-    });
-  };
 
   const VISIT_TYPE_LABELS = {
     regular:      'زيارة اعتيادية',
@@ -1815,259 +2228,312 @@ const handleLogout = useCallback(() => {
     cancelled:   'ملغاة',
   };
 
-  const PAYMENT_STATUS_LABELS = {
-    paid:            'مدفوع',
-    pending:         'بانتظار الدفع',
-    partially_paid:  'مدفوع جزئياً',
-    cancelled:       'ملغى',
-    free:            'مجاني',
+  const VISIT_STATUS_VARIANTS = {
+    in_progress: 'warning',
+    completed:   'success',
+    cancelled:   'danger',
   };
 
-  const renderVitalSigns = (vitals) => {
-    if (!vitals || typeof vitals !== 'object') return null;
-    const items = [
-      { key: 'bloodPressureSystolic',  label: 'ضغط الدم الانقباضي',  value: vitals.bloodPressureSystolic,  unit: 'mmHg'        },
-      { key: 'bloodPressureDiastolic', label: 'ضغط الدم الانبساطي',  value: vitals.bloodPressureDiastolic, unit: 'mmHg'        },
-      { key: 'heartRate',              label: 'النبض',                  value: vitals.heartRate,              unit: 'نبضة/دقيقة' },
-      { key: 'oxygenSaturation',       label: 'الأكسجين',                value: vitals.oxygenSaturation,       unit: '%'           },
-      { key: 'bloodGlucose',           label: 'سكر الدم',                value: vitals.bloodGlucose,           unit: 'mg/dL'       },
-      { key: 'temperature',            label: 'الحرارة',                  value: vitals.temperature,            unit: '°C'          },
-      { key: 'weight',                 label: 'الوزن',                    value: vitals.weight,                 unit: 'كغ'           },
-      { key: 'height',                 label: 'الطول',                    value: vitals.height,                 unit: 'سم'           },
-      { key: 'respiratoryRate',        label: 'التنفس',                   value: vitals.respiratoryRate,        unit: 'نفس/دقيقة'  },
-    ].filter((i) => i.value !== undefined && i.value !== null);
+  // Visits tab groups — same shape as appointments. 'all' shows everything.
+  const VISIT_STATUS_GROUPS = {
+    all:         ['in_progress', 'completed', 'cancelled'],
+    in_progress: ['in_progress'],
+    completed:   ['completed'],
+    cancelled:   ['cancelled'],
+  };
 
-    if (items.length === 0) return null;
+  const VISIT_TABS = [
+    { key: 'all',         label: 'الكل' },
+    { key: 'in_progress', label: 'جارية' },
+    { key: 'completed',   label: 'مكتملة' },
+    { key: 'cancelled',   label: 'ملغاة' },
+  ];
+
+  const VISIT_PERIODS = [
+    { key: 'all',     label: 'كل الفترات' },
+    { key: 'week',    label: 'آخر أسبوع' },
+    { key: 'month',   label: 'آخر شهر' },
+    { key: '3months', label: 'آخر 3 أشهر' },
+    { key: 'year',    label: 'آخر سنة' },
+  ];
+
+  const renderVisits = () => {
+    // 1) Tab filter
+    const inTab = visits.filter((v) =>
+      VISIT_STATUS_GROUPS[visitTab]?.includes(v.status)
+    );
+
+    // 2) Per-tab counts
+    const tabCounts = {
+      all:         visits.length,
+      in_progress: visits.filter((v) => v.status === 'in_progress').length,
+      completed:   visits.filter((v) => v.status === 'completed').length,
+      cancelled:   visits.filter((v) => v.status === 'cancelled').length,
+    };
+
+    // 3) Search + period + sort
+    const filtered = filterAndSortItems({
+      items:        inTab,
+      search:       visitSearch,
+      searchFields: ['chiefComplaint', 'diagnosis', 'doctorName', 'doctor.firstName', 'doctor.lastName', 'doctor.specialization'],
+      period:       visitPeriod,
+      dateField:    'visitDate',
+      sortOrder:    visitSort,
+    });
+
+    // 4) Group by date for list view
+    const grouped = groupByDate(filtered, 'visitDate');
+
+    // 5) Active filter chips
+    const activeFilters = [];
+    if (visitSearch.trim())     activeFilters.push({ key: 'search', label: `بحث: ${visitSearch.trim()}`, clear: () => setVisitSearch('') });
+    if (visitPeriod !== 'all')  activeFilters.push({ key: 'period', label: VISIT_PERIODS.find((p) => p.key === visitPeriod)?.label || visitPeriod, clear: () => setVisitPeriod('all') });
+    if (visitSort !== 'newest') activeFilters.push({ key: 'sort',   label: 'الأقدم أولاً', clear: () => setVisitSort('newest') });
+    const clearAllFilters = () => { setVisitSearch(''); setVisitPeriod('all'); setVisitSort('newest'); };
+
+    // 6) Navigation to detail page — pass visit in state for fast render
+    const openDetail = (visit) => {
+      navigate(`/patient-dashboard/visits/${visit._id}`, { state: { visit } });
+    };
+
+    // 7) Single-card renderer (shared between list + cards views)
+    const renderVisitCard = (visit) => {
+      const typeLabel    = VISIT_TYPE_LABELS[visit.visitType] || 'زيارة';
+      const statusLabel  = VISIT_STATUS_LABELS[visit.status]  || visit.status;
+      const statusVariant = VISIT_STATUS_VARIANTS[visit.status] || 'muted';
+
+      // Tiny doctor-name display — uses the same graceful fallback chain
+      // as the appointment card.
+      const doctorName =
+        (visit.doctor && [visit.doctor.firstName, visit.doctor.lastName].filter(Boolean).join(' '))
+        || visit.doctorName
+        || null;
+
+      return (
+        <li key={visit._id} className="pdmr-card">
+          <button
+            type="button"
+            className="pdmr-card-head"
+            onClick={() => openDetail(visit)}
+            aria-label={`عرض تفاصيل: ${visit.chiefComplaint || typeLabel}`}
+          >
+            <div className="pdmr-card-icon" aria-hidden="true">
+              <Stethoscope size={20} />
+            </div>
+
+            <div className="pdmr-card-body">
+              <div className="pdmr-card-title-row">
+                <h3 className="pdmr-card-title" dir="auto">
+                  {visit.chiefComplaint || typeLabel}
+                </h3>
+                <span className={`pdmr-status pdmr-status--${statusVariant}`}>
+                  {statusLabel}
+                </span>
+              </div>
+
+              <div className="pdmr-card-meta">
+                <span className="pdmr-card-meta-item" dir="ltr">
+                  <Calendar size={13} aria-hidden="true" />
+                  <time dateTime={visit.visitDate}>{formatDate(visit.visitDate)}</time>
+                </span>
+                <span className="pdmr-card-meta-item">
+                  <Activity size={13} aria-hidden="true" />
+                  <span>{typeLabel}</span>
+                </span>
+                {doctorName && (
+                  <span className="pdmr-card-meta-item" dir="auto">
+                    <Stethoscope size={13} aria-hidden="true" />
+                    <span>{doctorName}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <ChevronLeft className="pdmr-card-chevron" size={18} aria-hidden="true" />
+          </button>
+        </li>
+      );
+    };
 
     return (
-      <dl className="pd-visit-vitals">
-        {items.map((item) => (
-          <div key={item.key} className="pd-visit-vital">
-            <dt className="pd-visit-vital-label">{item.label}</dt>
-            <dd className="pd-visit-vital-value" dir="ltr">
-              {item.value}{' '}
-              <span className="pd-visit-vital-unit">{item.unit}</span>
-            </dd>
+      <div className="pd-visits pdmr-section">
+
+        {/* ── Universal toolbar — search + view + tabs + period ───── */}
+        <div className="pdmr-toolbar" role="toolbar" aria-label="أدوات تصفية الزيارات">
+          {/* Row 1: Search + view-toggle + sort */}
+          <div className="pdmr-toolbar-main">
+            <div className="pdmr-search">
+              <Search size={16} aria-hidden="true" className="pdmr-search-icon" />
+              <input
+                type="search"
+                className="pdmr-search-input"
+                placeholder="ابحث في الزيارات (تشخيص، طبيب، شكوى)..."
+                value={visitSearch}
+                onChange={(e) => setVisitSearch(e.target.value)}
+                dir="auto"
+                aria-label="بحث"
+              />
+              {visitSearch && (
+                <button
+                  type="button"
+                  className="pdmr-search-clear"
+                  onClick={() => setVisitSearch('')}
+                  aria-label="مسح البحث"
+                >
+                  <X size={14} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+
+            <div className="pdmr-view-toggle" role="group" aria-label="طريقة العرض">
+              <button
+                type="button"
+                className={`pdmr-view-btn${visitView === 'list' ? ' is-active' : ''}`}
+                onClick={() => setVisitView('list')}
+                aria-pressed={visitView === 'list'}
+                title="عرض قائمة"
+              >
+                <Menu size={15} aria-hidden="true" />
+                <span>قائمة</span>
+              </button>
+              <button
+                type="button"
+                className={`pdmr-view-btn${visitView === 'cards' ? ' is-active' : ''}`}
+                onClick={() => setVisitView('cards')}
+                aria-pressed={visitView === 'cards'}
+                title="عرض بطاقات"
+              >
+                <FileText size={15} aria-hidden="true" />
+                <span>بطاقات</span>
+              </button>
+            </div>
+
+            <select
+              className="pdmr-sort"
+              value={visitSort}
+              onChange={(e) => setVisitSort(e.target.value)}
+              aria-label="ترتيب"
+            >
+              <option value="newest">الأحدث أولاً</option>
+              <option value="oldest">الأقدم أولاً</option>
+            </select>
           </div>
-        ))}
-      </dl>
+
+          {/* Row 2: Status tabs */}
+          <div className="pdmr-chips" role="tablist" aria-label="حالة الزيارة">
+            {VISIT_TABS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={visitTab === key}
+                className={`pdmr-chip${visitTab === key ? ' is-active' : ''}`}
+                onClick={() => setVisitTab(key)}
+              >
+                <span>{label}</span>
+                <span className="pdmr-chip-count" aria-label={`${tabCounts[key]} زيارة`}>
+                  {tabCounts[key]}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* Row 3: Period filter */}
+          <div className="pdmr-chips pdmr-chips--secondary" role="group" aria-label="الفترة الزمنية">
+            {VISIT_PERIODS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                className={`pdmr-chip pdmr-chip--ghost${visitPeriod === key ? ' is-active' : ''}`}
+                onClick={() => setVisitPeriod(key)}
+                aria-pressed={visitPeriod === key}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {/* Row 4: Active filters */}
+          {activeFilters.length > 0 && (
+            <div className="pdmr-active-filters" aria-label="الفلاتر المُفعّلة">
+              <span className="pdmr-active-filters-label">
+                <Filter size={13} aria-hidden="true" />
+                <span>الفلاتر:</span>
+              </span>
+              {activeFilters.map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  className="pdmr-active-filter"
+                  onClick={f.clear}
+                  aria-label={`إزالة فلتر: ${f.label}`}
+                >
+                  <span>{f.label}</span>
+                  <X size={12} aria-hidden="true" />
+                </button>
+              ))}
+              <button
+                type="button"
+                className="pdmr-clear-all"
+                onClick={clearAllFilters}
+              >
+                مسح الكل
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* ── Content ──────────────────────────────────────────────── */}
+        {visitsLoading ? (
+          <div className="pd-section-loading">
+            <LoadingSpinner message="جاري تحميل الزيارات..." />
+          </div>
+        ) : filtered.length === 0 ? (
+          inTab.length === 0 ? (
+            <EmptyState
+              icon={FileText}
+              title="لا توجد زيارات مسجلة"
+              subtitle="ستظهر هنا زياراتك الطبية بعد تسجيلها من قبل الطبيب."
+            />
+          ) : (
+            <EmptyState
+              icon={Search}
+              title="لا نتائج مطابقة"
+              subtitle="جرّب تغيير الفلاتر أو مصطلح البحث."
+              cta={{ label: 'مسح الفلاتر', onClick: clearAllFilters }}
+            />
+          )
+        ) : visitView === 'list' ? (
+          <div className="pdmr-groups">
+            {grouped.map((group) => (
+              <section key={group.key} className="pdmr-group">
+                <h3 className="pdmr-group-header">
+                  <Calendar size={14} aria-hidden="true" />
+                  <span>{DATE_GROUP_LABELS[group.key]}</span>
+                  <span className="pdmr-group-count">{group.items.length}</span>
+                </h3>
+                <ul className="pdmr-list">
+                  {group.items.map(renderVisitCard)}
+                </ul>
+              </section>
+            ))}
+          </div>
+        ) : (
+          <ul className="pdmr-grid">
+            {filtered.map(renderVisitCard)}
+          </ul>
+        )}
+      </div>
     );
   };
-
-  const renderVisits = () => (
-    <div className="pd-visits">
-      {visitsLoading ? (
-        <div className="pd-section-loading">
-          <LoadingSpinner message="جاري تحميل الزيارات..." />
-        </div>
-      ) : visits.length === 0 ? (
-        <EmptyState
-          icon={FileText}
-          title="لا توجد زيارات مسجلة"
-          subtitle="ستظهر هنا زياراتك الطبية بعد تسجيلها من قبل الطبيب."
-        />
-      ) : (
-        <ol className="pd-visit-timeline">
-          {visits.map((visit) => {
-            const isExpanded = expandedVisits.has(visit._id);
-            const typeLabel = VISIT_TYPE_LABELS[visit.visitType] || 'زيارة';
-            const statusLabel = VISIT_STATUS_LABELS[visit.status] || visit.status;
-            const vitalsJSX = renderVitalSigns(visit.vitalSigns);
-            const meds = Array.isArray(visit.prescribedMedications)
-              ? visit.prescribedMedications
-              : [];
-
-            return (
-              <li key={visit._id} className="pd-visit-item">
-                <div className="pd-visit-marker" aria-hidden="true">
-                  <Stethoscope size={16} />
-                </div>
-
-                <article className={`pd-visit-card${isExpanded ? ' is-expanded' : ''}`}>
-                  <button
-                    type="button"
-                    className="pd-visit-card-head"
-                    onClick={() => toggleVisit(visit._id)}
-                    aria-expanded={isExpanded}
-                    aria-controls={`pd-visit-body-${visit._id}`}
-                  >
-                    <div className="pd-visit-card-title">
-                      <h3 dir="auto">{visit.chiefComplaint || typeLabel}</h3>
-                      <div className="pd-visit-card-meta">
-                        <span className="pd-visit-type-badge">{typeLabel}</span>
-                        <span className="pd-visit-date" dir="ltr">
-                          <Calendar size={12} aria-hidden="true" />
-                          <time dateTime={visit.visitDate}>{formatDate(visit.visitDate)}</time>
-                        </span>
-                        {visit.status && (
-                          <span className={`pd-visit-status pd-visit-status--${visit.status}`}>
-                            {statusLabel}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    <ChevronDown className="pd-visit-card-chevron" size={18} aria-hidden="true" />
-                  </button>
-
-                  {isExpanded && (
-                    <div id={`pd-visit-body-${visit._id}`} className="pd-visit-card-body">
-                      {visit.diagnosis && (
-                        <section className="pd-visit-subsection">
-                          <h4 className="pd-visit-subsection-title">
-                            <Activity size={16} aria-hidden="true" />
-                            <span>التشخيص</span>
-                          </h4>
-                          <p dir="auto">{visit.diagnosis}</p>
-                        </section>
-                      )}
-
-                      {vitalsJSX && (
-                        <section className="pd-visit-subsection">
-                          <h4 className="pd-visit-subsection-title">
-                            <HeartPulse size={16} aria-hidden="true" />
-                            <span>العلامات الحيوية</span>
-                          </h4>
-                          {vitalsJSX}
-                        </section>
-                      )}
-
-                      {meds.length > 0 && (
-                        <section className="pd-visit-subsection">
-                          <h4 className="pd-visit-subsection-title">
-                            <Pill size={16} aria-hidden="true" />
-                            <span>الأدوية الموصوفة</span>
-                          </h4>
-                          <ul className="pd-visit-meds">
-                            {meds.map((med, idx) => (
-                              <li key={idx} className="pd-visit-med">
-                                <strong dir="auto">{med.medicationName}</strong>
-                                <span dir="auto">
-                                  {[med.dosage, med.frequency, med.duration].filter(Boolean).join(' • ')}
-                                </span>
-                                {med.instructions && (
-                                  <span className="pd-visit-med-note" dir="auto">{med.instructions}</span>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
-                        </section>
-                      )}
-
-                      {visit.doctorNotes && (
-                        <section className="pd-visit-subsection">
-                          <h4 className="pd-visit-subsection-title">
-                            <FileText size={16} aria-hidden="true" />
-                            <span>ملاحظات الطبيب</span>
-                          </h4>
-                          <p dir="auto">{visit.doctorNotes}</p>
-                        </section>
-                      )}
-
-                      {visit.followUpDate && (
-                        <section className="pd-visit-subsection">
-                          <h4 className="pd-visit-subsection-title">
-                            <Calendar size={16} aria-hidden="true" />
-                            <span>موعد المتابعة</span>
-                          </h4>
-                          <p>
-                            <span dir="ltr">{formatDate(visit.followUpDate)}</span>
-                            {visit.followUpNotes && (
-                              <span dir="auto">{' — '}{visit.followUpNotes}</span>
-                            )}
-                          </p>
-                        </section>
-                      )}
-
-                      {visit.visitPhotoUrl && (
-                        <section className="pd-visit-subsection">
-                          <h4 className="pd-visit-subsection-title">
-                            <FileText size={16} aria-hidden="true" />
-                            <span>صورة مرفقة</span>
-                          </h4>
-                          <a
-                            href={visit.visitPhotoUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="pd-visit-photo-link"
-                          >
-                            <img
-                              src={visit.visitPhotoUrl}
-                              alt="صورة الزيارة"
-                              className="pd-visit-photo"
-                            />
-                            <span className="pd-visit-photo-hint">
-                              <ExternalLink size={12} aria-hidden="true" />
-                              <span>عرض بالحجم الكامل</span>
-                            </span>
-                          </a>
-                        </section>
-                      )}
-
-                      {visit.ecgAnalysis && (
-                        <section className="pd-visit-subsection pd-visit-ecg">
-                          <h4 className="pd-visit-subsection-title">
-                            <Heart size={16} aria-hidden="true" />
-                            <span>تحليل تخطيط القلب</span>
-                          </h4>
-                          <div className="pd-visit-ecg-body">
-                            {visit.ecgAnalysis.topPrediction && (
-                              <p>
-                                <strong>النتيجة: </strong>
-                                <span dir="auto">{visit.ecgAnalysis.topPrediction}</span>
-                              </p>
-                            )}
-                            {visit.ecgAnalysis.recommendation && (
-                              <p dir="auto">{visit.ecgAnalysis.recommendation}</p>
-                            )}
-                            {visit.ecgAnalysis.ecgImageUrl && (
-                              <a
-                                href={visit.ecgAnalysis.ecgImageUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="pd-visit-ecg-link"
-                              >
-                                <ExternalLink size={14} aria-hidden="true" />
-                                <span>عرض صورة التخطيط</span>
-                              </a>
-                            )}
-                          </div>
-                        </section>
-                      )}
-
-                      {visit.paymentStatus && (
-                        <div className="pd-visit-payment">
-                          <span className="pd-visit-payment-label">حالة الدفع:</span>
-                          <span className={`pd-visit-payment-status pd-visit-payment-status--${visit.paymentStatus}`}>
-                            {PAYMENT_STATUS_LABELS[visit.paymentStatus] || visit.paymentStatus}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </article>
-              </li>
-            );
-          })}
-        </ol>
-      )}
-    </div>
-  );
 
 
   // ════════════════════════════════════════════════════════════════════
   // Prescriptions section
   // ════════════════════════════════════════════════════════════════════
 
-  const togglePrescription = (id) => {
-    setExpandedPrescriptions((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
   const PRESCRIPTION_STATUS_GROUPS = {
+    all:       ['active', 'partially_dispensed', 'dispensed', 'expired', 'cancelled'],
     active:    ['active', 'partially_dispensed'],
     dispensed: ['dispensed'],
     expired:   ['expired', 'cancelled'],
@@ -2081,273 +2547,323 @@ const handleLogout = useCallback(() => {
     cancelled:            'ملغاة',
   };
 
+  // Map status → pdmr-status color variant
+  const PRESCRIPTION_STATUS_VARIANTS = {
+    active:               'info',
+    partially_dispensed:  'warning',
+    dispensed:            'success',
+    expired:              'muted',
+    cancelled:            'danger',
+  };
+
+  const PRESCRIPTION_TABS = [
+    { key: 'all',       label: 'الكل' },
+    { key: 'active',    label: 'النشطة' },
+    { key: 'dispensed', label: 'تم صرفها' },
+    { key: 'expired',   label: 'منتهية/ملغاة' },
+  ];
+
+  const PRESCRIPTION_PERIODS = [
+    { key: 'all',     label: 'كل الفترات' },
+    { key: 'week',    label: 'آخر أسبوع' },
+    { key: 'month',   label: 'آخر شهر' },
+    { key: '3months', label: 'آخر 3 أشهر' },
+    { key: 'year',    label: 'آخر سنة' },
+  ];
+
   const renderPrescriptions = () => {
-    const filtered = prescriptions.filter((rx) =>
+    // 1) Tab filter
+    const inTab = prescriptions.filter((rx) =>
       PRESCRIPTION_STATUS_GROUPS[prescriptionTab]?.includes(rx.status)
     );
 
+    // 2) Per-tab counts
+    const tabCounts = {
+      all:       prescriptions.length,
+      active:    prescriptions.filter((rx) => PRESCRIPTION_STATUS_GROUPS.active.includes(rx.status)).length,
+      dispensed: prescriptions.filter((rx) => PRESCRIPTION_STATUS_GROUPS.dispensed.includes(rx.status)).length,
+      expired:   prescriptions.filter((rx) => PRESCRIPTION_STATUS_GROUPS.expired.includes(rx.status)).length,
+    };
+
+    // 3) Search + period + sort
+    const filtered = filterAndSortItems({
+      items:        inTab,
+      search:       prescriptionSearch,
+      searchFields: ['prescriptionNumber', 'prescriptionNotes', 'doctorName',
+                     'doctor.firstName', 'doctor.lastName',
+                     // Medications array: synthetic searchable string via flatMap fallback
+                     ],
+      period:       prescriptionPeriod,
+      dateField:    'prescriptionDate',
+      sortOrder:    prescriptionSort,
+    });
+
+    // 3b) Extra search against medication names (since they're inside an
+    //     array and filterAndSortItems only reads simple property paths).
+    const q = prescriptionSearch.trim().toLowerCase();
+    const finalFiltered = q
+      ? filtered.filter((rx) => {
+          // First pass already accepted the rx via top-level fields? Keep.
+          const topLevelHit = ['prescriptionNumber', 'prescriptionNotes',
+                               rx.doctorName, rx.doctor?.firstName, rx.doctor?.lastName]
+            .some((v) => v && String(v).toLowerCase().includes(q));
+          if (topLevelHit) return true;
+          // Otherwise scan medication names.
+          if (!Array.isArray(rx.medications)) return false;
+          return rx.medications.some((m) => {
+            const name = (m.medicationName || '') + ' ' + (m.arabicName || '');
+            return name.toLowerCase().includes(q);
+          });
+        })
+      : filtered;
+
+    // 4) Group by date for list view
+    const grouped = groupByDate(finalFiltered, 'prescriptionDate');
+
+    // 5) Active filter chips
+    const activeFilters = [];
+    if (prescriptionSearch.trim())     activeFilters.push({ key: 'search', label: `بحث: ${prescriptionSearch.trim()}`, clear: () => setPrescriptionSearch('') });
+    if (prescriptionPeriod !== 'all')  activeFilters.push({ key: 'period', label: PRESCRIPTION_PERIODS.find((p) => p.key === prescriptionPeriod)?.label || prescriptionPeriod, clear: () => setPrescriptionPeriod('all') });
+    if (prescriptionSort !== 'newest') activeFilters.push({ key: 'sort',   label: 'الأقدم أولاً', clear: () => setPrescriptionSort('newest') });
+    const clearAllFilters = () => { setPrescriptionSearch(''); setPrescriptionPeriod('all'); setPrescriptionSort('newest'); };
+
+    // 6) Navigation to detail page
+    const openDetail = (rx) => {
+      navigate(`/patient-dashboard/prescriptions/${rx._id}`, { state: { prescription: rx } });
+    };
+
+    // 7) Single-card renderer
+    const renderPrescriptionCard = (rx) => {
+      const statusLabel   = PRESCRIPTION_STATUS_LABELS[rx.status]   || rx.status;
+      const statusVariant = PRESCRIPTION_STATUS_VARIANTS[rx.status] || 'muted';
+      const meds = Array.isArray(rx.medications) ? rx.medications : [];
+      const dispensedCount = meds.filter((m) => m.isDispensed).length;
+
+      // Compact medication summary — first 3 names, joined by Arabic comma.
+      const medSummary = meds.length > 0
+        ? meds.slice(0, 3).map((m) => m.arabicName || m.medicationName).filter(Boolean).join('، ')
+          + (meds.length > 3 ? `، +${meds.length - 3}` : '')
+        : null;
+
+      return (
+        <li key={rx._id} className="pdmr-card">
+          <button
+            type="button"
+            className="pdmr-card-head"
+            onClick={() => openDetail(rx)}
+            aria-label={`عرض تفاصيل الوصفة: ${rx.prescriptionNumber}`}
+          >
+            <div className="pdmr-card-icon" aria-hidden="true">
+              <Pill size={20} />
+            </div>
+
+            <div className="pdmr-card-body">
+              <div className="pdmr-card-title-row">
+                <h3 className="pdmr-card-title" dir="ltr">
+                  {rx.prescriptionNumber || 'وصفة طبية'}
+                </h3>
+                <span className={`pdmr-status pdmr-status--${statusVariant}`}>
+                  {statusLabel}
+                </span>
+              </div>
+
+              {medSummary && (
+                <p className="pdmr-card-summary" dir="auto">
+                  {medSummary}
+                </p>
+              )}
+
+              <div className="pdmr-card-meta">
+                <span className="pdmr-card-meta-item" dir="ltr">
+                  <Calendar size={13} aria-hidden="true" />
+                  <time dateTime={rx.prescriptionDate}>{formatDate(rx.prescriptionDate)}</time>
+                </span>
+                <span className="pdmr-card-meta-item">
+                  <Pill size={13} aria-hidden="true" />
+                  <span>
+                    {meds.length} دواء
+                    {dispensedCount > 0 && dispensedCount < meds.length && ` · ${dispensedCount} مصروف`}
+                  </span>
+                </span>
+              </div>
+            </div>
+
+            <ChevronLeft className="pdmr-card-chevron" size={18} aria-hidden="true" />
+          </button>
+        </li>
+      );
+    };
+
     return (
-      <div className="pd-prescriptions">
-        <div className="pd-section-toolbar">
-          <div className="pd-tabs" role="tablist">
-            {[
-              { key: 'active',    label: 'النشطة'         },
-              { key: 'dispensed', label: 'تم صرفها'        },
-              { key: 'expired',   label: 'منتهية/ملغاة'   },
-            ].map(({ key, label }) => (
+      <div className="pd-prescriptions pdmr-section">
+
+        {/* ── Universal toolbar ────────────────────────────────────── */}
+        <div className="pdmr-toolbar" role="toolbar" aria-label="أدوات تصفية الوصفات">
+          {/* Row 1: Search + view-toggle + sort */}
+          <div className="pdmr-toolbar-main">
+            <div className="pdmr-search">
+              <Search size={16} aria-hidden="true" className="pdmr-search-icon" />
+              <input
+                type="search"
+                className="pdmr-search-input"
+                placeholder="ابحث في الوصفات (رقم، دواء، طبيب)..."
+                value={prescriptionSearch}
+                onChange={(e) => setPrescriptionSearch(e.target.value)}
+                dir="auto"
+                aria-label="بحث"
+              />
+              {prescriptionSearch && (
+                <button
+                  type="button"
+                  className="pdmr-search-clear"
+                  onClick={() => setPrescriptionSearch('')}
+                  aria-label="مسح البحث"
+                >
+                  <X size={14} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+
+            <div className="pdmr-view-toggle" role="group" aria-label="طريقة العرض">
+              <button
+                type="button"
+                className={`pdmr-view-btn${prescriptionView === 'list' ? ' is-active' : ''}`}
+                onClick={() => setPrescriptionView('list')}
+                aria-pressed={prescriptionView === 'list'}
+                title="عرض قائمة"
+              >
+                <Menu size={15} aria-hidden="true" />
+                <span>قائمة</span>
+              </button>
+              <button
+                type="button"
+                className={`pdmr-view-btn${prescriptionView === 'cards' ? ' is-active' : ''}`}
+                onClick={() => setPrescriptionView('cards')}
+                aria-pressed={prescriptionView === 'cards'}
+                title="عرض بطاقات"
+              >
+                <FileText size={15} aria-hidden="true" />
+                <span>بطاقات</span>
+              </button>
+            </div>
+
+            <select
+              className="pdmr-sort"
+              value={prescriptionSort}
+              onChange={(e) => setPrescriptionSort(e.target.value)}
+              aria-label="ترتيب"
+            >
+              <option value="newest">الأحدث أولاً</option>
+              <option value="oldest">الأقدم أولاً</option>
+            </select>
+          </div>
+
+          {/* Row 2: Status tabs */}
+          <div className="pdmr-chips" role="tablist" aria-label="حالة الوصفة">
+            {PRESCRIPTION_TABS.map(({ key, label }) => (
               <button
                 key={key}
                 type="button"
                 role="tab"
                 aria-selected={prescriptionTab === key}
-                className={`pd-tab${prescriptionTab === key ? ' is-active' : ''}`}
+                className={`pdmr-chip${prescriptionTab === key ? ' is-active' : ''}`}
                 onClick={() => setPrescriptionTab(key)}
+              >
+                <span>{label}</span>
+                <span className="pdmr-chip-count" aria-label={`${tabCounts[key]} وصفة`}>
+                  {tabCounts[key]}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* Row 3: Period filter */}
+          <div className="pdmr-chips pdmr-chips--secondary" role="group" aria-label="الفترة الزمنية">
+            {PRESCRIPTION_PERIODS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                className={`pdmr-chip pdmr-chip--ghost${prescriptionPeriod === key ? ' is-active' : ''}`}
+                onClick={() => setPrescriptionPeriod(key)}
+                aria-pressed={prescriptionPeriod === key}
               >
                 {label}
               </button>
             ))}
           </div>
+
+          {/* Row 4: Active filters */}
+          {activeFilters.length > 0 && (
+            <div className="pdmr-active-filters" aria-label="الفلاتر المُفعّلة">
+              <span className="pdmr-active-filters-label">
+                <Filter size={13} aria-hidden="true" />
+                <span>الفلاتر:</span>
+              </span>
+              {activeFilters.map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  className="pdmr-active-filter"
+                  onClick={f.clear}
+                  aria-label={`إزالة فلتر: ${f.label}`}
+                >
+                  <span>{f.label}</span>
+                  <X size={12} aria-hidden="true" />
+                </button>
+              ))}
+              <button
+                type="button"
+                className="pdmr-clear-all"
+                onClick={clearAllFilters}
+              >
+                مسح الكل
+              </button>
+            </div>
+          )}
         </div>
 
+        {/* ── Content ──────────────────────────────────────────────── */}
         {prescriptionsLoading ? (
           <div className="pd-section-loading">
             <LoadingSpinner message="جاري تحميل الوصفات..." />
           </div>
-        ) : filtered.length === 0 ? (
-          <EmptyState
-            icon={Pill}
-            title="لا توجد وصفات"
-            subtitle={
-              prescriptionTab === 'active'
-                ? 'ستظهر هنا الوصفات النشطة بعد كتابتها من قبل الطبيب.'
-                : 'لا يوجد محتوى لعرضه في هذا التبويب.'
-            }
-          />
+        ) : finalFiltered.length === 0 ? (
+          inTab.length === 0 ? (
+            <EmptyState
+              icon={Pill}
+              title="لا توجد وصفات"
+              subtitle={
+                prescriptionTab === 'active'
+                  ? 'ستظهر هنا الوصفات النشطة بعد كتابتها من قبل الطبيب.'
+                  : 'لا يوجد محتوى لعرضه في هذا التبويب.'
+              }
+            />
+          ) : (
+            <EmptyState
+              icon={Search}
+              title="لا نتائج مطابقة"
+              subtitle="جرّب تغيير الفلاتر أو مصطلح البحث."
+              cta={{ label: 'مسح الفلاتر', onClick: clearAllFilters }}
+            />
+          )
+        ) : prescriptionView === 'list' ? (
+          <div className="pdmr-groups">
+            {grouped.map((group) => (
+              <section key={group.key} className="pdmr-group">
+                <h3 className="pdmr-group-header">
+                  <Calendar size={14} aria-hidden="true" />
+                  <span>{DATE_GROUP_LABELS[group.key]}</span>
+                  <span className="pdmr-group-count">{group.items.length}</span>
+                </h3>
+                <ul className="pdmr-list">
+                  {group.items.map(renderPrescriptionCard)}
+                </ul>
+              </section>
+            ))}
+          </div>
         ) : (
-          <ul className="pd-prescription-list">
-            {filtered.map((rx) => {
-              const isExpanded = expandedPrescriptions.has(rx._id);
-              const meds = Array.isArray(rx.medications) ? rx.medications : [];
-              const dispensedCount = meds.filter((m) => m.isDispensed).length;
-              // A prescription is "fully dispensed" when the backend says so
-              // (status flipped to 'dispensed') OR when every med is marked
-              // as dispensed. Either condition hides the verification code.
-              const isFullyDispensed =
-                rx.status === 'dispensed' ||
-                (meds.length > 0 && dispensedCount === meds.length);
-              // Earliest dispensedAt across meds = when the pharmacy finalized
-              // the dispensing (used for the success banner timestamp).
-              const dispensedDate = meds
-                .map((m) => m.dispensedAt)
-                .filter(Boolean)
-                .sort()[0];
-
-              return (
-                <li
-                  key={rx._id}
-                  className={`pd-prescription-card${isFullyDispensed ? ' is-fully-dispensed' : ''}`}
-                >
-                  <button
-                    type="button"
-                    className="pd-prescription-head"
-                    onClick={() => togglePrescription(rx._id)}
-                    aria-expanded={isExpanded}
-                    aria-controls={`pd-rx-body-${rx._id}`}
-                  >
-                    <div className="pd-prescription-head-left">
-                      <div className="pd-prescription-icon" aria-hidden="true">
-                        <Pill size={20} />
-                      </div>
-                      <div className="pd-prescription-title">
-                        <h3 dir="ltr">{rx.prescriptionNumber}</h3>
-                        {meds.length > 0 && (
-                          <div className="pd-prescription-med-summary" dir="auto">
-                            {meds
-                              .map((m) => m.arabicName || m.medicationName)
-                              .filter(Boolean)
-                              .join('، ')}
-                          </div>
-                        )}
-                        <div className="pd-prescription-meta">
-                          <span className="pd-prescription-date" dir="ltr">
-                            <Calendar size={12} aria-hidden="true" />
-                            <time dateTime={rx.prescriptionDate}>{formatDate(rx.prescriptionDate)}</time>
-                          </span>
-                          <span className={`pd-prescription-status pd-prescription-status--${rx.status}`}>
-                            {PRESCRIPTION_STATUS_LABELS[rx.status] || rx.status}
-                          </span>
-                          <span className="pd-prescription-count">
-                            {meds.length} دواء
-                            {dispensedCount > 0 && ` · ${dispensedCount} مصروف`}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                    <ChevronDown className="pd-prescription-chevron" size={18} aria-hidden="true" />
-                  </button>
-
-                  {isExpanded && (
-                    <div id={`pd-rx-body-${rx._id}`} className="pd-prescription-body">
-                      {/* Success banner — prominent "this Rx is done" signal */}
-                      {isFullyDispensed && (
-                        <div className="pd-prescription-dispensed-banner" role="status">
-                          <div className="pd-prescription-dispensed-banner-icon" aria-hidden="true">
-                            <CheckCircle2 size={32} strokeWidth={2.5} />
-                          </div>
-                          <div className="pd-prescription-dispensed-banner-body">
-                            <h4>تم صرف هذه الوصفة</h4>
-                            <p>
-                              {dispensedDate ? (
-                                <>
-                                  تم الصرف بتاريخ{' '}
-                                  <time dateTime={dispensedDate} dir="ltr">
-                                    {formatDate(dispensedDate)}
-                                  </time>
-                                </>
-                              ) : (
-                                'جميع الأدوية في هذه الوصفة تم صرفها'
-                              )}
-                            </p>
-                          </div>
-                        </div>
-                      )}
-
-                      {meds.length > 0 && (
-                        <section className="pd-prescription-section">
-                          <h4 className="pd-prescription-section-title">الأدوية</h4>
-                          <ul className="pd-prescription-meds">
-                            {meds.map((med, idx) => {
-                              const routeLabel = med.route ? (MED_ROUTE_LABELS[med.route] || med.route) : null;
-                              return (
-                                <li
-                                  key={idx}
-                                  className={`pd-prescription-med${med.isDispensed ? ' is-dispensed' : ''}`}
-                                >
-                                  {/* Header: drug name + dispensed badge */}
-                                  <div className="pd-prescription-med-head">
-                                    <div className="pd-prescription-med-title">
-                                      <span className="pd-prescription-med-icon" aria-hidden="true">
-                                        <Pill size={18} />
-                                      </span>
-                                      <div className="pd-prescription-med-names">
-                                        <strong dir="auto">{med.medicationName}</strong>
-                                        {med.arabicName && (
-                                          <span className="pd-prescription-med-ar" dir="auto">
-                                            {med.arabicName}
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-                                    {med.isDispensed && (
-                                      <span className="pd-prescription-med-badge">
-                                        <CheckCircle2 size={12} aria-hidden="true" />
-                                        <span>مصروف</span>
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  {/* Field grid: labeled key facts */}
-                                  <dl className="pd-prescription-med-grid">
-                                    {med.dosage && (
-                                      <div className="pd-prescription-med-field">
-                                        <dt>
-                                          <Syringe size={14} aria-hidden="true" />
-                                          <span>الجرعة</span>
-                                        </dt>
-                                        <dd dir="auto">{med.dosage}</dd>
-                                      </div>
-                                    )}
-                                    {med.frequency && (
-                                      <div className="pd-prescription-med-field">
-                                        <dt>
-                                          <Repeat size={14} aria-hidden="true" />
-                                          <span>التكرار</span>
-                                        </dt>
-                                        <dd dir="auto">{med.frequency}</dd>
-                                      </div>
-                                    )}
-                                    {med.duration && (
-                                      <div className="pd-prescription-med-field">
-                                        <dt>
-                                          <Calendar size={14} aria-hidden="true" />
-                                          <span>المدة</span>
-                                        </dt>
-                                        <dd dir="auto">{med.duration}</dd>
-                                      </div>
-                                    )}
-                                    {routeLabel && (
-                                      <div className="pd-prescription-med-field">
-                                        <dt>
-                                          <Navigation size={14} aria-hidden="true" />
-                                          <span>طريقة الاستخدام</span>
-                                        </dt>
-                                        <dd dir="auto">{routeLabel}</dd>
-                                      </div>
-                                    )}
-                                    {med.quantity != null && med.quantity !== '' && (
-                                      <div className="pd-prescription-med-field">
-                                        <dt>
-                                          <Hash size={14} aria-hidden="true" />
-                                          <span>الكمية</span>
-                                        </dt>
-                                        <dd dir="auto">{med.quantity}</dd>
-                                      </div>
-                                    )}
-                                  </dl>
-
-                                  {/* Highlighted instructions callout (safety-critical) */}
-                                  {med.instructions && (
-                                    <aside className="pd-prescription-med-instructions" dir="auto">
-                                      <Info size={14} aria-hidden="true" />
-                                      <div>
-                                        <span className="pd-prescription-med-instructions-label">
-                                          تعليمات الاستخدام
-                                        </span>
-                                        <p>{med.instructions}</p>
-                                      </div>
-                                    </aside>
-                                  )}
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </section>
-                      )}
-
-                      {!isFullyDispensed && (
-                        <section className="pd-prescription-section pd-prescription-verification">
-                          <h4 className="pd-prescription-section-title">رمز التحقق للصيدلية</h4>
-                          <div className="pd-prescription-code-row">
-                            {rx.verificationCode && (
-                              <div
-                                className="pd-prescription-code-pill"
-                                dir="ltr"
-                                aria-label={`رمز التحقق: ${rx.verificationCode}`}
-                              >
-                                {rx.verificationCode}
-                              </div>
-                            )}
-                            {/* TODO: replace with real QR render when qrcode.react is added. */}
-                            <div className="pd-prescription-qr-placeholder" aria-label="رمز QR للصرف">
-                              <ShieldCheck size={32} aria-hidden="true" />
-                              <span>رمز QR</span>
-                            </div>
-                          </div>
-                          <p className="pd-prescription-hint">أبرز هذا الرمز للصيدلي عند الصرف.</p>
-                        </section>
-                      )}
-
-                      {rx.prescriptionNotes && (
-                        <section className="pd-prescription-section">
-                          <h4 className="pd-prescription-section-title">ملاحظات</h4>
-                          <p dir="auto">{rx.prescriptionNotes}</p>
-                        </section>
-                      )}
-                    </div>
-                  )}
-                </li>
-              );
-            })}
+          <ul className="pdmr-grid">
+            {finalFiltered.map(renderPrescriptionCard)}
           </ul>
         )}
       </div>
@@ -2355,11 +2871,13 @@ const handleLogout = useCallback(() => {
   };
 
 
+
   // ════════════════════════════════════════════════════════════════════
   // Lab results section
   // ════════════════════════════════════════════════════════════════════
 
   const LAB_STATUS_GROUPS = {
+    all:       ['ordered', 'scheduled', 'sample_collected', 'in_progress', 'completed', 'cancelled', 'rejected'],
     pending:   ['ordered', 'scheduled', 'sample_collected', 'in_progress'],
     results:   ['completed'],
     cancelled: ['cancelled', 'rejected'],
@@ -2375,187 +2893,341 @@ const handleLogout = useCallback(() => {
     rejected:         'مرفوضة',
   };
 
-  const toggleLabTest = async (lab) => {
-    const wasExpanded = expandedLabTests.has(lab._id);
+  // Map status → pdmr-status color variant
+  const LAB_STATUS_VARIANTS = {
+    ordered:          'info',
+    scheduled:        'info',
+    sample_collected: 'info',
+    in_progress:      'warning',
+    completed:        'success',
+    cancelled:        'danger',
+    rejected:         'danger',
+  };
 
-    setExpandedLabTests((prev) => {
-      const next = new Set(prev);
-      if (next.has(lab._id)) next.delete(lab._id);
-      else next.add(lab._id);
-      return next;
-    });
+  const LAB_TABS = [
+    { key: 'all',       label: 'الكل' },
+    { key: 'results',   label: 'النتائج' },
+    { key: 'pending',   label: 'قيد الإنتظار' },
+    { key: 'cancelled', label: 'ملغاة' },
+  ];
 
-    if (!wasExpanded && lab.status === 'completed' && !lab.isViewedByPatient) {
-      try {
-        await patientAPI.markLabTestViewed(lab._id);
-        setLabTests((prev) =>
-          prev.map((t) =>
-            t._id === lab._id ? { ...t, isViewedByPatient: true } : t
-          )
-        );
-      } catch {
-        // Silent — next page load will reconcile.
-      }
+  const LAB_PERIODS = [
+    { key: 'all',     label: 'كل الفترات' },
+    { key: 'week',    label: 'آخر أسبوع' },
+    { key: 'month',   label: 'آخر شهر' },
+    { key: '3months', label: 'آخر 3 أشهر' },
+    { key: 'year',    label: 'آخر سنة' },
+  ];
+
+  // Auto-mark as viewed when opening detail page (mirrors the previous
+  // inline-expand behavior — fires the same API call so the doctor's
+  // "unviewed" indicator gets cleared as soon as the patient looks).
+  const markLabAsViewedOnOpen = async (lab) => {
+    if (lab.status !== 'completed' || lab.isViewedByPatient) return;
+    try {
+      await patientAPI.markLabTestViewed(lab._id);
+      setLabTests((prev) =>
+        prev.map((t) =>
+          t._id === lab._id ? { ...t, isViewedByPatient: true } : t
+        )
+      );
+    } catch {
+      // Silent — next page load reconciles.
     }
   };
 
   const renderLabTests = () => {
-    const filtered = labTests.filter((lab) =>
+    // 1) Tab filter
+    const inTab = labTests.filter((lab) =>
       LAB_STATUS_GROUPS[labTestTab]?.includes(lab.status)
     );
 
+    // 2) Per-tab counts
+    const tabCounts = {
+      all:       labTests.length,
+      results:   labTests.filter((l) => LAB_STATUS_GROUPS.results.includes(l.status)).length,
+      pending:   labTests.filter((l) => LAB_STATUS_GROUPS.pending.includes(l.status)).length,
+      cancelled: labTests.filter((l) => LAB_STATUS_GROUPS.cancelled.includes(l.status)).length,
+    };
+
+    // Bonus: unread completed results — counted across the WHOLE labTests
+    // set (not just the active tab) so the patient is notified even when
+    // looking at, say, the "Pending" tab.
+    const unreadCount = labTests.filter(
+      (l) => l.status === 'completed' && !l.isViewedByPatient
+    ).length;
+
+    // 3) Search + period + sort
+    const filtered = filterAndSortItems({
+      items:        inTab,
+      search:       labTestSearch,
+      searchFields: ['testNumber', 'labNotes', 'doctorName',
+                     'doctor.firstName', 'doctor.lastName',
+                     'laboratoryName', 'laboratory.name'],
+      period:       labTestPeriod,
+      dateField:    'orderDate',
+      sortOrder:    labTestSort,
+    });
+
+    // 4) Group by date for list view
+    const grouped = groupByDate(filtered, 'orderDate');
+
+    // 5) Active filter chips
+    const activeFilters = [];
+    if (labTestSearch.trim())     activeFilters.push({ key: 'search', label: `بحث: ${labTestSearch.trim()}`, clear: () => setLabTestSearch('') });
+    if (labTestPeriod !== 'all')  activeFilters.push({ key: 'period', label: LAB_PERIODS.find((p) => p.key === labTestPeriod)?.label || labTestPeriod, clear: () => setLabTestPeriod('all') });
+    if (labTestSort !== 'newest') activeFilters.push({ key: 'sort',   label: 'الأقدم أولاً', clear: () => setLabTestSort('newest') });
+    const clearAllFilters = () => { setLabTestSearch(''); setLabTestPeriod('all'); setLabTestSort('newest'); };
+
+    // 6) Navigation — and auto-mark as viewed at the same time
+    const openDetail = (lab) => {
+      markLabAsViewedOnOpen(lab);
+      navigate(`/patient-dashboard/lab-results/${lab._id}`, { state: { labTest: lab } });
+    };
+
+    // 7) Single-card renderer
+    const renderLabCard = (lab) => {
+      const statusLabel    = LAB_STATUS_LABELS[lab.status]   || lab.status;
+      const statusVariant  = LAB_STATUS_VARIANTS[lab.status] || 'muted';
+      const results = Array.isArray(lab.testResults) ? lab.testResults : [];
+      const abnormalCount = results.filter((r) => r.isAbnormal || r.isCritical).length;
+      const criticalCount = results.filter((r) => r.isCritical).length;
+      const isUnread = lab.status === 'completed' && !lab.isViewedByPatient;
+
+      return (
+        <li key={lab._id} className={`pdmr-card${isUnread ? ' pdmr-card--unread' : ''}`}>
+          <button
+            type="button"
+            className="pdmr-card-head"
+            onClick={() => openDetail(lab)}
+            aria-label={`عرض تفاصيل التحليل: ${lab.testNumber}`}
+          >
+            <div className="pdmr-card-icon" aria-hidden="true">
+              <FlaskConical size={20} />
+            </div>
+
+            <div className="pdmr-card-body">
+              <div className="pdmr-card-title-row">
+                <h3 className="pdmr-card-title" dir="ltr">
+                  {lab.testNumber || 'تحليل مخبري'}
+                  {isUnread && (
+                    <span className="pdmr-card-unread-dot" aria-label="نتيجة غير مقروءة" />
+                  )}
+                </h3>
+                <span className={`pdmr-status pdmr-status--${statusVariant}`}>
+                  {statusLabel}
+                </span>
+              </div>
+
+              <div className="pdmr-card-meta">
+                <span className="pdmr-card-meta-item" dir="ltr">
+                  <Calendar size={13} aria-hidden="true" />
+                  <time dateTime={lab.orderDate}>{formatDate(lab.orderDate)}</time>
+                </span>
+                {results.length > 0 && (
+                  <span className="pdmr-card-meta-item">
+                    <FlaskConical size={13} aria-hidden="true" />
+                    <span>{results.length} فحص</span>
+                  </span>
+                )}
+                {criticalCount > 0 && (
+                  <span className="pdmr-priority pdmr-priority--emergency">
+                    <AlertOctagon size={11} aria-hidden="true" />
+                    <span>{criticalCount} حرجة</span>
+                  </span>
+                )}
+                {criticalCount === 0 && abnormalCount > 0 && (
+                  <span className="pdmr-priority pdmr-priority--urgent">
+                    <AlertTriangle size={11} aria-hidden="true" />
+                    <span>{abnormalCount} غير طبيعية</span>
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <ChevronLeft className="pdmr-card-chevron" size={18} aria-hidden="true" />
+          </button>
+        </li>
+      );
+    };
+
     return (
-      <div className="pd-lab-tests">
-        <div className="pd-section-toolbar">
-          <div className="pd-tabs" role="tablist">
-            {[
-              { key: 'pending',   label: 'قيد الإنتظار' },
-              { key: 'results',   label: 'النتائج'        },
-              { key: 'cancelled', label: 'ملغاة'          },
-            ].map(({ key, label }) => (
+      <div className="pd-lab-tests pdmr-section">
+
+        {/* ── Universal toolbar ────────────────────────────────────── */}
+        <div className="pdmr-toolbar" role="toolbar" aria-label="أدوات تصفية التحاليل">
+          <div className="pdmr-toolbar-main">
+            <div className="pdmr-search">
+              <Search size={16} aria-hidden="true" className="pdmr-search-icon" />
+              <input
+                type="search"
+                className="pdmr-search-input"
+                placeholder="ابحث في التحاليل (رقم، طبيب، مختبر)..."
+                value={labTestSearch}
+                onChange={(e) => setLabTestSearch(e.target.value)}
+                dir="auto"
+                aria-label="بحث"
+              />
+              {labTestSearch && (
+                <button
+                  type="button"
+                  className="pdmr-search-clear"
+                  onClick={() => setLabTestSearch('')}
+                  aria-label="مسح البحث"
+                >
+                  <X size={14} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+
+            <div className="pdmr-view-toggle" role="group" aria-label="طريقة العرض">
+              <button
+                type="button"
+                className={`pdmr-view-btn${labTestView === 'list' ? ' is-active' : ''}`}
+                onClick={() => setLabTestView('list')}
+                aria-pressed={labTestView === 'list'}
+                title="عرض قائمة"
+              >
+                <Menu size={15} aria-hidden="true" />
+                <span>قائمة</span>
+              </button>
+              <button
+                type="button"
+                className={`pdmr-view-btn${labTestView === 'cards' ? ' is-active' : ''}`}
+                onClick={() => setLabTestView('cards')}
+                aria-pressed={labTestView === 'cards'}
+                title="عرض بطاقات"
+              >
+                <FileText size={15} aria-hidden="true" />
+                <span>بطاقات</span>
+              </button>
+            </div>
+
+            <select
+              className="pdmr-sort"
+              value={labTestSort}
+              onChange={(e) => setLabTestSort(e.target.value)}
+              aria-label="ترتيب"
+            >
+              <option value="newest">الأحدث أولاً</option>
+              <option value="oldest">الأقدم أولاً</option>
+            </select>
+          </div>
+
+          {/* Status tabs */}
+          <div className="pdmr-chips" role="tablist" aria-label="حالة التحليل">
+            {LAB_TABS.map(({ key, label }) => (
               <button
                 key={key}
                 type="button"
                 role="tab"
                 aria-selected={labTestTab === key}
-                className={`pd-tab${labTestTab === key ? ' is-active' : ''}`}
+                className={`pdmr-chip${labTestTab === key ? ' is-active' : ''}`}
                 onClick={() => setLabTestTab(key)}
+              >
+                <span>{label}</span>
+                <span className="pdmr-chip-count" aria-label={`${tabCounts[key]} تحليل`}>
+                  {tabCounts[key]}
+                </span>
+              </button>
+            ))}
+            {unreadCount > 0 && (
+              <span className="pdmr-chip pdmr-chip--alert" aria-label={`${unreadCount} نتيجة غير مقروءة`}>
+                <AlertCircle size={12} aria-hidden="true" />
+                <span>{unreadCount} غير مقروءة</span>
+              </span>
+            )}
+          </div>
+
+          {/* Period filter */}
+          <div className="pdmr-chips pdmr-chips--secondary" role="group" aria-label="الفترة الزمنية">
+            {LAB_PERIODS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                className={`pdmr-chip pdmr-chip--ghost${labTestPeriod === key ? ' is-active' : ''}`}
+                onClick={() => setLabTestPeriod(key)}
+                aria-pressed={labTestPeriod === key}
               >
                 {label}
               </button>
             ))}
           </div>
+
+          {/* Active filters */}
+          {activeFilters.length > 0 && (
+            <div className="pdmr-active-filters" aria-label="الفلاتر المُفعّلة">
+              <span className="pdmr-active-filters-label">
+                <Filter size={13} aria-hidden="true" />
+                <span>الفلاتر:</span>
+              </span>
+              {activeFilters.map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  className="pdmr-active-filter"
+                  onClick={f.clear}
+                  aria-label={`إزالة فلتر: ${f.label}`}
+                >
+                  <span>{f.label}</span>
+                  <X size={12} aria-hidden="true" />
+                </button>
+              ))}
+              <button
+                type="button"
+                className="pdmr-clear-all"
+                onClick={clearAllFilters}
+              >
+                مسح الكل
+              </button>
+            </div>
+          )}
         </div>
 
+        {/* ── Content ──────────────────────────────────────────────── */}
         {labTestsLoading ? (
           <div className="pd-section-loading">
             <LoadingSpinner message="جاري تحميل النتائج..." />
           </div>
         ) : filtered.length === 0 ? (
-          <EmptyState
-            icon={FlaskConical}
-            title="لا توجد نتائج في هذا التبويب"
-            subtitle="ستظهر هنا فور توفرها من المختبر."
-          />
+          inTab.length === 0 ? (
+            <EmptyState
+              icon={FlaskConical}
+              title="لا توجد نتائج في هذا التبويب"
+              subtitle="ستظهر هنا فور توفرها من المختبر."
+            />
+          ) : (
+            <EmptyState
+              icon={Search}
+              title="لا نتائج مطابقة"
+              subtitle="جرّب تغيير الفلاتر أو مصطلح البحث."
+              cta={{ label: 'مسح الفلاتر', onClick: clearAllFilters }}
+            />
+          )
+        ) : labTestView === 'list' ? (
+          <div className="pdmr-groups">
+            {grouped.map((group) => (
+              <section key={group.key} className="pdmr-group">
+                <h3 className="pdmr-group-header">
+                  <Calendar size={14} aria-hidden="true" />
+                  <span>{DATE_GROUP_LABELS[group.key]}</span>
+                  <span className="pdmr-group-count">{group.items.length}</span>
+                </h3>
+                <ul className="pdmr-list">
+                  {group.items.map(renderLabCard)}
+                </ul>
+              </section>
+            ))}
+          </div>
         ) : (
-          <ul className="pd-lab-list">
-            {filtered.map((lab) => {
-              const isExpanded = expandedLabTests.has(lab._id);
-              const results = Array.isArray(lab.testResults) ? lab.testResults : [];
-              const abnormalCount = results.filter((r) => r.isAbnormal || r.isCritical).length;
-              const criticalCount = results.filter((r) => r.isCritical).length;
-              const isUnread = lab.status === 'completed' && !lab.isViewedByPatient;
-
-              return (
-                <li key={lab._id} className="pd-lab-card">
-                  <button
-                    type="button"
-                    className="pd-lab-head"
-                    onClick={() => toggleLabTest(lab)}
-                    aria-expanded={isExpanded}
-                    aria-controls={`pd-lab-body-${lab._id}`}
-                  >
-                    <div className="pd-lab-head-left">
-                      <div className="pd-lab-icon" aria-hidden="true">
-                        <FlaskConical size={20} />
-                      </div>
-                      <div className="pd-lab-title">
-                        <h3 dir="ltr">{lab.testNumber}</h3>
-                        <div className="pd-lab-meta">
-                          <span className="pd-lab-date" dir="ltr">
-                            <Calendar size={12} aria-hidden="true" />
-                            <time dateTime={lab.orderDate}>{formatDate(lab.orderDate)}</time>
-                          </span>
-                          <span className={`pd-lab-status pd-lab-status--${lab.status}`}>
-                            {LAB_STATUS_LABELS[lab.status] || lab.status}
-                          </span>
-                          {isUnread && (
-                            <span className="pd-lab-unread-dot" aria-label="نتيجة غير مقروءة">
-                              •
-                            </span>
-                          )}
-                          {criticalCount > 0 && (
-                            <span className="pd-lab-flag pd-lab-flag--critical">
-                              <AlertOctagon size={12} aria-hidden="true" />
-                              <span>حرجة</span>
-                            </span>
-                          )}
-                          {criticalCount === 0 && abnormalCount > 0 && (
-                            <span className="pd-lab-flag pd-lab-flag--abnormal">
-                              <AlertTriangle size={12} aria-hidden="true" />
-                              <span>غير طبيعية</span>
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    <ChevronDown className="pd-lab-chevron" size={18} aria-hidden="true" />
-                  </button>
-
-                  {isExpanded && (
-                    <div id={`pd-lab-body-${lab._id}`} className="pd-lab-body">
-                      {results.length > 0 ? (
-                        <div className="pd-lab-results-wrap">
-                          <table className="pd-lab-results-table">
-                            <thead>
-                              <tr>
-                                <th scope="col">الفحص</th>
-                                <th scope="col">القيمة</th>
-                                <th scope="col">المعدل الطبيعي</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {results.map((r, idx) => {
-                                const rowClass =
-                                  r.isCritical ? 'is-critical'
-                                  : r.isAbnormal ? 'is-abnormal'
-                                  : '';
-                                return (
-                                  <tr key={idx} className={rowClass}>
-                                   <td>{r.testName}</td>
-                                   <td>
-                                    {r.value}
-                                    {r.unit && <span className="pd-lab-unit">{' '}{r.unit}</span>}
-                                     </td>
-                                    <td>{r.referenceRange || '—'}</td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      ) : (
-                        <p className="pd-lab-no-results">لم تصدر النتائج بعد.</p>
-                      )}
-
-                      {lab.resultPdfUrl && (
-                        <a
-                          href={`http://localhost:5000${lab.resultPdfUrl}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="pd-btn pd-btn--ghost pd-lab-pdf-link"
-                        >
-                          <Download size={16} aria-hidden="true" />
-                          <span>تنزيل تقرير PDF</span>
-                        </a>
-                      )}
-
-                      {lab.labNotes && (
-                        <p className="pd-lab-notes" dir="auto">
-                          <strong>ملاحظات المختبر: </strong>
-                          {lab.labNotes}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </li>
-              );
-            })}
+          <ul className="pdmr-grid">
+            {filtered.map(renderLabCard)}
           </ul>
         )}
       </div>
     );
   };
+
 
 
   // ════════════════════════════════════════════════════════════════════

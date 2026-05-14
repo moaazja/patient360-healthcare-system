@@ -39,6 +39,8 @@ const {
   Person, Children, Patient, AuditLog
 } = require('../models');
 
+const { createNotification } = require('./notificationController');
+
 // ============================================================================
 // HELPERS
 // ============================================================================
@@ -408,6 +410,26 @@ exports.collectSample = async (req, res) => {
 
     console.log('✅ Sample collected for', labTest.testNumber);
 
+    // ── PUSH NOTIFICATION TO PATIENT ────────────────────────────────────────
+    try {
+      createNotification({
+        recipientPersonId: labTest.patientPersonId,
+        recipientChildId:  labTest.patientChildId,
+        recipientType: 'patient',
+        notificationType: 'lab_results_ready',
+        title:       'تم استلام عينتك',
+        titleArabic: 'تم استلام عينتك',
+        body: `تم استلام عينة الفحص رقم ${labTest.testNumber} بنجاح. ستصلك النتائج عند جاهزيتها.`,
+        channels: ['push', 'in_app'],
+        relatedType: 'lab_test',
+        relatedId:   labTest._id,
+        deepLinkRoute: '/lab',
+        priority: 'normal'
+      }).catch(err => console.warn('⚠️  Notification failed:', err.message));
+    } catch (notifError) {
+      console.warn('⚠️  Notification dispatch error (non-fatal):', notifError.message);
+    }
+
     AuditLog.record({
       userId: req.user._id,
       userEmail: req.user.email,
@@ -770,6 +792,29 @@ exports.completeLabTest = async (req, res) => {
     await labTech.recordTestCompleted();
 
     console.log('✅ Test completed:', labTest.testNumber);
+
+    // ── PUSH NOTIFICATION TO PATIENT ────────────────────────────────────────
+    try {
+      const isCriticalResult = labTest.isCritical === true;
+      createNotification({
+        recipientPersonId: labTest.patientPersonId,
+        recipientChildId:  labTest.patientChildId,
+        recipientType: 'patient',
+        notificationType: isCriticalResult ? 'lab_results_critical' : 'lab_results_ready',
+        title:       isCriticalResult ? 'نتائج فحص حرجة' : 'نتائج فحصك جاهزة',
+        titleArabic: isCriticalResult ? 'نتائج فحص حرجة' : 'نتائج فحصك جاهزة',
+        body: isCriticalResult
+          ? `يوجد نتائج فحص حرجة تتطلب مراجعة طبيبك فوراً — رقم الفحص ${labTest.testNumber}`
+          : `نتائج فحصك رقم ${labTest.testNumber} جاهزة الآن. اضغط للاطلاع عليها.`,
+        channels: ['push', 'in_app'],
+        relatedType: 'lab_test',
+        relatedId:   labTest._id,
+        deepLinkRoute: '/lab',
+        priority: isCriticalResult ? 'urgent' : 'normal'
+      }).catch(err => console.warn('⚠️  Notification failed:', err.message));
+    } catch (notifError) {
+      console.warn('⚠️  Notification dispatch error (non-fatal):', notifError.message);
+    }
 
     AuditLog.record({
       userId: req.user._id,

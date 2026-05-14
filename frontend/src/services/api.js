@@ -40,18 +40,19 @@ api.interceptors.request.use(
   }
 );
 
+// Add response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
   (error) => {
+    // Don't redirect during login attempt itself
     if (error.response?.status === 401) {
       const isLoginAttempt = error.config?.url?.includes('/auth/login');
-      const isOnLoginPage  = window.location.pathname === '/';
 
-      if (!isLoginAttempt && !isOnLoginPage) {
-        // 🔒 الجلسة انتهت أو التوكن غير صالح — تنظيف شامل
-        localStorage.clear();
-        sessionStorage.clear();
-        window.location.replace('/');
+      if (!isLoginAttempt && localStorage.getItem('token')) {
+        // Only redirect if it's NOT a login attempt and user has a token
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        window.location.href = '/login';
       }
     }
     return Promise.reject(error);
@@ -91,12 +92,13 @@ export const authAPI = {
     }
   },
 
-
+  // Logout
   logout: () => {
-    localStorage.clear();
-    sessionStorage.clear();
-    window.location.replace('/');
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    window.location.href = '/login';
   },
+
   // Get current user
   getCurrentUser: () => {
     const userStr = localStorage.getItem('user');
@@ -1274,6 +1276,89 @@ export const doctorAPI = {
       return response.data;
     } catch (error) {
       const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في إضافة الموعد';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  // ──────────────────────────────────────────
+  // 3.5 SCHEDULE TEMPLATE (Calendly-style — v2)
+  // ──────────────────────────────────────────
+  // The schedule template is the source of truth for the doctor's weekly
+  // working hours. The backend uses it to AUTO-GENERATE availability_slots,
+  // so the doctor no longer has to add slots one by one. Used in:
+  //   • SignUp (submitted as part of the registration form)
+  //   • DoctorDashboard "جدول العمل" section (view + edit)
+
+  /**
+   * GET /api/doctor/schedule-template
+   * Returns the logged-in doctor's full weekly schedule template.
+   * If the doctor has never saved one, returns a sane empty default
+   * so the editor UI can mount without crashing.
+   *
+   * @returns {Promise<{success, scheduleTemplate, legacyAvailableDays}>}
+   *   scheduleTemplate shape:
+   *     {
+   *       weeklyPattern: { Sunday: [...], Monday: [...], ... },
+   *       slotDuration: number,
+   *       bufferTime: number,
+   *       bookingWindowDays: number,
+   *       exceptions: [...],
+   *       isActive: boolean
+   *     }
+   */
+  getScheduleTemplate: async () => {
+    try {
+      const response = await api.get('/doctor/schedule-template');
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message
+        || error.message
+        || 'حدث خطأ في تحميل جدول العمل';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /**
+   * PUT /api/doctor/schedule-template
+   * Save a new schedule template AND regenerate the doctor's
+   * availability_slots collection from it. Booked + blocked slots are
+   * preserved; only future unbooked slots are deleted and replaced.
+   *
+   * @param {Object} scheduleTemplate — full template object
+   * @returns {Promise<{success, message, scheduleTemplate, slots: {deleted, inserted, kept}}>}
+   */
+  updateScheduleTemplate: async (scheduleTemplate) => {
+    try {
+      const response = await api.put('/doctor/schedule-template', { scheduleTemplate });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message
+        || error.message
+        || 'حدث خطأ في حفظ جدول العمل';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /**
+   * POST /api/doctor/schedule-template/regenerate
+   * Regenerate availability_slots from the CURRENT schedule template,
+   * without changing the template itself. Useful for extending the
+   * booking window forward or recovering from manual deletions.
+   *
+   * @param {number} [daysAhead] — optional override for the booking window
+   * @returns {Promise<{success, message, slots: {deleted, inserted, kept}}>}
+   */
+  regenerateScheduleSlots: async (daysAhead) => {
+    try {
+      const payload = (daysAhead !== undefined && daysAhead !== null)
+        ? { daysAhead }
+        : {};
+      const response = await api.post('/doctor/schedule-template/regenerate', payload);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message
+        || error.message
+        || 'حدث خطأ في إعادة توليد المواعيد';
       throw { message: errorMessage, ...error.response?.data };
     }
   },

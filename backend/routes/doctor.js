@@ -7,6 +7,19 @@
  *  All routes require:
  *    1. Authentication  (protect)
  *    2. Doctor role     (restrictTo('doctor'))
+ *
+ *  ─────────────────────────────────────────────────────────────────────
+ *  v2 — Schedule Template endpoints (Calendly-style, May 2026)
+ *
+ *      GET    /api/doctor/schedule-template
+ *      PUT    /api/doctor/schedule-template
+ *      POST   /api/doctor/schedule-template/regenerate
+ *
+ *  These manage the doctor's structured weekly schedule template and
+ *  delegate to availabilitySlotController for the generation work.
+ *  All three pass through `injectDoctorContext` so the caller's identity
+ *  is verified before any read or write.
+ *  ─────────────────────────────────────────────────────────────────────
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -50,6 +63,9 @@ const notificationController = require('../controllers/notificationController');
  * The frontend should never send doctorId itself — that's a security concern
  * (a doctor could otherwise create slots for a different doctor's calendar).
  * This middleware enforces "the slot always belongs to the caller".
+ *
+ * Also sets req.doctorId for handlers that don't read from req.body
+ * (e.g. GET requests).
  */
 async function injectDoctorContext(req, res, next) {
   try {
@@ -541,7 +557,7 @@ router.post(
   '/availability-slots',
   protect,
   restrictTo('doctor'),
-  injectDoctorContext,              // ← NEW: auto-injects doctorId from the logged-in user
+  injectDoctorContext,              // ← auto-injects doctorId from the logged-in user
   slotController.createSlot
 );
 
@@ -614,6 +630,60 @@ router.delete(
       });
     }
   }
+);
+
+
+// ============================================================================
+// SCHEDULE TEMPLATE — NEW v2 (Calendly-style weekly schedule)
+// ============================================================================
+
+/**
+ * @route   GET /api/doctor/schedule-template
+ * @desc    Return the logged-in doctor's structured weekly schedule template.
+ *          If the doctor has never saved one, returns a sane empty default.
+ * @access  Private (Doctor only)
+ */
+router.get(
+  '/schedule-template',
+  protect,
+  restrictTo('doctor'),
+  injectDoctorContext,
+  slotController.getScheduleTemplate
+);
+
+/**
+ * @route   PUT /api/doctor/schedule-template
+ * @desc    Save a new schedule template AND regenerate the doctor's
+ *          availability_slots from it. Booked + blocked slots are preserved;
+ *          only future unbooked slots are replaced.
+ * @access  Private (Doctor only)
+ *
+ * Body: { scheduleTemplate: {...} } — matches Doctor.scheduleTemplate shape
+ */
+router.put(
+  '/schedule-template',
+  protect,
+  restrictTo('doctor'),
+  injectDoctorContext,
+  slotController.updateScheduleTemplate
+);
+
+/**
+ * @route   POST /api/doctor/schedule-template/regenerate
+ * @desc    Regenerate availability_slots from the doctor's CURRENT schedule
+ *          template, without changing the template itself. Useful for
+ *          extending the booking window forward or recovering from mistaken
+ *          manual deletions.
+ * @access  Private (Doctor only)
+ *
+ * Body (optional): { daysAhead?: number }
+ */
+router.post(
+  '/schedule-template/regenerate',
+  protect,
+  restrictTo('doctor'),
+  injectDoctorContext,
+  slotController.regenerateFromTemplate
 );
 
 

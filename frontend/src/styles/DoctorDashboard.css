@@ -4283,3 +4283,785 @@
 @media (prefers-reduced-motion: reduce) {
   .dd-xray-score-fill { transition: none; }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   20. SCHEDULE TEMPLATE SECTION (Calendly-style — v2)
+   ────────────────────────────────────────────────────────────────────
+   The "جدول العمل" sidebar section. Hosts the <WeeklyScheduleEditor />
+   component (which brings its own .wse-* styles) and adds:
+     • a save/regenerate toolbar in the page header,
+     • dirty-state, success, and error banners,
+     • a loading placeholder while the API call resolves.
+
+   The editor itself is fully styled by WeeklyScheduleEditor.css — these
+   rules only handle the page-level chrome around it.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* ── Toolbar — two action buttons in the page header ── */
+
+.dd-schedule-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 720px) {
+  .dd-schedule-actions {
+    width: 100%;
+  }
+  .dd-schedule-actions .dd-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+
+/* ── Loading placeholder ── */
+
+.dd-schedule-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 20px;
+  background: var(--tm-card-bg, #FFFFFF);
+  border: 1px solid var(--tm-card-border, var(--tm-input-border, #C5DBDA));
+  border-radius: 16px;
+  color: var(--tm-text-secondary, #4A6B6E);
+  font-size: 0.95rem;
+  font-weight: 600;
+  box-shadow: var(--tm-shadow, 0 4px 12px rgba(13, 59, 62, 0.08));
+}
+
+.dd-schedule-loading .dd-spin {
+  animation: dd-spin 1s linear infinite;
+  color: var(--tm-action, #00897B);
+}
+
+@keyframes dd-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── Banners (dirty, success, error) ── */
+
+.dd-schedule-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  border: 1.5px solid transparent;
+  margin-bottom: 16px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  animation: dd-banner-fade-in 0.3s ease;
+}
+
+.dd-schedule-banner svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.dd-schedule-banner-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.dd-schedule-banner-text strong {
+  font-weight: 800;
+  font-size: 0.95rem;
+}
+
+.dd-schedule-banner-text span {
+  font-weight: 500;
+  font-size: 0.825rem;
+  color: inherit;
+  opacity: 0.9;
+  line-height: 1.5;
+}
+
+/* Warning — unsaved changes */
+.dd-schedule-banner--warning {
+  background: rgba(245, 124, 0, 0.08);
+  border-color: rgba(245, 124, 0, 0.35);
+  color: var(--tm-warning, #F57C00);
+}
+
+/* Success — last save/regenerate result */
+.dd-schedule-banner--success {
+  background: rgba(var(--tm-action-rgb, 0, 137, 123), 0.08);
+  border-color: rgba(var(--tm-action-rgb, 0, 137, 123), 0.35);
+  color: var(--tm-action, #00897B);
+}
+
+/* Error — validation failure */
+.dd-schedule-banner--error {
+  background: rgba(var(--tm-danger-rgb, 198, 40, 40), 0.08);
+  border-color: rgba(var(--tm-danger-rgb, 198, 40, 40), 0.35);
+  color: var(--tm-danger, #C62828);
+  align-items: center;
+}
+
+@keyframes dd-banner-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Editor wrapper — gives the embedded WeeklyScheduleEditor some
+   breathing room within the doctor dashboard layout. ── */
+
+.dd-schedule-editor-wrap {
+  width: 100%;
+}
+
+/* In responsive layouts the editor's own breakpoints handle internal
+   reflow — we just ensure no horizontal overflow at the parent level. */
+
+@media (max-width: 720px) {
+  .dd-schedule-editor-wrap {
+    margin-inline: -4px;
+  }
+}
+
+/* ── Reduced motion ── */
+
+@media (prefers-reduced-motion: reduce) {
+  .dd-schedule-loading .dd-spin { animation: none; }
+  .dd-schedule-banner { animation: none; }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   21. APPOINTMENTS — HYBRID TOGGLE (Week | Agenda | Day)
+   ────────────────────────────────────────────────────────────────────
+   Replaces the legacy week-only calendar. Adds:
+     - dd-cal-hybrid-toolbar : view-mode segmented control + date nav
+     - dd-cal-filter-bar     : search + status chips (all/avail/booked/blocked)
+     - dd-cal-slot variants  : .av .bk .bl .past (replacing old colour classes)
+     - dd-cal-agenda         : list-style view grouped by day
+     - dd-cal-day-view       : single-day expanded view
+     - dd-cal-legend         : footer with live counts
+   ──────────────────────────────────────────────────────────────────── */
+
+/* ── Hybrid toolbar (view toggle + date nav) ─────────────────────── */
+
+.dd-cal-hybrid-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  background: var(--tm-card-bg);
+  border: 1px solid var(--tm-card-border);
+  border-radius: 16px;
+  flex-wrap: wrap;
+}
+
+.dd-cal-view-toggle {
+  display: inline-flex;
+  background: rgba(var(--tm-action-rgb), 0.08);
+  border-radius: 12px;
+  padding: 4px;
+  gap: 2px;
+}
+
+.dd-cal-view-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--tm-text-secondary);
+  border: none;
+  font-family: 'Cairo', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  white-space: nowrap;
+}
+
+.dd-cal-view-btn:hover {
+  color: var(--tm-primary);
+  background: rgba(var(--tm-action-rgb), 0.06);
+}
+
+.dd-cal-view-btn.active {
+  background: var(--tm-card-bg);
+  color: var(--tm-action);
+  box-shadow: 0 2px 8px rgba(var(--tm-primary-rgb), 0.10);
+}
+
+.dd-cal-view-btn svg {
+  flex-shrink: 0;
+}
+
+.dd-cal-nav-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dd-cal-current-label {
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--tm-primary);
+  font-family: 'Cairo', sans-serif;
+  margin-inline-start: 8px;
+  white-space: nowrap;
+}
+
+/* ── Filter bar (search + status chips) ──────────────────────────── */
+
+.dd-cal-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--tm-card-bg);
+  border: 1px solid var(--tm-card-border);
+  border-radius: 14px;
+  flex-wrap: wrap;
+}
+
+.dd-cal-search {
+  position: relative;
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+}
+
+.dd-cal-search > svg:first-child {
+  position: absolute;
+  inset-inline-end: 14px;
+  color: var(--tm-text-muted);
+  pointer-events: none;
+}
+
+.dd-cal-search-input {
+  width: 100%;
+  padding: 10px 42px 10px 16px;
+  background: rgba(var(--tm-action-rgb), 0.04);
+  border: 1px solid var(--tm-input-border);
+  border-radius: 10px;
+  font-family: 'Cairo', sans-serif;
+  font-size: 0.875rem;
+  color: var(--tm-text);
+  transition: all 0.25s ease;
+}
+
+.dd-cal-search-input:focus {
+  outline: none;
+  border-color: var(--tm-action);
+  background: var(--tm-card-bg);
+  box-shadow: 0 0 0 3px rgba(var(--tm-action-rgb), 0.12);
+}
+
+.dd-cal-search-input::placeholder {
+  color: var(--tm-text-muted);
+}
+
+.dd-cal-search-clear {
+  position: absolute;
+  inset-inline-start: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--tm-error-light);
+  color: var(--tm-error);
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.dd-cal-search-clear:hover {
+  background: var(--tm-error);
+  color: #FFFFFF;
+}
+
+.dd-cal-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.dd-cal-chip {
+  padding: 7px 14px;
+  border-radius: 999px;
+  background: rgba(var(--tm-primary-rgb), 0.05);
+  color: var(--tm-text-secondary);
+  border: 1px solid transparent;
+  font-family: 'Cairo', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.25s ease;
+}
+
+.dd-cal-chip:hover {
+  background: rgba(var(--tm-action-rgb), 0.08);
+  color: var(--tm-primary);
+}
+
+.dd-cal-chip.active {
+  background: var(--tm-gradient);
+  color: #FFFFFF;
+  box-shadow: 0 4px 12px var(--tm-glow);
+}
+
+.dd-cal-chip.av.active     { background: linear-gradient(135deg, #0F6E56 0%, var(--tm-action) 100%); }
+.dd-cal-chip.bk.active     { background: linear-gradient(135deg, #185FA5 0%, #2C7AC4 100%); }
+.dd-cal-chip.bl.active     { background: linear-gradient(135deg, #534AB7 0%, #6F66CC 100%); }
+
+/* ── Week view slot variants (NEW colour scheme) ─────────────────── */
+
+.dd-cal-slot.av {
+  background: #E0F2F1;
+  color: #0F6E56;
+  border: 1px solid rgba(77, 182, 172, 0.45);
+}
+
+.dd-cal-slot.bk {
+  background: #DCEEFB;
+  color: #185FA5;
+  border: 1px solid rgba(133, 183, 235, 0.55);
+}
+
+.dd-cal-slot.bl {
+  background: #EEEDFE;
+  color: #534AB7;
+  border: 1px solid rgba(175, 169, 236, 0.55);
+}
+
+.dd-cal-slot.past {
+  background: #F1EFE8;
+  color: #888780;
+  border: 1px dashed rgba(136, 135, 128, 0.45);
+}
+
+[data-theme="dark"] .dd-cal-slot.av {
+  background: rgba(15, 110, 86, 0.20);
+  color: #4DB6AC;
+  border-color: rgba(77, 182, 172, 0.30);
+}
+[data-theme="dark"] .dd-cal-slot.bk {
+  background: rgba(24, 95, 165, 0.22);
+  color: #85B7EB;
+  border-color: rgba(133, 183, 235, 0.30);
+}
+[data-theme="dark"] .dd-cal-slot.bl {
+  background: rgba(83, 74, 183, 0.22);
+  color: #AFA9EC;
+  border-color: rgba(175, 169, 236, 0.30);
+}
+[data-theme="dark"] .dd-cal-slot.past {
+  background: rgba(136, 135, 128, 0.10);
+  color: #9C9B92;
+}
+
+/* Today column tint for Week grid */
+.dd-cal-day-header.today {
+  background: rgba(var(--tm-action-rgb), 0.10);
+}
+
+/* ── Agenda view (list grouped by day) ───────────────────────────── */
+
+.dd-cal-agenda {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.dd-agenda-day {
+  background: var(--tm-card-bg);
+  border: 1px solid var(--tm-card-border);
+  border-radius: 16px;
+  padding: 18px 20px;
+  box-shadow: var(--tm-card-shadow);
+}
+
+.dd-agenda-day.today {
+  border-color: var(--tm-action);
+  box-shadow: 0 0 0 2px rgba(var(--tm-action-rgb), 0.10), var(--tm-card-shadow);
+}
+
+.dd-agenda-day-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--tm-divider);
+}
+
+.dd-agenda-day-num {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: rgba(var(--tm-action-rgb), 0.10);
+  color: var(--tm-action);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Inter', sans-serif;
+  font-size: 1.1rem;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.dd-agenda-day.today .dd-agenda-day-num {
+  background: var(--tm-gradient);
+  color: #FFFFFF;
+  box-shadow: 0 4px 12px var(--tm-glow);
+}
+
+.dd-agenda-day-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dd-agenda-day-name {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--tm-primary);
+  font-family: 'Cairo', sans-serif;
+}
+
+.dd-agenda-day-date {
+  font-size: 0.78rem;
+  color: var(--tm-text-muted);
+}
+
+.dd-agenda-day-count {
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(var(--tm-action-rgb), 0.10);
+  color: var(--tm-action);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.dd-agenda-events {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dd-agenda-event {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--tm-card-bg);
+  border: 1px solid var(--tm-card-border);
+  cursor: pointer;
+  font-family: 'Cairo', sans-serif;
+  text-align: right;
+  transition: all 0.25s ease;
+}
+
+.dd-agenda-event:hover {
+  transform: translateX(-3px);
+  box-shadow: 0 8px 20px rgba(var(--tm-primary-rgb), 0.08);
+}
+
+.dd-agenda-event.av { border-inline-end: 4px solid #4DB6AC; }
+.dd-agenda-event.bk { border-inline-end: 4px solid #85B7EB; }
+.dd-agenda-event.bl { border-inline-end: 4px solid #AFA9EC; }
+
+.dd-agenda-event-time {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: var(--tm-primary);
+  font-variant-numeric: tabular-nums;
+  direction: ltr;
+}
+
+.dd-agenda-event-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dd-agenda-event-body strong {
+  font-size: 0.9rem;
+  color: var(--tm-primary);
+  font-weight: 700;
+}
+
+.dd-agenda-event-reason {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--tm-text-muted);
+}
+
+.dd-agenda-event-reason svg { flex-shrink: 0; color: var(--tm-action); }
+
+.dd-agenda-event-badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: 'Cairo', sans-serif;
+  background: rgba(var(--tm-primary-rgb), 0.06);
+  color: var(--tm-text-muted);
+}
+
+.dd-agenda-event.av .dd-agenda-event-badge { background: #E0F2F1;  color: #0F6E56; }
+.dd-agenda-event.bk .dd-agenda-event-badge { background: #DCEEFB;  color: #185FA5; }
+.dd-agenda-event.bl .dd-agenda-event-badge { background: #EEEDFE;  color: #534AB7; }
+
+/* ── Day view (single day expanded) ──────────────────────────────── */
+
+.dd-cal-day-view {
+  background: var(--tm-card-bg);
+  border: 1px solid var(--tm-card-border);
+  border-radius: 18px;
+  padding: 24px 28px;
+  box-shadow: var(--tm-card-shadow);
+}
+
+.dd-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 18px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--tm-divider);
+}
+
+.dd-day-head.today {
+  border-bottom-color: var(--tm-action);
+}
+
+.dd-day-head-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dd-day-head-name {
+  font-size: 1.4rem;
+  font-weight: 800;
+  color: var(--tm-primary);
+  font-family: 'Cairo', sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.dd-day-head-date {
+  font-size: 0.9rem;
+  color: var(--tm-text-muted);
+}
+
+.dd-day-head-count {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 20px;
+  border-radius: 14px;
+  background: var(--tm-gradient);
+  color: #FFFFFF;
+  box-shadow: 0 6px 18px var(--tm-glow);
+}
+
+.dd-day-head-num {
+  font-size: 1.6rem;
+  font-weight: 800;
+  font-family: 'Inter', sans-serif;
+  line-height: 1;
+}
+
+.dd-day-head-label {
+  font-size: 0.7rem;
+  opacity: 0.85;
+  margin-top: 2px;
+}
+
+.dd-day-events {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dd-day-event {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 18px;
+  align-items: center;
+  padding: 18px 22px;
+  border-radius: 14px;
+  background: var(--tm-card-bg);
+  border: 1px solid var(--tm-card-border);
+  cursor: pointer;
+  font-family: 'Cairo', sans-serif;
+  text-align: right;
+  transition: all 0.3s ease;
+}
+
+.dd-day-event:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px rgba(var(--tm-primary-rgb), 0.08);
+}
+
+.dd-day-event.av { border-inline-end: 5px solid #4DB6AC; }
+.dd-day-event.bk { border-inline-end: 5px solid #85B7EB; }
+.dd-day-event.bl { border-inline-end: 5px solid #AFA9EC; }
+
+.dd-day-event-time {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: rgba(var(--tm-action-rgb), 0.06);
+  min-width: 96px;
+  text-align: center;
+}
+
+.dd-day-event-time-main {
+  font-family: 'Inter', sans-serif;
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--tm-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.dd-day-event-time-sub {
+  font-size: 0.7rem;
+  color: var(--tm-text-muted);
+  font-family: 'Cairo', sans-serif;
+}
+
+.dd-day-event-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dd-day-event-body strong {
+  font-size: 1rem;
+  color: var(--tm-primary);
+  font-weight: 700;
+}
+
+.dd-day-event-body span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.825rem;
+  color: var(--tm-text-secondary);
+}
+
+.dd-day-event-body span svg { flex-shrink: 0; color: var(--tm-action); }
+
+.dd-day-event-chev {
+  color: var(--tm-text-muted);
+  transition: transform 0.25s ease;
+}
+
+.dd-day-event:hover .dd-day-event-chev {
+  transform: translateX(-4px);
+  color: var(--tm-action);
+}
+
+/* ── Legend footer with live counts ──────────────────────────────── */
+
+.dd-cal-legend {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 14px 20px;
+  background: var(--tm-card-bg);
+  border: 1px solid var(--tm-card-border);
+  border-radius: 14px;
+  font-family: 'Cairo', sans-serif;
+  font-size: 0.825rem;
+  color: var(--tm-text-secondary);
+  flex-wrap: wrap;
+}
+
+.dd-cal-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.dd-cal-legend-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+
+.dd-cal-legend-swatch.av { background: #E0F2F1; border: 1px solid rgba(77, 182, 172, 0.45); }
+.dd-cal-legend-swatch.bk { background: #DCEEFB; border: 1px solid rgba(133, 183, 235, 0.55); }
+.dd-cal-legend-swatch.bl { background: #EEEDFE; border: 1px solid rgba(175, 169, 236, 0.55); }
+
+.dd-cal-legend-sep {
+  color: var(--tm-text-muted);
+  opacity: 0.6;
+}
+
+/* ── Responsive tweaks for Hybrid Toggle ─────────────────────────── */
+
+@media (max-width: 768px) {
+  .dd-cal-hybrid-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .dd-cal-view-toggle {
+    justify-content: stretch;
+  }
+  .dd-cal-view-btn {
+    flex: 1;
+    justify-content: center;
+  }
+  .dd-cal-nav-group {
+    justify-content: center;
+  }
+  .dd-cal-current-label {
+    width: 100%;
+    text-align: center;
+    margin-inline-start: 0;
+    margin-top: 4px;
+  }
+  .dd-cal-filter-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .dd-cal-chips {
+    justify-content: center;
+  }
+  .dd-agenda-event,
+  .dd-day-event {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .dd-day-head {
+    flex-direction: column;
+    text-align: center;
+  }
+  .dd-day-event-chev { display: none; }
+}

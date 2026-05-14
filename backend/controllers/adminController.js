@@ -46,6 +46,10 @@ const {
   Visit, AuditLog, DoctorRequest
 } = require('../models');
 
+// Slot controller — used by approveDoctorRequest to auto-generate the
+// approved doctor's availability_slots from their schedule template.
+const slotController = require('./availabilitySlotController');
+
 // Allowed deactivation reasons — matches locked Account schema enum
 const ALLOWED_DEACTIVATION_REASONS = [
   'voluntary', 'administrative', 'security',
@@ -1568,11 +1572,44 @@ exports.approveDoctorRequest = async (req, res) => {
           yearsOfExperience: request.yearsOfExperience,
           hospitalAffiliation: request.hospitalAffiliation,
           availableDays: request.availableDays || [],
+          ...(request.scheduleTemplate
+            ? { scheduleTemplate: request.scheduleTemplate.toObject
+                  ? request.scheduleTemplate.toObject()
+                  : request.scheduleTemplate }
+            : {}),
           consultationFee: request.consultationFee,
           currency: request.currency || 'SYP'
         });
         createdIds.professionalId = professionalRecord._id;
         console.log(`✅ Doctor created: ${professionalRecord._id}`);
+
+        // ── Auto-generate availability_slots from the schedule template ──
+        // Non-fatal: if generation fails (e.g. template is invalid), the
+        // doctor account is still approved successfully. The doctor can
+        // manually trigger regeneration later from their dashboard.
+        if (
+          professionalRecord.scheduleTemplate &&
+          professionalRecord.scheduleTemplate.isActive !== false
+        ) {
+          try {
+            const slotResult = await slotController.regenerateSlotsForDoctor(
+              professionalRecord
+            );
+            console.log(
+              `✅ Auto-generated ${slotResult.inserted} availability slots ` +
+              `from schedule template`
+            );
+          } catch (slotErr) {
+            console.error(
+              '⚠️  Initial slot generation failed (non-fatal):',
+              slotErr.message
+            );
+          }
+        } else {
+          console.log(
+            'ℹ️  Doctor has no active schedule template — skipping slot generation'
+          );
+        }
 
       } else if (requestType === 'pharmacist') {
         console.log('3️⃣ Creating Pharmacist...');

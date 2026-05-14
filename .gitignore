@@ -75,3 +75,11 @@ Thumbs.db
 # ============================================================================
 patient360_mobile/custom_lint.log
 patient360_mobile/*.log
+
+# ============================================================================
+# Firebase Service Account — Backend FCM (NEVER commit!)
+# ============================================================================
+backend/config/firebase-service-account.json
+backend/config/*firebase-adminsdk*.json
+**/firebase-service-account.json
+*-firebase-adminsdk-*.json

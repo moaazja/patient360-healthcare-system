@@ -7,7 +7,14 @@ import DoctorDashboard from './pages/DoctorDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import PharmacistDashboard from './pages/PharmacistDashboard';
 import LabDashboard from './pages/LabDashboard';
-import ProtectedRoute from './components/ProtectedRoute';       // ← NEW
+import ProtectedRoute from './components/ProtectedRoute';
+
+// Patient detail pages (Stage 1: appointment; Stages 2-4 will add visits / prescriptions / lab-results)
+import AppointmentDetailPage from './pages/patient/AppointmentDetailPage';
+import VisitDetailPage from './pages/patient/VisitDetailPage';
+import PrescriptionDetailPage from './pages/patient/PrescriptionDetailPage';
+import LabResultDetailPage from './pages/patient/LabResultDetailPage';
+
 import { initializeAdminAccount } from './services/adminService';
 
 /**
@@ -16,6 +23,10 @@ import { initializeAdminAccount } from './services/adminService';
  *
  * كل الـ Dashboards محمية بـ ProtectedRoute مع تحديد الدور المسموح،
  * بحيث لا يمكن للمستخدم الوصول لصفحة غير صفحته حتى لو كتب الـ URL يدوياً.
+ *
+ * Detail pages (e.g. AppointmentDetailPage) are also patient-only and
+ * live under the /patient-dashboard/* URL prefix so the ProtectedRoute
+ * guard stays consistent across the patient surface.
  */
 function App() {
   useEffect(() => {
@@ -36,6 +47,43 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={['patient']}>
                 <PatientDashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Patient detail pages — same guard, separate URL space ──── */}
+          <Route
+            path="/patient-dashboard/appointments/:id"
+            element={
+              <ProtectedRoute allowedRoles={['patient']}>
+                <AppointmentDetailPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/patient-dashboard/visits/:id"
+            element={
+              <ProtectedRoute allowedRoles={['patient']}>
+                <VisitDetailPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/patient-dashboard/prescriptions/:id"
+            element={
+              <ProtectedRoute allowedRoles={['patient']}>
+                <PrescriptionDetailPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/patient-dashboard/lab-results/:id"
+            element={
+              <ProtectedRoute allowedRoles={['patient']}>
+                <LabResultDetailPage />
               </ProtectedRoute>
             }
           />

@@ -130,6 +130,7 @@ import {
   validateNationalId,
 } from '../utils/ageCalculator';
 import LoadingSpinner from '../components/LoadingSpinner';
+import WeeklyScheduleEditor, { createDefaultScheduleTemplate } from '../components/WeeklyScheduleEditor';
 import '../styles/SignUp.css';
 
 
@@ -1064,6 +1065,12 @@ const SignUp = () => {
     yearsOfExperience: '',
     hospitalAffiliation: '',
     availableDays: [],
+    // ── Calendly-style weekly schedule (v2) ──────────────────────────────
+    // Source of truth for the doctor's working hours. The backend uses this
+    // to auto-generate availability_slots on admin approval. The legacy
+    // `availableDays` array above is kept in sync (derived from this
+    // template's weeklyPattern keys) for backward compatibility.
+    scheduleTemplate: createDefaultScheduleTemplate(),
     consultationFee: '',
     licenseDocument: null,
     medicalCertificate: null,
@@ -1268,6 +1275,39 @@ const SignUp = () => {
     setErrors((prev) => {
       if (!prev.availableDays) return prev;
       const next = { ...prev };
+      delete next.availableDays;
+      return next;
+    });
+  }, []);
+
+  /**
+   * Handler for the WeeklyScheduleEditor component. Updates the structured
+   * scheduleTemplate AND derives the legacy `availableDays` array from it
+   * (any day with at least one period is considered "available").
+   *
+   * Also clears any related validation errors so the user sees immediate
+   * feedback as they edit the schedule.
+   */
+  const handleScheduleTemplateChange = useCallback((nextTemplate) => {
+    const WEEKDAY_IDS = [
+      'Sunday', 'Monday', 'Tuesday', 'Wednesday',
+      'Thursday', 'Friday', 'Saturday',
+    ];
+    const derivedDays = WEEKDAY_IDS.filter((day) => {
+      const periods = nextTemplate?.weeklyPattern?.[day];
+      return Array.isArray(periods) && periods.length > 0;
+    });
+
+    setDoctorFormData((prev) => ({
+      ...prev,
+      scheduleTemplate: nextTemplate,
+      availableDays: derivedDays,
+    }));
+
+    setErrors((prev) => {
+      if (!prev.scheduleTemplate && !prev.availableDays) return prev;
+      const next = { ...prev };
+      delete next.scheduleTemplate;
       delete next.availableDays;
       return next;
     });
@@ -1521,7 +1561,24 @@ const SignUp = () => {
 
       if (!doctorFormData.specialization) e.specialization = 'التخصص مطلوب';
       if (!doctorFormData.hospitalAffiliation.trim()) e.hospitalAffiliation = 'مكان العمل مطلوب';
-      if (doctorFormData.availableDays.length === 0) e.availableDays = 'يجب اختيار يوم عمل واحد على الأقل';
+
+      // ── Schedule template validation (v2) ─────────────────────────────
+      // Must have at least one working period across the whole week.
+      // We also check time-format and reversal errors at the controller
+      // and model layers — this is a fast pre-flight client-side check.
+      const WEEKDAY_IDS = [
+        'Sunday', 'Monday', 'Tuesday', 'Wednesday',
+        'Thursday', 'Friday', 'Saturday',
+      ];
+      const totalPeriods = doctorFormData.scheduleTemplate
+        ? WEEKDAY_IDS.reduce((sum, day) => {
+            const periods = doctorFormData.scheduleTemplate.weeklyPattern?.[day];
+            return sum + (Array.isArray(periods) ? periods.length : 0);
+          }, 0)
+        : 0;
+      if (totalPeriods === 0) {
+        e.scheduleTemplate = 'يجب تحديد فترة عمل واحدة على الأقل في جدول العمل';
+      }
 
       const years = parseInt(doctorFormData.yearsOfExperience, 10);
       if (Number.isNaN(years) || years < 0 || years > 60) e.yearsOfExperience = 'سنوات الخبرة يجب أن تكون بين 0-60';
@@ -1767,6 +1824,16 @@ const SignUp = () => {
       formData.append('yearsOfExperience', doctorFormData.yearsOfExperience);
       formData.append('hospitalAffiliation', doctorFormData.hospitalAffiliation.trim());
       formData.append('availableDays', JSON.stringify(doctorFormData.availableDays));
+      // ── Schedule template (v2 Calendly-style) ────────────────────────
+      // Sent as a JSON string because multipart/form-data can't carry
+      // nested objects natively. The backend's registerDoctorRequest
+      // parses this back into an object and validates it.
+      if (doctorFormData.scheduleTemplate) {
+        formData.append(
+          'scheduleTemplate',
+          JSON.stringify(doctorFormData.scheduleTemplate),
+        );
+      }
       formData.append('consultationFee', doctorFormData.consultationFee || '0');
 
       if (doctorFormData.medicalCertificate) formData.append('medicalCertificate', doctorFormData.medicalCertificate);
@@ -4336,30 +4403,25 @@ const SignUp = () => {
                   </div>
                 </div>
 
-                {/* Available days */}
-                <div className="form-group">
-                  <label className="form-label">
-                    أيام العمل <span className="required-mark">*</span>
-                  </label>
-                  <div className="weekdays-grid">
-                    {WEEKDAYS.map((day) => (
-                      <button
-                        key={day.id}
-                        type="button"
-                        className={`weekday-btn ${
-                          doctorFormData.availableDays.includes(day.id) ? 'selected' : ''
-                        }`}
-                        onClick={() => handleDayToggle(day.id)}
-                        aria-pressed={doctorFormData.availableDays.includes(day.id)}
-                      >
-                        {day.nameAr}
-                      </button>
-                    ))}
-                  </div>
-                  {errors.availableDays && (
+                {/* ═══ Calendly-style weekly schedule editor ═══ */}
+                {/* Replaces the legacy 7-button weekday grid.
+                    The doctor now defines exact working hours per day with
+                    multi-period support (morning + afternoon shifts), slot
+                    duration, and booking window. The backend auto-generates
+                    availability_slots from this template on admin approval. */}
+                <div className="form-group form-group-schedule">
+                  <WeeklyScheduleEditor
+                    mode="signup"
+                    value={doctorFormData.scheduleTemplate}
+                    onChange={handleScheduleTemplateChange}
+                    errors={{
+                      weeklyPattern: errors.scheduleTemplate || errors.availableDays,
+                    }}
+                  />
+                  {(errors.scheduleTemplate || errors.availableDays) && (
                     <span className="error-message">
                       <AlertCircle size={14} strokeWidth={2.2} />
-                      {errors.availableDays}
+                      {errors.scheduleTemplate || errors.availableDays}
                     </span>
                   )}
                 </div>
@@ -4527,9 +4589,55 @@ const SignUp = () => {
                         <span className="review-value">
                           {doctorFormData.availableDays
                             .map((d) => WEEKDAYS.find((w) => w.id === d)?.nameAr)
-                            .join(' • ')}
+                            .join(' • ') || 'لم يتم تحديد أيام'}
                         </span>
                       </div>
+                      {/* ── Schedule template review (v2) ─────────────────── */}
+                      {doctorFormData.scheduleTemplate && (
+                        <>
+                          <div className="review-item">
+                            <span className="review-label">مدة الموعد</span>
+                            <span className="review-value">
+                              {doctorFormData.scheduleTemplate.slotDuration} دقيقة
+                            </span>
+                          </div>
+                          <div className="review-item">
+                            <span className="review-label">نافذة الحجز</span>
+                            <span className="review-value">
+                              {doctorFormData.scheduleTemplate.bookingWindowDays} يوم
+                            </span>
+                          </div>
+                          <div className="review-item full-width">
+                            <span className="review-label">إجمالي ساعات العمل الأسبوعية</span>
+                            <span className="review-value">
+                              {(() => {
+                                const WEEKDAY_IDS = [
+                                  'Sunday', 'Monday', 'Tuesday', 'Wednesday',
+                                  'Thursday', 'Friday', 'Saturday',
+                                ];
+                                let totalMin = 0;
+                                WEEKDAY_IDS.forEach((day) => {
+                                  const periods = doctorFormData.scheduleTemplate
+                                    .weeklyPattern?.[day] || [];
+                                  periods.forEach((p) => {
+                                    const [sh, sm] = (p.startTime || '0:0').split(':').map(Number);
+                                    const [eh, em] = (p.endTime || '0:0').split(':').map(Number);
+                                    const startMin = (sh * 60) + (sm || 0);
+                                    const endMin = (eh * 60) + (em || 0);
+                                    if (endMin > startMin) totalMin += (endMin - startMin);
+                                  });
+                                });
+                                const h = Math.floor(totalMin / 60);
+                                const m = totalMin % 60;
+                                if (h === 0 && m === 0) return '—';
+                                if (m === 0) return `${h} ساعة`;
+                                if (h === 0) return `${m} دقيقة`;
+                                return `${h} ساعة ${m} دقيقة`;
+                              })()}
+                            </span>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
 

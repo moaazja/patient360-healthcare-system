@@ -50,8 +50,9 @@ class _Patient360AppState extends ConsumerState<Patient360App>
   /// dose the user just tapped on. Background-launched taps are handled
   /// the same way once the scheduler emits onto the stream after init.
   void _wireDeepLinkListener() {
-    final NotificationScheduler scheduler =
-        ref.read(notificationSchedulerProvider);
+    final NotificationScheduler scheduler = ref.read(
+      notificationSchedulerProvider,
+    );
     _deepLinkSub = scheduler.deepLinkStream.listen((ReminderDeepLink dl) {
       final GoRouter router = ref.read(appRouterProvider);
       final String iso = dl.scheduledAt.toIso8601String();
@@ -70,8 +71,9 @@ class _Patient360AppState extends ConsumerState<Patient360App>
       // is a safe no-op.
       final List<ReminderSchedule> schedules =
           ref.read(remindersProvider).value ?? <ReminderSchedule>[];
-      final NotificationScheduler scheduler =
-          ref.read(notificationSchedulerProvider);
+      final NotificationScheduler scheduler = ref.read(
+        notificationSchedulerProvider,
+      );
       // Don't await — this fires from the framework callback, no UI
       // depends on the result.
       scheduler.scheduleSlidingWindow(schedules);
@@ -91,10 +93,7 @@ class _Patient360AppState extends ConsumerState<Patient360App>
       themeMode: themeMode,
       routerConfig: router,
       locale: const Locale('ar', 'SY'),
-      supportedLocales: const <Locale>[
-        Locale('ar', 'SY'),
-        Locale('en', 'US'),
-      ],
+      supportedLocales: const <Locale>[Locale('ar', 'SY'), Locale('en', 'US')],
       localizationsDelegates: const <LocalizationsDelegate<Object>>[
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,

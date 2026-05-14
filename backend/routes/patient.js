@@ -412,12 +412,94 @@ router.get('/notifications', protect, authorize('patient'), async (req, res) => 
     });
   }
 });
+
 // ============================================================================
-// PATCH /api/patient/notifications/read-all
-// ---------------------------------------------------------------------------
-// Marks ALL unread notifications for this patient as read in a single call.
-// Useful for a "علّم الكل كمقروء" button in the notifications panel UI.
+// POST aliases for mobile compatibility
+// ----------------------------------------------------------------------------
+// The mobile app's notifications_repository.dart calls these endpoints
+// using POST (not PATCH). We expose POST aliases that simply forward to
+// the same handler logic via internal middleware redirect.
 // ============================================================================
+
+router.post('/notifications/read-all', protect, authorize('patient'), async (req, res) => {
+  try {
+    const result = await Notification.updateMany(
+      {
+        recipientId: req.account._id,
+        recipientType: 'patient',
+        status: { $ne: 'read' }
+      },
+      {
+        $set: { status: 'read', readAt: new Date() }
+      }
+    );
+
+    return res.json({
+      success: true,
+      modifiedCount: result.modifiedCount
+    });
+  } catch (error) {
+    console.error('POST /notifications/read-all error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في تحديث الإشعارات'
+    });
+  }
+});
+
+router.post('/notifications/:id/read', protect, authorize('patient'), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate ObjectId format (24-character hex string).
+    if (!/^[0-9a-fA-F]{24}$/.test(id)) {
+      return res.status(400).json({
+        success: false,
+        message: 'معرّف الإشعار غير صالح'
+      });
+    }
+
+    const notification = await Notification.findById(id);
+    if (!notification) {
+      return res.status(404).json({
+        success: false,
+        message: 'الإشعار غير موجود'
+      });
+    }
+
+    // Ownership check — prevent access to other users' notifications.
+    if (String(notification.recipientId) !== String(req.account._id)) {
+      return res.status(403).json({
+        success: false,
+        message: 'لا يمكنك الوصول إلى هذا الإشعار'
+      });
+    }
+
+    // Idempotent — already read.
+    if (notification.status === 'read') {
+      return res.json({
+        success: true,
+        notification,
+        message: 'الإشعار مقروء مسبقاً'
+      });
+    }
+
+    notification.status = 'read';
+    notification.readAt = new Date();
+    await notification.save();
+
+    return res.json({
+      success: true,
+      notification
+    });
+  } catch (error) {
+    console.error('POST /notifications/:id/read error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في تحديث حالة الإشعار'
+    });
+  }
+});
 router.patch('/notifications/read-all', protect, authorize('patient'), async (req, res) => {
   try {
     const result = await Notification.updateMany(

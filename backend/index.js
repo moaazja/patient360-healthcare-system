@@ -37,7 +37,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const path = require('path');
 const fs = require('fs');
-
+const fcmService = require('./services/fcmService');
 const PORT = process.env.PORT || 5000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/PATIENT360';
@@ -217,7 +217,13 @@ app.use('/api/appointments', appointmentRoutes);
 const emergencyRoutes = require('./routes/emergency');
 const notificationRoutes = require('./routes/notification');
 app.use('/api/emergency', emergencyRoutes);
-app.use('/api/notifications', notificationRoutes);
+
+// Notifications — primary path + mobile-compatible /api/auth/fcm-token alias
+app.use('/api/notifications', notificationRoutes.notificationsRouter || notificationRoutes);
+if (notificationRoutes.authFcmRouter) {
+  app.use('/api/auth', notificationRoutes.authFcmRouter);
+  console.log('✅ FCM token alias mounted at /api/auth/fcm-token');
+}
 
 // ── X-Ray fracture detection (Kinan model, FastAPI on port 8002) ────────────
 // Thin proxy: Express handles auth + multer, then forwards to FastAPI and
@@ -466,6 +472,8 @@ app.use((err, req, res, next) => {
 async function start() {
   await connectDatabase();
   await syncAllIndexes(); // No-op unless SYNC_INDEXES=true
+
+  fcmService.init();
 
   app.listen(PORT, () => {
     console.log('');

@@ -49,6 +49,8 @@ const {
   PharmacyInventory, Medication, AuditLog
 } = require('../models');
 
+const { createNotification } = require('./notificationController');
+
 // ============================================================================
 // HELPER: Get pharmacist record from logged-in account
 // ============================================================================
@@ -325,6 +327,27 @@ exports.dispensePrescription = async (req, res) => {
     });
 
     console.log('✅ Dispensing complete:', createdDispensing.dispensingNumber);
+
+    // ── PUSH NOTIFICATION TO PATIENT ────────────────────────────────────────
+    try {
+      const dispensedItemCount = createdDispensing.medicationsDispensed?.length || 0;
+      createNotification({
+        recipientPersonId: prescription.patientPersonId,
+        recipientChildId:  prescription.patientChildId,
+        recipientType: 'patient',
+        notificationType: 'prescription_dispensed',
+        title:       'تم صرف وصفتك',
+        titleArabic: 'تم صرف وصفتك',
+        body: `تم صرف وصفتك رقم ${prescription.prescriptionNumber} (${dispensedItemCount} دواء). يمكنك مراجعة التفاصيل.`,
+        channels: ['push', 'in_app'],
+        relatedType: 'prescription',
+        relatedId:   prescription._id,
+        deepLinkRoute: '/medications',
+        priority: 'normal'
+      }).catch(err => console.warn('⚠️  Notification failed:', err.message));
+    } catch (notifError) {
+      console.warn('⚠️  Notification dispatch error (non-fatal):', notifError.message);
+    }
 
     return res.status(201).json({
       success: true,

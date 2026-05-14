@@ -3791,6 +3791,643 @@ select.pd-form-input {
 
 
 /* ══════════════════════════════════════════════════════════════════════
+   Medical Records System (pdmr-*) — UNIVERSAL TOOLBAR + CARDS
+   ──────────────────────────────────────────────────────────────────────
+   Shared design system for the four medical-record sections of the
+   PatientDashboard (appointments, visits, prescriptions, lab-results)
+   and intended for reuse across DoctorDashboard / LabDashboard /
+   PharmacistDashboard with the same class names.
+
+   Layers:
+     pdmr-toolbar       — sticky toolbar shell (search + tabs + filters)
+     pdmr-search        — search input
+     pdmr-view-toggle   — list/cards view switcher
+     pdmr-sort          — newest/oldest dropdown
+     pdmr-chips         — tab row (status) + period row
+     pdmr-active-filters — chips for currently-active filters
+     pdmr-groups        — date-grouped container with sticky headers
+     pdmr-group-header  — "اليوم" "هذا الأسبوع" dividers
+     pdmr-list / pdmr-grid — list vs grid layout
+     pdmr-card          — single record card (used in both views)
+     pdmr-status        — colored status badge (variants: success/info/warning/danger/muted)
+
+   All tokens come from --tm-* / --pd-* defined at :root. Dark mode is
+   handled by [data-theme="dark"] overrides at the bottom of this block.
+   ══════════════════════════════════════════════════════════════════════ */
+
+.pdmr-section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Toolbar shell ──────────────────────────────────────────────── */
+.pdmr-toolbar {
+  background: var(--tm-card-bg);
+  border: 1px solid var(--tm-border);
+  border-radius: var(--pd-radius-lg);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: var(--pd-shadow-sm);
+}
+
+.pdmr-toolbar-main {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) auto auto auto;
+  gap: 10px;
+  align-items: center;
+}
+
+/* Universal search */
+.pdmr-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background: var(--tm-input-bg);
+  border: 1px solid var(--tm-border);
+  border-radius: var(--pd-radius-md);
+  height: 38px;
+  padding: 0 12px;
+  transition: border-color var(--pd-transition), box-shadow var(--pd-transition);
+}
+.pdmr-search:focus-within {
+  border-color: var(--tm-action);
+  box-shadow: 0 0 0 3px rgba(0, 137, 123, 0.12);
+}
+.pdmr-search-icon {
+  color: var(--tm-text-secondary);
+  flex-shrink: 0;
+}
+.pdmr-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--tm-text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  padding: 0 10px;
+  height: 100%;
+}
+.pdmr-search-input::placeholder {
+  color: var(--tm-text-secondary);
+  opacity: 0.65;
+}
+.pdmr-search-clear {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--tm-text-secondary);
+  padding: 4px;
+  border-radius: var(--pd-radius-sm);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  transition: background var(--pd-transition), color var(--pd-transition);
+}
+.pdmr-search-clear:hover {
+  background: var(--tm-surface);
+  color: var(--tm-action);
+}
+
+/* View toggle (list / cards) */
+.pdmr-view-toggle {
+  display: inline-flex;
+  background: var(--tm-surface);
+  border-radius: var(--pd-radius-md);
+  padding: 3px;
+  gap: 2px;
+}
+.pdmr-view-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tm-text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: var(--pd-radius-sm);
+  transition: background var(--pd-transition), color var(--pd-transition);
+  font-family: inherit;
+}
+.pdmr-view-btn:hover {
+  color: var(--tm-action);
+}
+.pdmr-view-btn.is-active {
+  background: var(--tm-card-bg);
+  color: var(--tm-primary);
+  box-shadow: var(--pd-shadow-sm);
+}
+
+/* Sort dropdown */
+.pdmr-sort {
+  height: 38px;
+  padding: 0 30px 0 12px;
+  border: 1px solid var(--tm-border);
+  border-radius: var(--pd-radius-md);
+  background: var(--tm-input-bg);
+  color: var(--tm-text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--tm-text-secondary) 50%),
+                    linear-gradient(135deg, var(--tm-text-secondary) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 50%, calc(100% - 10px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  transition: border-color var(--pd-transition);
+}
+.pdmr-sort:hover {
+  border-color: var(--tm-action);
+}
+.pdmr-sort:focus {
+  outline: none;
+  border-color: var(--tm-action);
+  box-shadow: 0 0 0 3px rgba(0, 137, 123, 0.12);
+}
+
+/* New-record CTA inherits .pd-btn but sits inline with toolbar */
+.pdmr-cta {
+  height: 38px;
+}
+
+/* Chip rows — status tabs + period filter */
+.pdmr-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 4px;
+  border-top: 1px dashed var(--tm-border);
+}
+.pdmr-chips--secondary {
+  border-top: none;
+  padding-top: 0;
+}
+.pdmr-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--tm-text-secondary);
+  background: var(--tm-card-bg);
+  border: 1px solid var(--tm-border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background var(--pd-transition), color var(--pd-transition), border-color var(--pd-transition);
+  font-family: inherit;
+}
+.pdmr-chip:hover {
+  background: var(--tm-surface);
+  color: var(--tm-primary);
+  border-color: var(--tm-accent);
+}
+.pdmr-chip.is-active {
+  background: var(--tm-action);
+  color: #fff;
+  border-color: var(--tm-action);
+}
+.pdmr-chip.is-active:hover {
+  background: var(--tm-primary);
+  border-color: var(--tm-primary);
+}
+.pdmr-chip-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--tm-surface);
+  color: var(--tm-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+.pdmr-chip.is-active .pdmr-chip-count {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+/* Ghost chip variant for secondary filters (period) */
+.pdmr-chip--ghost {
+  background: transparent;
+  border-color: transparent;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.pdmr-chip--ghost:hover {
+  background: var(--tm-surface);
+  border-color: transparent;
+}
+.pdmr-chip--ghost.is-active {
+  background: var(--tm-surface);
+  color: var(--tm-action);
+  border-color: var(--tm-accent);
+}
+
+/* Active filters row */
+.pdmr-active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--tm-border);
+}
+.pdmr-active-filters-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--tm-text-secondary);
+  font-weight: 500;
+  margin-inline-end: 4px;
+}
+.pdmr-active-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--tm-primary);
+  background: var(--tm-surface);
+  border: 1px solid var(--tm-accent);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background var(--pd-transition), color var(--pd-transition);
+  font-family: inherit;
+}
+.pdmr-active-filter:hover {
+  background: var(--tm-error);
+  color: #fff;
+  border-color: var(--tm-error);
+}
+.pdmr-clear-all {
+  margin-inline-start: auto;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--tm-error);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  border-radius: var(--pd-radius-sm);
+  font-family: inherit;
+  transition: background var(--pd-transition);
+}
+.pdmr-clear-all:hover {
+  background: rgba(211, 47, 47, 0.08);
+}
+
+/* ── Date-grouped sections ──────────────────────────────────────── */
+.pdmr-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.pdmr-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pdmr-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tm-primary);
+  margin: 0;
+  padding: 0 4px;
+}
+.pdmr-group-header svg {
+  color: var(--tm-action);
+}
+.pdmr-group-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--tm-surface);
+  color: var(--tm-action);
+  font-size: 11px;
+  font-weight: 600;
+  margin-inline-start: auto;
+}
+
+/* ── List + grid containers ─────────────────────────────────────── */
+.pdmr-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pdmr-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+/* ── Card ────────────────────────────────────────────────────────── */
+.pdmr-card {
+  background: var(--tm-card-bg);
+  border: 1px solid var(--tm-border);
+  border-radius: var(--pd-radius-lg);
+  overflow: hidden;
+  transition: border-color var(--pd-transition), box-shadow var(--pd-transition), transform var(--pd-transition);
+}
+.pdmr-card:hover {
+  border-color: var(--tm-accent);
+  box-shadow: var(--pd-shadow-md);
+  transform: translateY(-1px);
+}
+
+.pdmr-card-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: start;
+  color: inherit;
+  font-family: inherit;
+  transition: background var(--pd-transition);
+}
+.pdmr-card-head:hover {
+  background: var(--tm-surface);
+}
+
+.pdmr-card-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--pd-radius-md);
+  background: var(--tm-surface);
+  color: var(--tm-action);
+  flex-shrink: 0;
+}
+
+.pdmr-card-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pdmr-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.pdmr-card-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--tm-text-primary);
+  line-height: 1.4;
+  flex: 1;
+  min-width: 0;
+}
+
+.pdmr-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  font-size: 12.5px;
+  color: var(--tm-text-secondary);
+}
+.pdmr-card-meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.pdmr-card-meta-item svg {
+  color: var(--tm-action);
+  opacity: 0.8;
+}
+
+/* Optional one-line summary inside a card (e.g. medication names) */
+.pdmr-card-summary {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--tm-text-secondary);
+  line-height: 1.5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+}
+
+/* Unread indicator dot — used on lab results that haven't been viewed yet */
+.pdmr-card-unread-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tm-error);
+  margin-inline-start: 6px;
+  animation: pdmr-pulse 1.6s ease-in-out infinite;
+  vertical-align: middle;
+}
+.pdmr-card--unread .pdmr-card-icon {
+  background: rgba(211, 47, 47, 0.1);
+  color: var(--tm-error);
+}
+
+/* Alert-style chip in the toolbar (e.g. "X غير مقروءة") — non-clickable */
+.pdmr-chip--alert {
+  background: rgba(211, 47, 47, 0.1);
+  color: var(--tm-error);
+  border-color: rgba(211, 47, 47, 0.3);
+  cursor: default;
+  margin-inline-start: auto;
+}
+.pdmr-chip--alert:hover {
+  background: rgba(211, 47, 47, 0.1);
+  color: var(--tm-error);
+  border-color: rgba(211, 47, 47, 0.3);
+}
+[data-theme="dark"] .pdmr-chip--alert {
+  background: rgba(239, 83, 80, 0.15);
+  color: #ef9a9a;
+  border-color: rgba(239, 83, 80, 0.35);
+}
+[data-theme="dark"] .pdmr-chip--alert:hover {
+  background: rgba(239, 83, 80, 0.15);
+  color: #ef9a9a;
+}
+[data-theme="dark"] .pdmr-card--unread .pdmr-card-icon {
+  background: rgba(239, 83, 80, 0.15);
+  color: #ef9a9a;
+}
+
+.pdmr-card-chevron {
+  color: var(--tm-text-secondary);
+  flex-shrink: 0;
+  transition: transform var(--pd-transition), color var(--pd-transition);
+}
+.pdmr-card-head:hover .pdmr-card-chevron {
+  color: var(--tm-action);
+  transform: translateX(-3px); /* RTL: arrow nudges towards content side */
+}
+
+/* Card action row (cancel button etc.) */
+.pdmr-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 16px 12px;
+  border-top: 1px solid var(--tm-border);
+  padding-top: 10px;
+}
+.pdmr-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 500;
+  background: transparent;
+  border: 1px solid var(--tm-border);
+  border-radius: var(--pd-radius-md);
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--tm-text-secondary);
+  transition: background var(--pd-transition), color var(--pd-transition), border-color var(--pd-transition);
+}
+.pdmr-action:hover {
+  background: var(--tm-surface);
+  color: var(--tm-primary);
+  border-color: var(--tm-accent);
+}
+.pdmr-action--danger {
+  color: var(--tm-error);
+  border-color: rgba(211, 47, 47, 0.3);
+}
+.pdmr-action--danger:hover {
+  background: rgba(211, 47, 47, 0.08);
+  color: var(--tm-error);
+  border-color: var(--tm-error);
+}
+
+/* ── Status badge — color variants ──────────────────────────────── */
+.pdmr-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+}
+.pdmr-status--success {
+  background: rgba(56, 142, 60, 0.12);
+  color: #2e7d32;
+}
+.pdmr-status--info {
+  background: rgba(0, 137, 123, 0.12);
+  color: var(--tm-action);
+}
+.pdmr-status--warning {
+  background: rgba(245, 124, 0, 0.14);
+  color: #b75300;
+}
+.pdmr-status--danger {
+  background: rgba(211, 47, 47, 0.12);
+  color: var(--tm-error);
+}
+.pdmr-status--muted {
+  background: var(--tm-surface);
+  color: var(--tm-text-secondary);
+}
+.pdmr-status--critical {
+  background: var(--tm-error);
+  color: #fff;
+}
+
+/* Priority badge (urgent/emergency for appointments) */
+.pdmr-priority {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+}
+.pdmr-priority--urgent {
+  background: rgba(245, 124, 0, 0.15);
+  color: #b75300;
+}
+.pdmr-priority--emergency {
+  background: var(--tm-error);
+  color: #fff;
+  animation: pdmr-pulse 1.6s ease-in-out infinite;
+}
+@keyframes pdmr-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.75; }
+}
+
+/* ── Dark mode overrides ────────────────────────────────────────── */
+[data-theme="dark"] .pdmr-toolbar { background: var(--tm-card-bg); border-color: var(--tm-border); }
+[data-theme="dark"] .pdmr-search { background: var(--tm-input-bg); border-color: var(--tm-border); }
+[data-theme="dark"] .pdmr-search:focus-within { box-shadow: 0 0 0 3px rgba(77, 182, 172, 0.18); }
+[data-theme="dark"] .pdmr-view-toggle { background: var(--tm-surface); }
+[data-theme="dark"] .pdmr-view-btn.is-active { background: var(--tm-card-bg); }
+[data-theme="dark"] .pdmr-sort { background: var(--tm-input-bg); border-color: var(--tm-border); }
+[data-theme="dark"] .pdmr-chip { background: var(--tm-card-bg); border-color: var(--tm-border); }
+[data-theme="dark"] .pdmr-chip:hover { background: var(--tm-surface); }
+[data-theme="dark"] .pdmr-chip-count { background: var(--tm-surface); }
+[data-theme="dark"] .pdmr-active-filter { background: var(--tm-surface); border-color: var(--tm-accent); color: var(--tm-accent); }
+[data-theme="dark"] .pdmr-card { background: var(--tm-card-bg); border-color: var(--tm-border); }
+[data-theme="dark"] .pdmr-card:hover { box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); }
+[data-theme="dark"] .pdmr-card-head:hover { background: var(--tm-surface); }
+[data-theme="dark"] .pdmr-card-icon { background: var(--tm-surface); color: var(--tm-accent); }
+[data-theme="dark"] .pdmr-status--success { background: rgba(102, 187, 106, 0.16); color: #81c784; }
+[data-theme="dark"] .pdmr-status--info { background: rgba(77, 182, 172, 0.18); color: var(--tm-accent); }
+[data-theme="dark"] .pdmr-status--warning { background: rgba(255, 167, 38, 0.18); color: #ffb74d; }
+[data-theme="dark"] .pdmr-status--danger { background: rgba(239, 83, 80, 0.18); color: #ef9a9a; }
+[data-theme="dark"] .pdmr-status--muted { background: var(--tm-surface); color: var(--tm-text-secondary); }
+[data-theme="dark"] .pdmr-priority--urgent { background: rgba(255, 167, 38, 0.2); color: #ffb74d; }
+[data-theme="dark"] .pdmr-action { color: var(--tm-text-secondary); border-color: var(--tm-border); }
+[data-theme="dark"] .pdmr-action:hover { background: var(--tm-surface); color: var(--tm-accent); border-color: var(--tm-accent); }
+[data-theme="dark"] .pdmr-action--danger { color: #ef9a9a; border-color: rgba(239, 83, 80, 0.3); }
+[data-theme="dark"] .pdmr-action--danger:hover { background: rgba(239, 83, 80, 0.12); border-color: #ef5350; color: #ef9a9a; }
+[data-theme="dark"] .pdmr-group-header { color: var(--tm-text-primary); }
+[data-theme="dark"] .pdmr-group-count { background: var(--tm-surface); color: var(--tm-accent); }
+[data-theme="dark"] .pdmr-clear-all { color: #ef9a9a; }
+[data-theme="dark"] .pdmr-clear-all:hover { background: rgba(239, 83, 80, 0.12); }
+
+
+/* ══════════════════════════════════════════════════════════════════════
    Responsive
    ══════════════════════════════════════════════════════════════════════ */
 
@@ -3830,6 +4467,23 @@ select.pd-form-input {
   .pd-section-toolbar { flex-direction: column; align-items: stretch; }
   .pd-tabs { width: 100%; overflow-x: auto; }
   .pd-ai-subtabs { flex-direction: column; }
+
+  /* pdmr-* mobile adjustments */
+  .pdmr-toolbar { padding: 12px; }
+  .pdmr-toolbar-main {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .pdmr-view-toggle { justify-content: center; }
+  .pdmr-cta { width: 100%; justify-content: center; }
+  .pdmr-chips { flex-wrap: wrap; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .pdmr-chip { font-size: 12px; padding: 5px 10px; }
+  .pdmr-card-head { padding: 12px; gap: 10px; }
+  .pdmr-card-icon { width: 36px; height: 36px; }
+  .pdmr-card-title { font-size: 14px; }
+  .pdmr-card-meta { font-size: 11.5px; gap: 8px; }
+  .pdmr-grid { grid-template-columns: 1fr; }
+  .pdmr-active-filters { padding-top: 6px; }
 
   .pd-booking-steps { flex-direction: column; }
   .pd-prescription-code-row { flex-direction: column; }
@@ -3883,4 +4537,759 @@ select.pd-form-input {
   .pd-ai-input-audio-processing-spinner {
     animation: none !important;
   }
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   DARK MODE v3 — VISUAL HIERARCHY FIX
+   ════════════════════════════════════════════════════════════════════
+   The pre-existing dark-mode variables made every surface too close in
+   shade — the page background (#0F1F21), card background (#162628) and
+   surface (#1A2F31) all sit within 7 RGB units of each other, so the
+   eye reads them as ONE flat dark plane. Cards and toolbars then
+   disappear into the page.
+   This v3 block:
+     1. Pushes the page background MUCH darker (#061418).
+     2. Lifts cards / toolbars / inputs to a noticeably lighter shade
+        (#152529 → #1B3033 → #213A3D for surface).
+     3. Adds a faint teal-tinted border + a real drop shadow so cards
+        visibly float over the page.
+     4. Brightens primary text on titles that previously used
+        --tm-primary (medium teal on dark teal — too low contrast).
+   ════════════════════════════════════════════════════════════════════ */
+
+[data-theme="dark"] {
+  /* Re-define the core CSS variables for noticeably more contrast.
+     These OVERRIDE the values from the original [data-theme="dark"]
+     block at the top of this file thanks to source order. */
+  --tm-background:     #061418;   /* page: near black with teal tint */
+  --tm-card-bg:        #152529;   /* cards: clearly lighter than page */
+  --tm-surface:        #1F3438;   /* hover / active fill */
+  --tm-input-bg:       #0F2024;   /* inputs sit between page and card */
+  --tm-modal-bg:       #1A2D30;
+  --tm-border:         rgba(77, 182, 172, 0.18);  /* visible teal tint */
+  --tm-text-primary:   #ECF7F6;   /* near-white, slight teal tint */
+  --tm-text-secondary: #9BB5B8;   /* lighter than before for legibility */
+  --tm-sidebar-bg:     #0A1F22;
+  --tm-skeleton:       #1F3438;
+}
+
+/* Body / shell — force the new very-dark background everywhere. */
+[data-theme="dark"] body,
+[data-theme="dark"] #root,
+[data-theme="dark"] .pd-layout,
+[data-theme="dark"] .pd-main-wrap,
+[data-theme="dark"] .pd-main {
+  background: #061418 !important;
+  color: var(--tm-text-primary) !important;
+}
+
+/* Page header — same shade as cards but with a stronger bottom border
+   so it visually separates from the content. */
+[data-theme="dark"] .pd-page-header {
+  background: #152529 !important;
+  border-bottom: 1px solid rgba(77, 182, 172, 0.2) !important;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+}
+
+/* The page-header title (e.g. "نتائج المختبر") originally used
+   --tm-primary which becomes a dim medium teal in dark mode. Bump it
+   to the bright primary text color so it actually reads. */
+[data-theme="dark"] .pd-page-header-title h1 {
+  color: var(--tm-text-primary) !important;
+}
+[data-theme="dark"] .pd-page-header-title p {
+  color: var(--tm-text-secondary) !important;
+}
+[data-theme="dark"] .pd-page-header-icon {
+  background: rgba(77, 182, 172, 0.15) !important;
+  color: var(--tm-accent) !important;
+}
+
+/* Every primary container — lift them with a brighter bg + soft shadow. */
+[data-theme="dark"] .pd-card,
+[data-theme="dark"] .pd-kpi-tile,
+[data-theme="dark"] .pd-quick-actions,
+[data-theme="dark"] .pd-recent-activity,
+[data-theme="dark"] .pd-stat-card,
+[data-theme="dark"] .pd-section-card,
+[data-theme="dark"] .pd-panel,
+[data-theme="dark"] .pd-modal,
+[data-theme="dark"] .pd-modal-content,
+[data-theme="dark"] .pdmr-toolbar,
+[data-theme="dark"] .pdmr-card,
+[data-theme="dark"] .pdmr-card-head,
+[data-theme="dark"] .pd-appointment-card,
+[data-theme="dark"] .pd-visit-card,
+[data-theme="dark"] .pd-prescription-card,
+[data-theme="dark"] .pd-lab-card,
+[data-theme="dark"] .pd-ai-panel,
+[data-theme="dark"] .pd-ai-panel-input,
+[data-theme="dark"] .pd-ai-panel-result {
+  background: var(--tm-card-bg) !important;
+  border: 1px solid var(--tm-border) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25) !important;
+}
+
+/* Card hover — lift more */
+[data-theme="dark"] .pd-kpi-tile:hover,
+[data-theme="dark"] .pdmr-card:hover,
+[data-theme="dark"] .pd-quick-action:hover,
+[data-theme="dark"] .pd-appointment-card:hover,
+[data-theme="dark"] .pd-visit-card:hover,
+[data-theme="dark"] .pd-prescription-card:hover,
+[data-theme="dark"] .pd-lab-card:hover {
+  background: var(--tm-surface) !important;
+  border-color: rgba(77, 182, 172, 0.4) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(77, 182, 172, 0.1) !important;
+  transform: translateY(-2px);
+}
+
+/* Inputs are slightly darker than cards (recessed look) */
+[data-theme="dark"] .pdmr-search,
+[data-theme="dark"] .pdmr-sort,
+[data-theme="dark"] input[type="text"],
+[data-theme="dark"] input[type="search"],
+[data-theme="dark"] input[type="email"],
+[data-theme="dark"] input[type="password"],
+[data-theme="dark"] input[type="tel"],
+[data-theme="dark"] input[type="number"],
+[data-theme="dark"] input[type="date"],
+[data-theme="dark"] input[type="time"],
+[data-theme="dark"] textarea,
+[data-theme="dark"] select {
+  background: var(--tm-input-bg) !important;
+  border-color: var(--tm-border) !important;
+  color: var(--tm-text-primary) !important;
+}
+
+/* Section headers / titles inside content — make them bright */
+[data-theme="dark"] .pd-section-title,
+[data-theme="dark"] .pd-section-header h2,
+[data-theme="dark"] .pd-section-header h3,
+[data-theme="dark"] .pd-card-title,
+[data-theme="dark"] .pd-card-header h3,
+[data-theme="dark"] .pdmr-card-title,
+[data-theme="dark"] .pd-ai-panel-title,
+[data-theme="dark"] .pd-modal-title,
+[data-theme="dark"] .pd-kpi-tile-value,
+[data-theme="dark"] .pd-recent-activity-title,
+[data-theme="dark"] .pd-quick-actions-title {
+  color: var(--tm-text-primary) !important;
+}
+
+/* Secondary / meta / subtitle text — keep readable but dimmer */
+[data-theme="dark"] .pd-section-subtitle,
+[data-theme="dark"] .pd-card-subtitle,
+[data-theme="dark"] .pdmr-card-summary,
+[data-theme="dark"] .pdmr-card-meta,
+[data-theme="dark"] .pdmr-card-meta-item,
+[data-theme="dark"] .pdmr-group-header,
+[data-theme="dark"] .pd-kpi-tile-label,
+[data-theme="dark"] .pd-empty-state-subtitle,
+[data-theme="dark"] .pd-ai-panel-intro p {
+  color: var(--tm-text-secondary) !important;
+}
+
+/* Chip system — much clearer hierarchy */
+[data-theme="dark"] .pdmr-chip {
+  background: transparent !important;
+  border: 1px solid var(--tm-border) !important;
+  color: var(--tm-text-secondary) !important;
+}
+[data-theme="dark"] .pdmr-chip:hover:not(.is-active):not(.pdmr-chip--alert) {
+  background: var(--tm-surface) !important;
+  color: var(--tm-text-primary) !important;
+  border-color: rgba(77, 182, 172, 0.35) !important;
+}
+[data-theme="dark"] .pdmr-chip.is-active {
+  background: var(--tm-action) !important;
+  color: #ffffff !important;
+  border-color: var(--tm-action) !important;
+  box-shadow: 0 2px 8px rgba(77, 182, 172, 0.3) !important;
+}
+[data-theme="dark"] .pdmr-chip-count {
+  background: rgba(255, 255, 255, 0.08) !important;
+  color: inherit !important;
+}
+[data-theme="dark"] .pdmr-chip.is-active .pdmr-chip-count {
+  background: rgba(255, 255, 255, 0.25) !important;
+  color: #ffffff !important;
+}
+
+/* View-toggle (list/cards switcher) */
+[data-theme="dark"] .pdmr-view-toggle {
+  background: var(--tm-input-bg) !important;
+  border: 1px solid var(--tm-border) !important;
+}
+[data-theme="dark"] .pdmr-view-btn {
+  background: transparent !important;
+  color: var(--tm-text-secondary) !important;
+}
+[data-theme="dark"] .pdmr-view-btn:hover {
+  color: var(--tm-text-primary) !important;
+}
+[data-theme="dark"] .pdmr-view-btn.is-active {
+  background: var(--tm-card-bg) !important;
+  color: var(--tm-accent) !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Welcome / hero — keep the teal gradient but tame it */
+[data-theme="dark"] .pd-hero {
+  background: linear-gradient(135deg, #0D3B3E 0%, #134B4E 100%) !important;
+  border: 1px solid rgba(77, 182, 172, 0.2) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* KPI tile icons */
+[data-theme="dark"] .pd-kpi-tile-icon {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Card chevron arrows — make visible */
+[data-theme="dark"] .pdmr-card-chevron {
+  color: var(--tm-text-secondary) !important;
+}
+[data-theme="dark"] .pdmr-card:hover .pdmr-card-chevron {
+  color: var(--tm-accent) !important;
+}
+
+/* Card icon containers — use teal-tinted bg */
+[data-theme="dark"] .pdmr-card-icon {
+  background: rgba(77, 182, 172, 0.12) !important;
+  color: var(--tm-accent) !important;
+}
+
+/* Hero icon container */
+[data-theme="dark"] .pd-hero-icon {
+  opacity: 0.9;
+}
+
+/* Group date headers — dim but visible */
+[data-theme="dark"] .pdmr-group-header {
+  color: var(--tm-text-secondary) !important;
+}
+[data-theme="dark"] .pdmr-group-header svg {
+  color: var(--tm-accent) !important;
+}
+[data-theme="dark"] .pdmr-group-count {
+  background: rgba(77, 182, 172, 0.15) !important;
+  color: var(--tm-accent) !important;
+}
+
+/* Status badges — slightly more saturated for dark mode */
+[data-theme="dark"] .pdmr-status--success { background: rgba(102, 187, 106, 0.2) !important; color: #a5d6a7 !important; }
+[data-theme="dark"] .pdmr-status--info    { background: rgba(77, 182, 172, 0.2) !important; color: #80cbc4 !important; }
+[data-theme="dark"] .pdmr-status--warning { background: rgba(255, 167, 38, 0.2) !important; color: #ffcc80 !important; }
+[data-theme="dark"] .pdmr-status--danger  { background: rgba(239, 83, 80, 0.2) !important; color: #ef9a9a !important; }
+[data-theme="dark"] .pdmr-status--muted   { background: rgba(255, 255, 255, 0.06) !important; color: var(--tm-text-secondary) !important; }
+
+
+/* ════════════════════════════════════════════════════════════════════
+   COMPREHENSIVE DARK MODE OVERRIDES (v2)
+   ════════════════════════════════════════════════════════════════════
+   The dark mode declarations above this block cover the dashboard
+   shell + a handful of card classes. Audit showed massive coverage
+   gaps for:
+     • pd-ai-* (AI assistant page — only 16/204 rules had dark vars)
+     • pd-modal-*, pd-btn-*, pdmr-card variants
+     • inputs, search boxes, dropdowns, range inputs
+     • pd-quick-action card hover states
+     • pd-recent activity panel
+     • welcome banner + KPI tiles in deeper states
+   This block targets every remaining hardcoded #FFFFFF / black /
+   light-only color and routes it through the dark-mode CSS variables.
+   Order: lowest specificity first, then class/element overrides.
+   ════════════════════════════════════════════════════════════════════ */
+
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* ── Universal: kill any leftover white surfaces ─────────────────────── */
+[data-theme="dark"] .pd-page-content,
+[data-theme="dark"] .pd-section,
+[data-theme="dark"] .pd-section-body,
+[data-theme="dark"] .pd-content,
+[data-theme="dark"] .pd-home,
+[data-theme="dark"] .pd-home-split > *,
+[data-theme="dark"] .pd-section-toolbar,
+[data-theme="dark"] .pd-tabs,
+[data-theme="dark"] .pd-empty-state {
+  background: transparent;
+  color: var(--tm-text-primary);
+}
+
+[data-theme="dark"] .pd-card,
+[data-theme="dark"] .pd-section-card,
+[data-theme="dark"] .pd-panel,
+[data-theme="dark"] .pd-kpi-tile,
+[data-theme="dark"] .pd-recent-activity,
+[data-theme="dark"] .pd-quick-actions,
+[data-theme="dark"] .pd-stat-card {
+  background: var(--tm-card-bg) !important;
+  border-color: var(--tm-border) !important;
+  color: var(--tm-text-primary) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important;
+}
+
+[data-theme="dark"] .pd-kpi-tile:hover {
+  border-color: var(--tm-accent) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* ── Hero / welcome banner — keep the green gradient but tame it ────── */
+[data-theme="dark"] .pd-hero {
+  background: linear-gradient(135deg, #0D3B3E, #00695C) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4) !important;
+}
+[data-theme="dark"] .pd-hero-title,
+[data-theme="dark"] .pd-hero-subtitle {
+  color: #ffffff !important;
+}
+[data-theme="dark"] .pd-hero-name {
+  color: var(--tm-accent) !important;
+}
+
+/* ── KPI tiles: text + icons ────────────────────────────────────────── */
+[data-theme="dark"] .pd-kpi-tile-value {
+  color: var(--tm-text-primary) !important;
+}
+[data-theme="dark"] .pd-kpi-tile-label {
+  color: var(--tm-text-secondary) !important;
+}
+[data-theme="dark"] .pd-kpi-tile-icon {
+  color: #ffffff !important;
+}
+
+/* ── Quick actions ──────────────────────────────────────────────────── */
+[data-theme="dark"] .pd-quick-action,
+[data-theme="dark"] .pd-quick-action-btn,
+[data-theme="dark"] .pd-quick-actions-list a,
+[data-theme="dark"] .pd-quick-actions-list button {
+  background: var(--tm-card-bg) !important;
+  border-color: var(--tm-border) !important;
+  color: var(--tm-text-primary) !important;
+}
+[data-theme="dark"] .pd-quick-action:hover,
+[data-theme="dark"] .pd-quick-action-btn:hover,
+[data-theme="dark"] .pd-quick-actions-list a:hover,
+[data-theme="dark"] .pd-quick-actions-list button:hover {
+  background: var(--tm-surface) !important;
+  border-color: var(--tm-accent) !important;
+  color: var(--tm-accent) !important;
+}
+
+/* ── Recent activity ────────────────────────────────────────────────── */
+[data-theme="dark"] .pd-recent-activity-empty,
+[data-theme="dark"] .pd-activity-empty,
+[data-theme="dark"] .pd-empty-state {
+  color: var(--tm-text-secondary) !important;
+}
+[data-theme="dark"] .pd-activity-item {
+  background: var(--tm-card-bg) !important;
+  border-color: var(--tm-border) !important;
+  color: var(--tm-text-primary) !important;
+}
+
+/* ── Section headers + titles ───────────────────────────────────────── */
+[data-theme="dark"] .pd-section-title,
+[data-theme="dark"] .pd-page-title,
+[data-theme="dark"] .pd-section-header h2,
+[data-theme="dark"] .pd-section-header h3,
+[data-theme="dark"] .pd-card-title,
+[data-theme="dark"] .pd-card-header {
+  color: var(--tm-text-primary) !important;
+}
+[data-theme="dark"] .pd-section-subtitle,
+[data-theme="dark"] .pd-page-subtitle {
+  color: var(--tm-text-secondary) !important;
+}
+
+/* ── All buttons in dark mode ───────────────────────────────────────── */
+[data-theme="dark"] .pd-btn--primary {
+  background: var(--tm-action) !important;
+  color: #ffffff !important;
+  border-color: var(--tm-action) !important;
+}
+[data-theme="dark"] .pd-btn--primary:hover {
+  background: var(--tm-accent) !important;
+  border-color: var(--tm-accent) !important;
+}
+[data-theme="dark"] .pd-btn--ghost,
+[data-theme="dark"] .pd-btn--secondary,
+[data-theme="dark"] .pd-btn--outline {
+  background: transparent !important;
+  color: var(--tm-text-primary) !important;
+  border-color: var(--tm-border) !important;
+}
+[data-theme="dark"] .pd-btn--ghost:hover,
+[data-theme="dark"] .pd-btn--secondary:hover,
+[data-theme="dark"] .pd-btn--outline:hover {
+  background: var(--tm-surface) !important;
+  border-color: var(--tm-accent) !important;
+  color: var(--tm-accent) !important;
+}
+
+/* ── ALL inputs, textareas, selects globally ────────────────────────── */
+[data-theme="dark"] input[type="text"],
+[data-theme="dark"] input[type="search"],
+[data-theme="dark"] input[type="email"],
+[data-theme="dark"] input[type="password"],
+[data-theme="dark"] input[type="tel"],
+[data-theme="dark"] input[type="number"],
+[data-theme="dark"] input[type="date"],
+[data-theme="dark"] input[type="time"],
+[data-theme="dark"] textarea,
+[data-theme="dark"] select {
+  background: var(--tm-input-bg) !important;
+  color: var(--tm-text-primary) !important;
+  border-color: var(--tm-border) !important;
+}
+[data-theme="dark"] input::placeholder,
+[data-theme="dark"] textarea::placeholder {
+  color: var(--tm-text-secondary) !important;
+  opacity: 0.7;
+}
+[data-theme="dark"] input:focus,
+[data-theme="dark"] textarea:focus,
+[data-theme="dark"] select:focus {
+  border-color: var(--tm-accent) !important;
+  box-shadow: 0 0 0 3px rgba(77, 182, 172, 0.18) !important;
+}
+
+/* ── Tabs ───────────────────────────────────────────────────────────── */
+[data-theme="dark"] .pd-tab,
+[data-theme="dark"] .pd-tab-button {
+  background: transparent !important;
+  color: var(--tm-text-secondary) !important;
+  border-color: var(--tm-border) !important;
+}
+[data-theme="dark"] .pd-tab:hover,
+[data-theme="dark"] .pd-tab-button:hover {
+  color: var(--tm-accent) !important;
+}
+[data-theme="dark"] .pd-tab.is-active,
+[data-theme="dark"] .pd-tab-button.is-active {
+  background: var(--tm-action) !important;
+  color: #ffffff !important;
+  border-color: var(--tm-action) !important;
+}
+
+/* ── Modals (catch any missed ones) ─────────────────────────────────── */
+[data-theme="dark"] .pd-modal,
+[data-theme="dark"] .pd-modal-content,
+[data-theme="dark"] .pd-modal-body,
+[data-theme="dark"] .pd-modal-header,
+[data-theme="dark"] .pd-modal-footer,
+[data-theme="dark"] .pd-modal-card {
+  background: var(--tm-modal-bg) !important;
+  color: var(--tm-text-primary) !important;
+  border-color: var(--tm-border) !important;
+}
+[data-theme="dark"] .pd-modal-overlay,
+[data-theme="dark"] .pd-modal-backdrop {
+  background: var(--tm-modal-backdrop) !important;
+}
+[data-theme="dark"] .pd-modal-title {
+  color: var(--tm-text-primary) !important;
+}
+[data-theme="dark"] .pd-modal-close {
+  color: var(--tm-text-secondary) !important;
+}
+[data-theme="dark"] .pd-modal-close:hover {
+  color: var(--tm-error) !important;
+  background: rgba(239, 83, 80, 0.12) !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   AI ASSISTANT — comprehensive dark mode
+   ════════════════════════════════════════════════════════════════════ */
+
+[data-theme="dark"] .pd-ai-assistant,
+[data-theme="dark"] .pd-ai-page {
+  background: transparent !important;
+}
+
+/* Sub-tabs (استشارة الأخصائي / الإسعاف الأولي) */
+[data-theme="dark"] .pd-ai-subtabs {
+  background: var(--tm-card-bg) !important;
+  border-color: var(--tm-border) !important;
+}
+[data-theme="dark"] .pd-ai-subtab {
+  background: transparent !important;
+  color: var(--tm-text-secondary) !important;
+}
+[data-theme="dark"] .pd-ai-subtab:hover:not(.is-active) {
+  color: var(--tm-accent) !important;
+}
+[data-theme="dark"] .pd-ai-subtab.is-active {
+  background: var(--tm-action) !important;
+  color: #ffffff !important;
+}
+
+/* Panel + intro */
+[data-theme="dark"] .pd-ai-panel {
+  background: var(--tm-card-bg) !important;
+  border-color: var(--tm-border) !important;
+  color: var(--tm-text-primary) !important;
+}
+[data-theme="dark"] .pd-ai-panel-intro {
+  background: var(--tm-surface) !important;
+  border-color: var(--tm-border) !important;
+}
+[data-theme="dark"] .pd-ai-panel-intro--emergency {
+  background: rgba(239, 83, 80, 0.1) !important;
+  border-color: rgba(239, 83, 80, 0.3) !important;
+}
+[data-theme="dark"] .pd-ai-panel-title {
+  color: var(--tm-text-primary) !important;
+}
+[data-theme="dark"] .pd-ai-panel-intro--emergency .pd-ai-panel-title {
+  color: #ef9a9a !important;
+}
+[data-theme="dark"] .pd-ai-panel-intro p {
+  color: var(--tm-text-secondary) !important;
+}
+[data-theme="dark"] .pd-ai-panel-intro--emergency p {
+  color: #ef9a9a !important;
+}
+
+/* Input column / textarea wrapper */
+[data-theme="dark"] .pd-ai-panel-input,
+[data-theme="dark"] .pd-ai-panel-result,
+[data-theme="dark"] .pd-ai-input-wrap,
+[data-theme="dark"] .pd-ai-textarea-wrap,
+[data-theme="dark"] .pd-ai-input-card,
+[data-theme="dark"] .pd-ai-input-empty,
+[data-theme="dark"] .pd-ai-result-card,
+[data-theme="dark"] .pd-ai-result-empty {
+  background: var(--tm-card-bg) !important;
+  border-color: var(--tm-border) !important;
+  color: var(--tm-text-primary) !important;
+}
+
+/* Empty/placeholder side ("ابدأ التحليل") */
+[data-theme="dark"] .pd-ai-empty-icon,
+[data-theme="dark"] .pd-ai-result-empty-icon,
+[data-theme="dark"] .pd-ai-input-empty-icon {
+  color: var(--tm-text-secondary) !important;
+  opacity: 0.5;
+}
+[data-theme="dark"] .pd-ai-empty-title,
+[data-theme="dark"] .pd-ai-result-empty-title,
+[data-theme="dark"] .pd-ai-input-empty-title {
+  color: var(--tm-text-primary) !important;
+}
+[data-theme="dark"] .pd-ai-empty-subtitle,
+[data-theme="dark"] .pd-ai-result-empty-subtitle,
+[data-theme="dark"] .pd-ai-input-empty-subtitle {
+  color: var(--tm-text-secondary) !important;
+}
+
+/* Counter (0/2000) */
+[data-theme="dark"] .pd-ai-counter,
+[data-theme="dark"] .pd-ai-char-counter {
+  color: var(--tm-text-secondary) !important;
+}
+
+/* Submit button */
+[data-theme="dark"] .pd-ai-submit-btn,
+[data-theme="dark"] .pd-ai-send-btn {
+  background: var(--tm-action) !important;
+  color: #ffffff !important;
+  border-color: var(--tm-action) !important;
+}
+[data-theme="dark"] .pd-ai-submit-btn:hover,
+[data-theme="dark"] .pd-ai-send-btn:hover {
+  background: var(--tm-accent) !important;
+}
+[data-theme="dark"] .pd-ai-submit-btn:disabled,
+[data-theme="dark"] .pd-ai-send-btn:disabled {
+  background: var(--tm-surface) !important;
+  color: var(--tm-text-secondary) !important;
+  border-color: var(--tm-border) !important;
+}
+
+/* Result content */
+[data-theme="dark"] .pd-ai-result-title,
+[data-theme="dark"] .pd-ai-result-content,
+[data-theme="dark"] .pd-ai-result-text {
+  color: var(--tm-text-primary) !important;
+}
+[data-theme="dark"] .pd-ai-result-meta,
+[data-theme="dark"] .pd-ai-result-disclaimer {
+  color: var(--tm-text-secondary) !important;
+}
+
+/* Image upload zone */
+[data-theme="dark"] .pd-ai-upload,
+[data-theme="dark"] .pd-ai-image-upload,
+[data-theme="dark"] .pd-ai-drop-zone {
+  background: var(--tm-surface) !important;
+  border-color: var(--tm-border) !important;
+  color: var(--tm-text-secondary) !important;
+}
+[data-theme="dark"] .pd-ai-upload:hover,
+[data-theme="dark"] .pd-ai-image-upload:hover,
+[data-theme="dark"] .pd-ai-drop-zone:hover {
+  border-color: var(--tm-accent) !important;
+  color: var(--tm-accent) !important;
+  background: rgba(77, 182, 172, 0.05) !important;
+}
+
+/* Voice recorder */
+[data-theme="dark"] .pd-ai-audio-recorder,
+[data-theme="dark"] .pd-ai-input-audio,
+[data-theme="dark"] .pd-ai-audio-controls {
+  background: var(--tm-card-bg) !important;
+  border-color: var(--tm-border) !important;
+  color: var(--tm-text-primary) !important;
+}
+[data-theme="dark"] .pd-ai-record-btn,
+[data-theme="dark"] .pd-ai-input-audio-btn {
+  background: var(--tm-surface) !important;
+  border-color: var(--tm-border) !important;
+  color: var(--tm-text-primary) !important;
+}
+[data-theme="dark"] .pd-ai-record-btn:hover,
+[data-theme="dark"] .pd-ai-input-audio-btn:hover {
+  border-color: var(--tm-accent) !important;
+  color: var(--tm-accent) !important;
+}
+
+/* AI emergency (red theme cleanup) */
+[data-theme="dark"] .pd-ai-emergency-result,
+[data-theme="dark"] .pd-ai-firstaid-card {
+  background: rgba(239, 83, 80, 0.08) !important;
+  border-color: rgba(239, 83, 80, 0.25) !important;
+  color: #ffcdd2 !important;
+}
+[data-theme="dark"] .pd-ai-emergency-result h3,
+[data-theme="dark"] .pd-ai-firstaid-card h3 {
+  color: #ef9a9a !important;
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   PDMR universal records system — missing dark coverage
+   ════════════════════════════════════════════════════════════════════ */
+
+/* Top bar of dashboard (theme button + notifications) */
+[data-theme="dark"] .pd-topbar,
+[data-theme="dark"] .pd-page-header-actions,
+[data-theme="dark"] .pd-theme-toggle,
+[data-theme="dark"] .pd-notif-btn {
+  background: transparent !important;
+  color: var(--tm-text-primary) !important;
+}
+[data-theme="dark"] .pd-theme-toggle:hover,
+[data-theme="dark"] .pd-notif-btn:hover {
+  background: var(--tm-surface) !important;
+  color: var(--tm-accent) !important;
+}
+
+/* Section titles for pdmr lists (e.g. date group headers) */
+[data-theme="dark"] .pdmr-group-header {
+  color: var(--tm-text-secondary) !important;
+  background: transparent !important;
+  border-bottom-color: var(--tm-border) !important;
+}
+
+/* Card text */
+[data-theme="dark"] .pdmr-card-title {
+  color: var(--tm-text-primary) !important;
+}
+[data-theme="dark"] .pdmr-card-summary,
+[data-theme="dark"] .pdmr-card-meta {
+  color: var(--tm-text-secondary) !important;
+}
+[data-theme="dark"] .pdmr-card-meta-item svg {
+  color: var(--tm-accent) !important;
+  opacity: 0.85;
+}
+
+/* Search input clear button */
+[data-theme="dark"] .pdmr-search-clear {
+  color: var(--tm-text-secondary) !important;
+}
+[data-theme="dark"] .pdmr-search-clear:hover {
+  background: var(--tm-surface) !important;
+  color: var(--tm-error) !important;
+}
+
+/* View toggle */
+[data-theme="dark"] .pdmr-view-toggle {
+  background: var(--tm-input-bg) !important;
+  border-color: var(--tm-border) !important;
+}
+[data-theme="dark"] .pdmr-view-btn {
+  background: transparent !important;
+  color: var(--tm-text-secondary) !important;
+}
+[data-theme="dark"] .pdmr-view-btn:hover {
+  color: var(--tm-accent) !important;
+}
+[data-theme="dark"] .pdmr-view-btn.is-active {
+  background: var(--tm-card-bg) !important;
+  color: var(--tm-accent) !important;
+}
+
+/* Chips */
+[data-theme="dark"] .pdmr-chip {
+  color: var(--tm-text-primary) !important;
+}
+[data-theme="dark"] .pdmr-chip:hover:not(.is-active):not(.pdmr-chip--alert) {
+  background: var(--tm-surface) !important;
+  border-color: var(--tm-accent) !important;
+  color: var(--tm-accent) !important;
+}
+[data-theme="dark"] .pdmr-chip.is-active {
+  background: var(--tm-action) !important;
+  color: #ffffff !important;
+  border-color: var(--tm-action) !important;
+}
+[data-theme="dark"] .pdmr-chip--ghost {
+  background: transparent !important;
+}
+[data-theme="dark"] .pdmr-chip--ghost.is-active {
+  background: var(--tm-surface) !important;
+  border-color: var(--tm-accent) !important;
+  color: var(--tm-accent) !important;
+}
+[data-theme="dark"] .pdmr-chip-count {
+  background: var(--tm-surface) !important;
+  color: var(--tm-text-secondary) !important;
+}
+
+/* Active filters bar */
+[data-theme="dark"] .pdmr-active-filters {
+  border-top-color: var(--tm-border) !important;
+}
+[data-theme="dark"] .pdmr-active-filters-label {
+  color: var(--tm-text-secondary) !important;
+}
+
+/* Empty state */
+[data-theme="dark"] .pd-empty-state-icon {
+  color: var(--tm-text-secondary) !important;
+  opacity: 0.4;
+}
+[data-theme="dark"] .pd-empty-state-title {
+  color: var(--tm-text-primary) !important;
+}
+[data-theme="dark"] .pd-empty-state-subtitle {
+  color: var(--tm-text-secondary) !important;
+}
+
+/* Loading spinner / messages */
+[data-theme="dark"] .pd-loading-message,
+[data-theme="dark"] .pd-section-loading {
+  color: var(--tm-text-secondary) !important;
+}
+
+/* Notification badge in sidebar / topbar — keep red */
+[data-theme="dark"] .pd-notif-badge,
+[data-theme="dark"] .pd-sidebar-notif-badge {
+  background: #ef5350 !important;
+  color: #ffffff !important;
 }

@@ -67,6 +67,8 @@ const {
   EmergencyReport, Person, Children, AuditLog
 } = require('../models');
 
+const { createNotification } = require('./notificationController');
+
 // ============================================================================
 // AI SERVICE — Real FastAPI integration (Redwan's service)
 // ============================================================================
@@ -855,6 +857,26 @@ exports.callAmbulance = async (req, res) => {
         contactPhoneNumber
       }
     });
+
+    // ── PUSH NOTIFICATION TO PATIENT ────────────────────────────────────────
+    try {
+      createNotification({
+        recipientPersonId: report.patientPersonId,
+        recipientChildId:  report.patientChildId,
+        recipientType: 'patient',
+        notificationType: 'emergency_alert',
+        title:       'تم طلب الإسعاف',
+        titleArabic: 'تم طلب الإسعاف',
+        body: 'تم تسجيل طلب الإسعاف بنجاح. سيتم التواصل معك في أقرب وقت ممكن. ابقَ بمكانك إذا كان آمناً.',
+        channels: ['push', 'in_app'],
+        relatedType: 'emergency_report',
+        relatedId:   report._id,
+        deepLinkRoute: '/ai',
+        priority: 'urgent'
+      }).catch(err => console.warn('⚠️  Notification failed:', err.message));
+    } catch (notifError) {
+      console.warn('⚠️  Notification dispatch error (non-fatal):', notifError.message);
+    }
 
     return res.json({
       success: true,
