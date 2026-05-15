@@ -176,9 +176,15 @@ class _TabButton extends StatelessWidget {
   }
 }
 
-/// One notification row. Priority drives the leading-edge border weight —
-/// urgent gets a 4px error stripe, high gets 3px warning, lower priorities
-/// rely on the type-color tint alone.
+/// One notification row.
+///
+/// Priority is encoded as a colored stripe on the leading edge (right side
+/// in RTL, left side in LTR). The stripe is rendered as a separate child
+/// inside a Stack rather than as a `Border.left` with a different color,
+/// because Flutter throws "A borderRadius can only be given on borders
+/// with uniform colors" when any single side has a different color while
+/// `borderRadius` is set. Stacking the stripe over a rounded container
+/// gives the same visual result and works in both light/dark mode.
 class NotificationItem extends StatelessWidget {
   const NotificationItem({
     required this.notification,
@@ -198,129 +204,154 @@ class NotificationItem extends StatelessWidget {
     final bool unread = !notification.isRead;
     final String? route = routeForRelatedType(notification.relatedType);
 
-    final BorderSide priorityBorder = _borderForPriority(notification.priority);
+    final _PriorityStripe stripe = _stripeForPriority(notification.priority);
 
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 4),
       decoration: BoxDecoration(
         color: scheme.surfaceContainer,
         borderRadius: AppRadii.radiusLg,
-        border: Border(
-          top: BorderSide(color: scheme.outline),
-          bottom: BorderSide(color: scheme.outline),
-          right: BorderSide(color: scheme.outline),
-          left: priorityBorder,
-        ),
+        // Uniform border on all four sides — Flutter requires this when
+        // borderRadius is set. The priority stripe lives on top via Stack.
+        border: Border.all(color: scheme.outline),
       ),
-      child: InkWell(
-        borderRadius: AppRadii.radiusLg,
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: meta.color.withValues(alpha: 0.18),
-                  borderRadius: AppRadii.radiusMd,
-                ),
-                alignment: Alignment.center,
-                child: Icon(meta.icon, size: 18, color: meta.color),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: <Widget>[
+          // ── Priority stripe (leading edge in RTL = right side) ───────
+          if (stripe.color != null)
+            Positioned(
+              top: 0,
+              bottom: 0,
+              right: 0, // RTL — stripe on the leading edge
+              width: stripe.width,
+              child: Container(color: stripe.color),
+            ),
+
+          // ── Main content ──────────────────────────────────────────────
+          InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                12,
+                12,
+                12 + (stripe.width ?? 0), // extra right-padding to clear stripe
+                12,
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Row(
-                      children: <Widget>[
-                        Flexible(
-                          child: Text(
-                            meta.arabicLabel,
-                            style: Theme.of(context).textTheme.labelMedium
-                                ?.copyWith(
-                                  color: meta.color,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                          ),
-                        ),
-                        if (unread) ...<Widget>[
-                          const SizedBox(width: 6),
-                          const _UnreadDot(),
-                        ],
-                      ],
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: meta.color.withValues(alpha: 0.18),
+                      borderRadius: AppRadii.radiusMd,
                     ),
-                    const SizedBox(height: 4),
-                    if (notification.title.isNotEmpty)
-                      Text(
-                        notification.title,
-                        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    if (notification.message.isNotEmpty) ...<Widget>[
-                      const SizedBox(height: 2),
-                      Text(
-                        notification.message,
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    Row(
+                    alignment: Alignment.center,
+                    child: Icon(meta.icon, size: 18, color: meta.color),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
-                        Icon(
-                          LucideIcons.clock,
-                          size: 12,
-                          color: scheme.onSurfaceVariant,
+                        Row(
+                          children: <Widget>[
+                            Flexible(
+                              child: Text(
+                                meta.arabicLabel,
+                                style: Theme.of(context).textTheme.labelMedium
+                                    ?.copyWith(
+                                      color: meta.color,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                              ),
+                            ),
+                            if (unread) ...<Widget>[
+                              const SizedBox(width: 6),
+                              const _UnreadDot(),
+                            ],
+                          ],
                         ),
-                        const SizedBox(width: 4),
-                        Text(
-                          intl.DateFormat(
-                            'yyyy-MM-dd HH:mm',
-                          ).format(notification.createdAt),
-                          textDirection: TextDirection.ltr,
-                          style: Theme.of(context).textTheme.labelSmall
-                              ?.copyWith(color: scheme.onSurfaceVariant),
-                        ),
-                        if (route != null) ...<Widget>[
-                          const Spacer(),
+                        const SizedBox(height: 4),
+                        if (notification.title.isNotEmpty)
                           Text(
-                            'اضغط لعرض التفاصيل',
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(color: AppColors.action),
+                            notification.title,
+                            style: Theme.of(context).textTheme.bodyLarge
+                                ?.copyWith(fontWeight: FontWeight.w700),
                           ),
-                          const SizedBox(width: 4),
-                          const Icon(
-                            LucideIcons.chevronLeft,
-                            size: 14,
-                            color: AppColors.action,
+                        if (notification.message.isNotEmpty) ...<Widget>[
+                          const SizedBox(height: 2),
+                          Text(
+                            notification.message,
+                            style: Theme.of(context).textTheme.bodyMedium,
                           ),
                         ],
+                        const SizedBox(height: 8),
+                        Row(
+                          children: <Widget>[
+                            Icon(
+                              LucideIcons.clock,
+                              size: 12,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              intl.DateFormat(
+                                'yyyy-MM-dd HH:mm',
+                              ).format(notification.createdAt),
+                              textDirection: TextDirection.ltr,
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(color: scheme.onSurfaceVariant),
+                            ),
+                            if (route != null) ...<Widget>[
+                              const Spacer(),
+                              Text(
+                                'اضغط لعرض التفاصيل',
+                                style: Theme.of(context).textTheme.labelSmall
+                                    ?.copyWith(color: AppColors.action),
+                              ),
+                              const SizedBox(width: 4),
+                              const Icon(
+                                LucideIcons.chevronLeft,
+                                size: 14,
+                                color: AppColors.action,
+                              ),
+                            ],
+                          ],
+                        ),
                       ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
 
-  static BorderSide _borderForPriority(String priority) {
+  /// Returns the stripe color + width for a given priority. Lower priorities
+  /// get `null` color so no stripe is drawn — the card stays clean.
+  static _PriorityStripe _stripeForPriority(String priority) {
     switch (priority) {
       case 'urgent':
-        return const BorderSide(color: AppColors.error, width: 4);
+        return const _PriorityStripe(color: AppColors.error, width: 4);
       case 'high':
-        return const BorderSide(color: AppColors.warning, width: 3);
+        return const _PriorityStripe(color: AppColors.warning, width: 3);
       default:
-        return const BorderSide(color: Colors.transparent);
+        return const _PriorityStripe(color: null, width: null);
     }
   }
+}
+
+/// Tiny value-type for the priority stripe descriptor.
+class _PriorityStripe {
+  const _PriorityStripe({required this.color, required this.width});
+  final Color? color;
+  final double? width;
 }
 
 class _UnreadDot extends StatelessWidget {

@@ -630,13 +630,23 @@
   font-size: 0.7rem;
   color: var(--tm-text-muted);
   font-weight: 600;
+  font-family: 'Cairo', sans-serif;
 }
 
+/*
+ * FIX (مشكلة #1b): The health-strip "value" can contain either Arabic words
+ * (e.g. "متصل" / "متصلة") OR English/Latin text (uptime, hostnames). The old
+ * rule pinned font-family to Inter, which made Arabic text render in the
+ * wrong family — visually misaligned vs the rest of the status cards.
+ *
+ * Use Cairo as the primary family (correct for Arabic), and keep Inter as
+ * a fallback for any Latin glyphs that may appear inside the same string.
+ */
 .ad-health-value {
   font-size: 0.875rem;
   font-weight: 800;
   color: var(--tm-primary);
-  font-family: 'Inter', sans-serif;
+  font-family: 'Cairo', 'Inter', sans-serif;
 }
 
 /* KPI tiles row (6 tiles in 3-col grid) */
@@ -1069,44 +1079,78 @@
   background: var(--tm-card-bg);
   border: 1px solid var(--tm-card-border);
   border-radius: 18px;
-  overflow: hidden;
+  overflow-x: auto;            /* horizontal scroll for wide tables */
+  overflow-y: hidden;
   box-shadow: var(--tm-card-shadow);
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Custom scrollbar for the table wrapper (subtle, on-brand) */
+.ad-table-wrap::-webkit-scrollbar {
+  height: 8px;
+}
+.ad-table-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+.ad-table-wrap::-webkit-scrollbar-thumb {
+  background: rgba(13, 59, 62, 0.18);
+  border-radius: 4px;
+}
+.ad-table-wrap::-webkit-scrollbar-thumb:hover {
+  background: rgba(13, 59, 62, 0.35);
+}
+[data-theme="dark"] .ad-table-wrap::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
 }
 
 .ad-table {
   width: 100%;
-  border-collapse: collapse;
+  min-width: 800px;            /* prevents column collapse on narrow viewports */
+  border-collapse: separate;
+  border-spacing: 0;
   font-family: 'Cairo', sans-serif;
 }
 
 .ad-table thead {
   background: rgba(var(--tm-action-rgb), 0.04);
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 
 .ad-table th {
-  padding: 14px 18px;
+  padding: 14px 16px;
   text-align: right;
   font-size: 0.78rem;
   font-weight: 700;
   color: var(--tm-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--tm-divider);
+  border-bottom: 2px solid var(--tm-divider);
+  white-space: nowrap;          /* headers shouldn't wrap */
+  background: inherit;
+}
+
+/* Vertical divider between columns (skip the first/last to avoid double borders) */
+.ad-table th + th,
+.ad-table td + td {
+  border-inline-start: 1px solid var(--tm-divider);
 }
 
 .ad-table td {
-  padding: 16px 18px;
+  padding: 14px 16px;
   font-size: 0.875rem;
   color: var(--tm-text);
   border-bottom: 1px solid var(--tm-divider);
   vertical-align: middle;
+  background: var(--tm-card-bg);  /* needed for sticky header contrast */
 }
 
 .ad-table tbody tr {
   transition: background 0.2s ease;
 }
 
-.ad-table tbody tr:hover {
+.ad-table tbody tr:hover td {
   background: rgba(var(--tm-action-rgb), 0.04);
 }
 
@@ -1116,6 +1160,29 @@
 
 .ad-table tbody tr.inactive {
   opacity: 0.55;
+}
+
+/* Failed-action rows in the audit table — subtle red tint, full-width */
+.ad-table tbody tr.audit-failed td {
+  background: rgba(198, 40, 40, 0.04);
+}
+[data-theme="dark"] .ad-table tbody tr.audit-failed td {
+  background: rgba(255, 138, 128, 0.06);
+}
+
+/* ─── Sensible per-column min-widths (prevent text crush) ──────────────── */
+
+/* Name columns: keep readable without forcing wrap */
+.ad-table td:first-child {
+  min-width: 180px;
+}
+
+/* Contact column — emails are long, give them room */
+.ad-cell-contact {
+  min-width: 180px;
+}
+.ad-cell-contact-line {
+  max-width: 220px;
 }
 
 .ad-cell-name {
@@ -2642,4 +2709,529 @@
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   v2 ADDITIONS — Frontend Fixes (May 2026)
+   ─────────────────────────────────────────────────────────────────────────
+   New components introduced in this version:
+     • .ad-search-clear           — clear-icon button inside search inputs
+     • .ad-filter-card            — wrapper around advanced (multi-field) filter
+     • .ad-filter-header          — title row of a filter card
+     • .ad-filter-grid            — responsive grid that lays out filter fields
+     • .ad-filter-field           — single filter slot (label + input/select)
+     • .ad-filter-field-wide      — full-width filter slot
+     • .ad-filter-label           — label above an input/select
+     • .ad-filter-input/-select   — styled input + select
+     • .ad-filter-actions         — buttons row (apply + clear + result count)
+     • .ad-filter-count           — "النتائج: N من M" indicator
+     • .ad-search-box-inline      — inline variant used inside a filter card
+     • .ad-cell-contact           — two-line contact column (email + phone)
+     • .ad-cell-contact-line      — single line within a contact cell
+     • .ad-cell-stack             — vertically stacked cell content
+     • .ad-cell-rating            — star + numeric rating cell
+     • .ad-cell-flags             — horizontal list of small flag pills
+     • .ad-audit-ua               — user-agent line below an audit entry
+     • .ad-audit-error            — error-message stripe inside an audit entry
+     • .ad-audit-meta-item.danger — highlighted variant for HTTP 4xx/5xx codes
+     • .ad-activity-report        — wrapper for the Account Activity panel
+     • .ad-suspicious-card        — emphasized card for suspicious-activity alerts
+   IMPORTANT: ALL colors come from the existing --tm-* tokens.
+              No color values change — only NEW components inherit them.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+
+/* ─── 1. Search input "clear" icon ──────────────────────────────────────── */
+
+.ad-search-box {
+  position: relative;
+}
+
+.ad-search-clear {
+  position: absolute;
+  inset-inline-end: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--tm-text-muted);
+  cursor: pointer;
+  border-radius: 50%;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.ad-search-clear:hover {
+  background: var(--tm-surface);
+  color: var(--tm-error);
+}
+
+[data-theme="dark"] .ad-search-clear:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+
+/* ─── 2. Advanced filter card (used by Audit Log + Account Activity) ───── */
+
+.ad-filter-card {
+  margin-bottom: 16px;
+  padding: 16px 20px;
+}
+
+.ad-filter-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--tm-border, rgba(13, 59, 62, 0.08));
+}
+
+.ad-filter-header h4 {
+  margin: 0;
+  font-family: 'Cairo', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--tm-primary);
+}
+
+.ad-filter-header svg {
+  color: var(--tm-action);
+}
+
+.ad-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px 14px;
+  margin-bottom: 14px;
+}
+
+.ad-filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ad-filter-field-wide {
+  grid-column: span 2;
+}
+
+@media (max-width: 700px) {
+  .ad-filter-field-wide {
+    grid-column: span 1;
+  }
+}
+
+.ad-filter-label {
+  font-family: 'Cairo', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--tm-text-muted);
+}
+
+.ad-filter-input,
+.ad-filter-select {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--tm-border, rgba(13, 59, 62, 0.15));
+  border-radius: 8px;
+  background: var(--tm-bg-input, #fff);
+  color: var(--tm-text);
+  font-family: 'Cairo', sans-serif;
+  font-size: 0.85rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ad-filter-input:focus,
+.ad-filter-select:focus {
+  outline: none;
+  border-color: var(--tm-action);
+  box-shadow: 0 0 0 3px rgba(0, 137, 123, 0.12);
+}
+
+[data-theme="dark"] .ad-filter-input,
+[data-theme="dark"] .ad-filter-select {
+  background: var(--tm-bg-input-dark, #1a2f31);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: var(--tm-text-light, #E0F2F1);
+}
+
+.ad-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--tm-border, rgba(13, 59, 62, 0.06));
+}
+
+.ad-filter-count {
+  margin-inline-start: auto;
+  font-family: 'Cairo', sans-serif;
+  font-size: 0.825rem;
+  color: var(--tm-text-muted);
+}
+
+.ad-filter-count strong {
+  color: var(--tm-primary);
+  font-weight: 800;
+}
+
+
+/* ─── 3. Inline search box (variant used inside filter card) ─────────────── */
+
+.ad-search-box-inline {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+}
+
+.ad-search-box-inline .ad-search-input {
+  height: auto;
+  padding: 9px 12px 9px 36px;
+  font-size: 0.85rem;
+}
+
+
+/* ─── 4. Table cell helpers ─────────────────────────────────────────────── */
+
+.ad-cell-contact {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 180px;
+}
+
+.ad-cell-contact-line {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.78rem;
+  color: var(--tm-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+  display: inline-block;
+}
+
+.ad-cell-contact-line.muted {
+  color: var(--tm-text-muted);
+  font-size: 0.72rem;
+}
+
+.ad-cell-contact-line.ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: left;
+}
+
+.ad-cell-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: flex-start;
+}
+
+.ad-cell-rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--tm-warning, #F57C00);
+  white-space: nowrap;
+}
+
+.ad-cell-rating small {
+  color: var(--tm-text-muted);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.ad-cell-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  min-width: 100px;
+}
+
+/* Make the row name cell more readable */
+.ad-cell-name {
+  min-width: 160px;
+}
+
+.ad-cell-name small {
+  font-size: 0.7rem;
+  font-family: 'Inter', sans-serif;
+  color: var(--tm-text-muted);
+  font-weight: 500;
+}
+
+/* ID cell — keeps national IDs / CRNs in a monospace pill */
+.ad-cell-id {
+  display: inline-block;
+  padding: 3px 8px;
+  background: var(--tm-surface, #E0F2F1);
+  color: var(--tm-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+  border-radius: 5px;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+[data-theme="dark"] .ad-cell-id {
+  background: rgba(77, 182, 172, 0.10);
+  color: var(--tm-accent, #4DB6AC);
+}
+
+/* Spec cell — icon + label inline */
+.ad-cell-spec {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.ad-cell-spec-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: rgba(var(--tm-action-rgb), 0.08);
+  color: var(--tm-action);
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+/* Actions cell — keep buttons in a row, no wrap */
+.ad-cell-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+
+/* ─── 5. Audit log v2 — user-agent line + error stripe + status code ────── */
+
+.ad-audit-ua {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.7rem;
+  color: var(--tm-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.ad-audit-ua svg {
+  flex-shrink: 0;
+}
+
+.ad-audit-error {
+  margin-top: 6px;
+  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--tm-error-light, rgba(198, 40, 40, 0.08));
+  color: var(--tm-error, #C62828);
+  border-radius: 6px;
+  font-family: 'Cairo', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.ad-audit-meta-item.danger {
+  color: var(--tm-error, #C62828);
+  font-weight: 700;
+}
+
+.ad-audit-meta-item code {
+  background: var(--tm-surface, #E0F2F1);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.72rem;
+  color: var(--tm-primary);
+}
+
+[data-theme="dark"] .ad-audit-meta-item code {
+  background: rgba(77, 182, 172, 0.12);
+  color: var(--tm-accent, #4DB6AC);
+}
+
+/* ─── 5b. Audit table — proper structured layout (replaces old list view) ── */
+
+.ad-audit-table {
+  min-width: 1100px;             /* 9 columns need real estate */
+}
+
+.ad-audit-table th {
+  font-size: 0.72rem;
+}
+
+.ad-audit-table td {
+  font-size: 0.82rem;
+  padding: 12px 14px;
+}
+
+/* Per-column width hints — based on content type */
+.ad-audit-col-time     { min-width: 160px; max-width: 200px; }
+.ad-audit-col-status   { width:   56px; text-align: center; }
+.ad-audit-col-action   { min-width: 200px; max-width: 280px; }
+.ad-audit-col-user     { min-width: 180px; max-width: 240px; }
+.ad-audit-col-role     { min-width: 100px; width: 110px; }
+.ad-audit-col-platform { width: 100px; }
+.ad-audit-col-ip       { min-width: 120px; width: 140px; }
+.ad-audit-col-resource { min-width: 130px; max-width: 180px; }
+.ad-audit-col-extras   { min-width: 130px; }
+
+/* The status icon pill (column 2) — color-coded */
+.ad-audit-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ad-audit-status-pill.success {
+  background: var(--tm-success-light, rgba(46, 125, 50, 0.10));
+  color: var(--tm-success, #2E7D32);
+}
+.ad-audit-status-pill.error {
+  background: var(--tm-error-light, rgba(198, 40, 40, 0.10));
+  color: var(--tm-error, #C62828);
+}
+.ad-audit-status-pill.warning {
+  background: var(--tm-warning-light, rgba(245, 124, 0, 0.10));
+  color: var(--tm-warning, #F57C00);
+}
+.ad-audit-status-pill.info {
+  background: var(--tm-info-light, rgba(2, 119, 189, 0.10));
+  color: var(--tm-info, #0277BD);
+}
+
+/* Action code (column 3) — monospace badge */
+.ad-audit-action-code {
+  display: inline-block;
+  padding: 2px 8px;
+  background: rgba(var(--tm-action-rgb), 0.08);
+  border-radius: 5px;
+  font-family: 'Inter', sans-serif;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--tm-primary);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+[data-theme="dark"] .ad-audit-action-code {
+  background: rgba(77, 182, 172, 0.12);
+  color: var(--tm-accent, #4DB6AC);
+}
+
+
+/* ─── 6. Account Activity panel ─────────────────────────────────────────── */
+
+.ad-activity-report {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ad-activity-report .ad-card {
+  padding: 16px 20px;
+}
+
+.ad-suspicious-card {
+  border: 2px solid var(--tm-error, #C62828);
+  background: var(--tm-error-light, rgba(198, 40, 40, 0.04));
+}
+
+.ad-suspicious-card .ad-detail-section-title {
+  color: var(--tm-error, #C62828);
+}
+
+.ad-suspicious-card ul {
+  margin: 0;
+  font-family: 'Cairo', sans-serif;
+  font-size: 0.875rem;
+  color: var(--tm-text);
+  line-height: 1.7;
+}
+
+
+/* ─── 7. Filter actions inside Account Activity ─────────────────────────── */
+
+.ad-filter-actions .ad-btn-primary svg.ad-spin {
+  animation: ad-spin 0.9s linear infinite;
+}
+
+@keyframes ad-spin {
+  to { transform: rotate(360deg); }
+}
+
+
+/* ─── 8. Mobile responsiveness for new filter card ──────────────────────── */
+
+@media (max-width: 700px) {
+  .ad-filter-card {
+    padding: 12px 14px;
+  }
+  .ad-filter-grid {
+    grid-template-columns: 1fr;
+  }
+  .ad-filter-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ad-filter-count {
+    margin: 4px 0 0 0;
+    text-align: center;
+  }
+}
+
+
+/* ─── 9. Dark mode tuning for new components ────────────────────────────── */
+
+[data-theme="dark"] .ad-filter-card {
+  background: var(--tm-bg-card-dark, #152529);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .ad-filter-header {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .ad-filter-actions {
+  border-top-color: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="dark"] .ad-audit-error {
+  background: rgba(198, 40, 40, 0.15);
+  color: #ff8a80;
+}
+
+[data-theme="dark"] .ad-suspicious-card {
+  background: rgba(198, 40, 40, 0.10);
+  border-color: #ff5252;
+}
+
+[data-theme="dark"] .ad-suspicious-card .ad-detail-section-title {
+  color: #ff8a80;
 }

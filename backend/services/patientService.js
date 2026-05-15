@@ -1,361 +1,504 @@
-const Person = require('../models/Person');
-const Account = require('../models/Account');
-const Patient = require('../models/Patient');
-const Visit = require('../models/Visit');
-
 /**
- * Patient Service
- * Business logic for patient operations
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  Patient Service — Patient 360°
+ *  ─────────────────────────────────────────────────────────────────────────
+ *  📁 Path: backend/services/patientService.js
+ *  🔧 Version: 2.0 (CRITICAL SCHEMA FIX + dual-patient model support)
+ *
+ *  🚨 WHAT WAS BROKEN IN v1.0:
+ *
+ *  v1.0 only handled adult patients (assumed Patient.personId always exists)
+ *  and queried Visit by non-existent `patientId` field. This broke:
+ *    ✗ Children profile retrieval (Patient.childId was ignored)
+ *    ✗ All visit/medication aggregation for children
+ *    ✗ Visit stats returned empty for everyone
+ *    ✗ Lab tests reference (Visit.labTests doesn't exist — it's a separate collection)
+ *
+ *  v2.0 changes:
+ *    ✓ Full dual-patient support (adult via personId, child via childId)
+ *    ✓ Correct schema field names everywhere
+ *    ✓ Lab tests fetched from LabTest collection by visitId
+ *    ✓ BMI uses Patient model's auto-calculation when available
+ *    ✓ Restricted update fields enforced (national ID, name etc cannot change)
+ * ═══════════════════════════════════════════════════════════════════════════
  */
 
+const {
+  Person,
+  Children,
+  Account,
+  Patient,
+  Visit,
+  LabTest,
+} = require('../models');
+
+const { buildPatientFilter } = require('./visitService');
+
+// ============================================================================
+// 1. GET PATIENT PROFILE — by Patient document ID
+// ============================================================================
+
 /**
- * Get complete patient profile
- * Aggregates data from Person, Account, and Patient collections
+ * Aggregates a complete patient profile from:
+ *   • Patient (medical info)
+ *   • Person OR Children (demographics)
+ *   • Account (auth, login history)
+ *   • Visit (stats — counts, lastVisit, etc.)
+ *
+ * @param {string} patientDocId — Patient._id
  */
-exports.getPatientProfile = async (patientId) => {
+exports.getPatientProfile = async (patientDocId) => {
   try {
-    // Get patient document
-    const patient = await Patient.findById(patientId)
+    const patient = await Patient.findById(patientDocId)
       .populate('personId')
+      .populate('childId')
       .lean();
 
     if (!patient) {
       return {
         success: false,
-        message: 'المريض غير موجود'
+        message: 'المريض غير موجود',
       };
     }
 
-    // Get account information
-    const account = await Account.findOne({ personId: patient.personId._id })
-      .select('email roles isActive lastLogin createdAt')
+    // ── Dual-patient: adult or child? ──────────────────────────────────
+    const isAdult     = !!patient.personId;
+    const profile     = isAdult ? patient.personId : patient.childId;
+
+    if (!profile) {
+      return {
+        success: false,
+        message: 'بيانات المريض الشخصية مفقودة',
+      };
+    }
+
+    // ── Find linked Account ────────────────────────────────────────────
+    const accountQuery = isAdult
+      ? { personId: profile._id }
+      : { childId:  profile._id };
+
+    const account = await Account.findOne(accountQuery)
+      .select('email roles isActive isVerified lastLogin createdAt language')
       .lean();
 
-    // Get visit statistics
-    const visitStats = await this.calculateVisitStats(patientId);
+    // ── Calculate visit statistics (using CORRECT schema fields) ───────
+    const patientFilter = isAdult
+      ? { patientPersonId: profile._id }
+      : { patientChildId:  profile._id };
 
-    // Combine all data
+    const visitStats = await calculateVisitStats(patientFilter);
+
+    // ── Assemble response ──────────────────────────────────────────────
     const profileData = {
-      // Patient ID
-      id: patient._id,
+      // ── Patient document ID ────────────────────────────────────────
+      id:        patient._id,
       patientId: patient._id,
-      
-      // Personal Information
-      nationalId: patient.personId.nationalId,
-      firstName: patient.personId.firstName,
-      lastName: patient.personId.lastName,
-      dateOfBirth: patient.personId.dateOfBirth,
-      age: calculateAge(patient.personId.dateOfBirth),
-      gender: patient.personId.gender,
-      phoneNumber: patient.personId.phoneNumber,
-      address: patient.personId.address,
-      
-      // Account Information
-      email: account?.email,
-      roles: account?.roles,
-      isActive: account?.isActive,
-      lastLogin: account?.lastLogin,
-      accountCreated: account?.createdAt,
-      
-      // Medical Information
-      bloodType: patient.bloodType,
-      height: patient.height,
-      weight: patient.weight,
-      bmi: calculateBMI(patient.height, patient.weight),
-      smokingStatus: patient.smokingStatus,
-      allergies: patient.allergies || [],
-      chronicDiseases: patient.chronicDiseases || [],
-      familyHistory: patient.familyHistory || [],
-      
-      // Emergency Contact
-      emergencyContact: patient.emergencyContact,
-      
-      // Visit Statistics
+      type:      isAdult ? 'adult' : 'minor',
+
+      // ── Identity ────────────────────────────────────────────────────
+      ...(isAdult
+        ? {
+            nationalId: profile.nationalId,
+          }
+        : {
+            childRegistrationNumber: profile.childRegistrationNumber,
+            parentNationalId:        profile.parentNationalId,
+            parentPersonId:          profile.parentPersonId,
+            birthCertificateNumber:  profile.birthCertificateNumber,
+            migrationStatus:         profile.migrationStatus,
+            hasReceivedNationalId:   profile.hasReceivedNationalId,
+          }
+      ),
+
+      // ── Names (same fields in both Person and Children) ─────────────
+      firstName:  profile.firstName,
+      fatherName: profile.fatherName,
+      lastName:   profile.lastName,
+      motherName: profile.motherName,
+      dateOfBirth: profile.dateOfBirth,
+      age:         calculateAge(profile.dateOfBirth),
+      gender:      profile.gender,
+
+      // ── Contact ─────────────────────────────────────────────────────
+      phoneNumber: profile.phoneNumber,
+      ...(isAdult && { email: profile.email }),
+      governorate: profile.governorate,
+      city:        profile.city,
+      district:    profile.district,
+      address:     profile.address,
+
+      // ── Account info ────────────────────────────────────────────────
+      account: account ? {
+        email:       account.email,
+        roles:       account.roles,
+        isActive:    account.isActive,
+        isVerified:  account.isVerified,
+        lastLogin:   account.lastLogin,
+        language:    account.language,
+        createdAt:   account.createdAt,
+      } : null,
+
+      // ── Medical information ─────────────────────────────────────────
+      bloodType:           patient.bloodType,
+      rhFactor:            patient.rhFactor,
+      height:              patient.height,
+      weight:              patient.weight,
+      bmi:                 calculateBMI(patient.height, patient.weight),
+      smokingStatus:       patient.smokingStatus,
+      alcoholConsumption:  patient.alcoholConsumption,
+      exerciseFrequency:   patient.exerciseFrequency,
+      dietType:            patient.dietType,
+      allergies:           patient.allergies || [],
+      chronicDiseases:     patient.chronicDiseases || [],
+      familyHistory:       patient.familyHistory || [],
+      previousSurgeries:   patient.previousSurgeries || [],
+      currentMedications:  patient.currentMedications || [],
+      emergencyContact:    patient.emergencyContact || null,
+
+      // ── Stats ────────────────────────────────────────────────────────
+      medicalCardNumber: patient.medicalCardNumber,
+      totalVisits:       patient.totalVisits || visitStats.totalVisits,
+      lastVisitDate:     patient.lastVisitDate || visitStats.lastVisit,
       visitStats,
-      
-      // Timestamps
+
+      // ── Timestamps ───────────────────────────────────────────────────
       createdAt: patient.createdAt,
-      updatedAt: patient.updatedAt
+      updatedAt: patient.updatedAt,
     };
 
     return {
       success: true,
-      patient: profileData
+      patient: profileData,
     };
   } catch (error) {
-    console.error('Error in getPatientProfile:', error);
+    console.error('❌ patientService.getPatientProfile error:', error);
     return {
       success: false,
-      message: 'حدث خطأ أثناء جلب بيانات المريض'
+      message: 'حدث خطأ أثناء جلب بيانات المريض',
     };
   }
 };
 
+// ============================================================================
+// 2. UPDATE PATIENT PROFILE — restricted to safe fields only
+// ============================================================================
+
 /**
- * Update patient profile
- * Only allows updating specific fields
+ * Updates patient profile with field-level access control.
+ *
+ * Fields ALLOWED to update:
+ *   - Person/Children: phoneNumber, alternativePhoneNumber, address, district, street, building
+ *   - Patient: bloodType, height, weight, lifestyle fields, allergies,
+ *              chronicDiseases, familyHistory, emergencyContact, currentMedications
+ *
+ * Fields BLOCKED (immutable identity):
+ *   - nationalId, firstName, fatherName, lastName, motherName, dateOfBirth, gender
+ *   - email (changes go through verification flow)
+ *
+ * @param {string} patientDocId
+ * @param {object} updates
  */
-exports.updatePatientProfile = async (patientId, updates) => {
+exports.updatePatientProfile = async (patientDocId, updates) => {
   try {
-    // Validate updates
-    const validationResult = this.validateProfileUpdates(updates);
-    if (!validationResult.valid) {
+    const validation = exports.validateProfileUpdates(updates);
+    if (!validation.valid) {
       return {
         success: false,
-        message: validationResult.message
+        message: validation.message,
       };
     }
 
-    const patient = await Patient.findById(patientId);
+    const patient = await Patient.findById(patientDocId);
     if (!patient) {
       return {
         success: false,
-        message: 'المريض غير موجود'
+        message: 'المريض غير موجود',
       };
     }
 
-    // Separate updates for Person and Patient collections
-    const personUpdates = {};
-    const patientUpdates = {};
+    // ── Separate updates by target collection ──────────────────────────
+    const demographicsFields = [
+      'phoneNumber', 'alternativePhoneNumber',
+      'address', 'district', 'street', 'building',
+    ];
 
-    // Fields that can be updated in Person collection
-    const personFields = ['phoneNumber', 'address'];
-    personFields.forEach(field => {
-      if (updates[field] !== undefined) {
-        personUpdates[field] = updates[field];
-      }
+    const patientFields = [
+      'bloodType', 'rhFactor', 'height', 'weight',
+      'smokingStatus', 'alcoholConsumption', 'exerciseFrequency', 'dietType',
+      'allergies', 'chronicDiseases', 'familyHistory', 'previousSurgeries',
+      'currentMedications', 'emergencyContact',
+    ];
+
+    const demographicsUpdates = {};
+    const patientUpdates      = {};
+
+    demographicsFields.forEach((field) => {
+      if (updates[field] !== undefined) demographicsUpdates[field] = updates[field];
     });
 
-    // Fields that can be updated in Patient collection
-    const patientFields = ['bloodType', 'height', 'weight', 'smokingStatus', 
-                          'allergies', 'chronicDiseases', 'familyHistory', 'emergencyContact'];
-    patientFields.forEach(field => {
-      if (updates[field] !== undefined) {
-        patientUpdates[field] = updates[field];
-      }
+    patientFields.forEach((field) => {
+      if (updates[field] !== undefined) patientUpdates[field] = updates[field];
     });
 
-    // Update Person document if needed
-    if (Object.keys(personUpdates).length > 0) {
-      await Person.findByIdAndUpdate(
-        patient.personId,
-        { $set: personUpdates },
-        { new: true, runValidators: true }
+    // ── Update demographics (Person or Children) ───────────────────────
+    if (Object.keys(demographicsUpdates).length > 0) {
+      const TargetModel = patient.personId ? Person : Children;
+      const targetId    = patient.personId || patient.childId;
+
+      await TargetModel.findByIdAndUpdate(
+        targetId,
+        { $set: demographicsUpdates },
+        { new: true, runValidators: true },
       );
     }
 
-    // Update Patient document if needed
+    // ── Update Patient ─────────────────────────────────────────────────
     if (Object.keys(patientUpdates).length > 0) {
       await Patient.findByIdAndUpdate(
-        patientId,
+        patientDocId,
         { $set: patientUpdates },
-        { new: true, runValidators: true }
+        { new: true, runValidators: true },
       );
     }
 
-    // Get updated profile
-    return await this.getPatientProfile(patientId);
+    // ── Return updated profile ─────────────────────────────────────────
+    return await exports.getPatientProfile(patientDocId);
   } catch (error) {
-    console.error('Error in updatePatientProfile:', error);
+    console.error('❌ patientService.updatePatientProfile error:', error);
     return {
       success: false,
-      message: 'حدث خطأ أثناء تحديث بيانات المريض'
+      message: 'حدث خطأ أثناء تحديث بيانات المريض',
     };
   }
 };
 
-/**
- * Get medical history summary
- */
-exports.getMedicalHistory = async (patientId) => {
+// ============================================================================
+// 3. GET MEDICAL HISTORY — comprehensive medical summary
+// ============================================================================
+
+exports.getMedicalHistory = async (patientDocId) => {
   try {
-    const patient = await Patient.findById(patientId)
+    const patient = await Patient.findById(patientDocId)
       .populate('personId')
+      .populate('childId')
       .lean();
 
     if (!patient) {
       return {
         success: false,
-        message: 'المريض غير موجود'
+        message: 'المريض غير موجود',
       };
     }
 
-    // Get all visits
-    const visits = await Visit.find({ patientId })
+    const profile = patient.personId || patient.childId;
+    if (!profile) {
+      return {
+        success: false,
+        message: 'بيانات المريض الشخصية مفقودة',
+      };
+    }
+
+    const patientFilter = patient.personId
+      ? { patientPersonId: patient.personId._id }
+      : { patientChildId:  patient.childId._id };
+
+    // ── Get visits ──────────────────────────────────────────────────────
+    const visits = await Visit.find(patientFilter)
+      .populate({
+        path: 'doctorId',
+        select: 'personId specialization',
+        populate: { path: 'personId', select: 'firstName lastName' },
+      })
       .sort({ visitDate: -1 })
-      .populate('doctorId', 'firstName lastName specialization')
       .lean();
 
-    // Extract unique diagnoses
-    const diagnoses = [...new Set(visits
-      .filter(v => v.diagnosis)
-      .map(v => v.diagnosis))];
+    // ── Get lab tests (separate collection!) ───────────────────────────
+    const labTests = await LabTest.find(patientFilter)
+      .select('testsOrdered status orderDate completedAt isCritical resultPdfUrl')
+      .sort({ orderDate: -1 })
+      .lean();
 
-    // Extract all prescribed medications
+    // ── Aggregate data ─────────────────────────────────────────────────
+    const diagnoses = [...new Set(
+      visits.filter(v => v.diagnosis).map(v => v.diagnosis.trim()),
+    )];
+
     const allMedications = visits
-      .filter(v => v.prescribedMedications && v.prescribedMedications.length > 0)
+      .filter(v => Array.isArray(v.prescribedMedications) && v.prescribedMedications.length > 0)
       .flatMap(v => v.prescribedMedications);
 
-    // Extract unique lab tests
-    const labTests = [...new Set(visits
-      .filter(v => v.labTests && v.labTests.length > 0)
-      .flatMap(v => v.labTests.map(test => test.testName)))];
+    const labTestNames = [...new Set(
+      labTests.flatMap(lt => (lt.testsOrdered || []).map(t => t.testName)),
+    )];
 
     const summary = {
-      // Basic Info
       patientInfo: {
-        name: `${patient.personId.firstName} ${patient.personId.lastName}`,
-        nationalId: patient.personId.nationalId,
-        age: calculateAge(patient.personId.dateOfBirth),
-        gender: patient.personId.gender
+        name:       `${profile.firstName} ${profile.lastName}`,
+        ...(patient.personId
+          ? { nationalId: profile.nationalId }
+          : { childRegistrationNumber: profile.childRegistrationNumber }
+        ),
+        age:    calculateAge(profile.dateOfBirth),
+        gender: profile.gender,
+        type:   patient.personId ? 'adult' : 'minor',
       },
-      
-      // Medical Profile
       medicalProfile: {
-        bloodType: patient.bloodType,
-        allergies: patient.allergies || [],
+        bloodType:       patient.bloodType,
+        allergies:       patient.allergies || [],
         chronicDiseases: patient.chronicDiseases || [],
-        familyHistory: patient.familyHistory || [],
-        smokingStatus: patient.smokingStatus
+        familyHistory:   patient.familyHistory || [],
+        smokingStatus:   patient.smokingStatus,
       },
-      
-      // Visit History
       visitHistory: {
-        totalVisits: visits.length,
-        lastVisit: visits[0]?.visitDate,
-        diagnoses: diagnoses,
+        totalVisits:      visits.length,
+        completedVisits:  visits.filter(v => v.status === 'completed').length,
+        lastVisit:        visits.filter(v => v.status === 'completed')[0]?.visitDate || null,
+        diagnoses,
         totalMedications: allMedications.length,
-        labTests: labTests
       },
-      
-      // Health Metrics
+      labHistory: {
+        totalLabTests:     labTests.length,
+        completedLabTests: labTests.filter(lt => lt.status === 'completed').length,
+        criticalResults:   labTests.filter(lt => lt.isCritical).length,
+        labTests:          labTestNames,
+      },
       healthMetrics: {
         height: patient.height,
         weight: patient.weight,
-        bmi: calculateBMI(patient.height, patient.weight)
-      }
+        bmi:    calculateBMI(patient.height, patient.weight),
+      },
     };
 
     return {
       success: true,
-      summary
+      summary,
     };
   } catch (error) {
-    console.error('Error in getMedicalHistory:', error);
+    console.error('❌ patientService.getMedicalHistory error:', error);
     return {
       success: false,
-      message: 'حدث خطأ أثناء جلب التاريخ الطبي'
+      message: 'حدث خطأ أثناء جلب التاريخ الطبي',
     };
   }
 };
 
-/**
- * Calculate visit statistics
- */
-exports.calculateVisitStats = async (patientId) => {
-  try {
-    const visits = await Visit.find({ patientId }).lean();
+// ============================================================================
+// 4. VALIDATE PROFILE UPDATES — guards against immutable fields
+// ============================================================================
 
-    if (visits.length === 0) {
-      return {
-        totalVisits: 0,
-        completedVisits: 0,
-        scheduledVisits: 0,
-        cancelledVisits: 0,
-        lastVisit: null,
-        nextVisit: null
-      };
-    }
-
-    const stats = {
-      totalVisits: visits.length,
-      completedVisits: visits.filter(v => v.status === 'completed').length,
-      scheduledVisits: visits.filter(v => v.status === 'scheduled').length,
-      cancelledVisits: visits.filter(v => v.status === 'cancelled').length,
-      lastVisit: visits
-        .filter(v => v.status === 'completed')
-        .sort((a, b) => new Date(b.visitDate) - new Date(a.visitDate))[0]?.visitDate || null,
-      nextVisit: visits
-        .filter(v => v.status === 'scheduled' && new Date(v.visitDate) > new Date())
-        .sort((a, b) => new Date(a.visitDate) - new Date(b.visitDate))[0]?.visitDate || null
-    };
-
-    return stats;
-  } catch (error) {
-    console.error('Error calculating visit stats:', error);
-    return null;
-  }
-};
-
-/**
- * Validate profile update fields
- */
 exports.validateProfileUpdates = (updates) => {
-  // Fields that are NOT allowed to be updated by patient
-  const restrictedFields = ['nationalId', 'firstName', 'lastName', 'dateOfBirth', 'gender', 'email', 'roles'];
-  
+  const restrictedFields = [
+    'nationalId', 'firstName', 'fatherName', 'lastName', 'motherName',
+    'dateOfBirth', 'gender', 'email', 'roles', 'personId', 'childId',
+    'childRegistrationNumber', 'parentNationalId',
+  ];
+
   for (const field of restrictedFields) {
     if (updates[field] !== undefined) {
       return {
         valid: false,
-        message: `لا يمكن تحديث الحقل: ${field}`
+        message: `لا يمكن تحديث الحقل: ${field}`,
       };
     }
   }
 
-  // Validate specific fields
+  // ── Field-specific validation ────────────────────────────────────────
   if (updates.phoneNumber && !isValidPhoneNumber(updates.phoneNumber)) {
     return {
       valid: false,
-      message: 'رقم الهاتف غير صالح'
+      message: 'رقم الهاتف غير صالح',
     };
   }
 
   if (updates.height && (updates.height < 50 || updates.height > 250)) {
     return {
       valid: false,
-      message: 'الطول يجب أن يكون بين 50 و 250 سم'
+      message: 'الطول يجب أن يكون بين 50 و 250 سم',
     };
   }
 
   if (updates.weight && (updates.weight < 2 || updates.weight > 300)) {
     return {
       valid: false,
-      message: 'الوزن يجب أن يكون بين 2 و 300 كجم'
+      message: 'الوزن يجب أن يكون بين 2 و 300 كجم',
     };
   }
 
   return { valid: true };
 };
 
-/**
- * Helper Functions
- */
+// ============================================================================
+// HELPER — Calculate visit statistics
+// ============================================================================
+
+async function calculateVisitStats(patientFilter) {
+  try {
+    const visits = await Visit.find(patientFilter)
+      .select('visitDate status visitType followUpDate')
+      .lean();
+
+    if (visits.length === 0) {
+      return {
+        totalVisits:      0,
+        completedVisits:  0,
+        inProgressVisits: 0,
+        cancelledVisits:  0,
+        lastVisit:        null,
+        nextFollowUp:     null,
+      };
+    }
+
+    return {
+      totalVisits:      visits.length,
+      completedVisits:  visits.filter(v => v.status === 'completed').length,
+      inProgressVisits: visits.filter(v => v.status === 'in_progress').length,
+      cancelledVisits:  visits.filter(v => v.status === 'cancelled').length,
+      lastVisit: visits
+        .filter(v => v.status === 'completed')
+        .sort((a, b) => new Date(b.visitDate) - new Date(a.visitDate))[0]?.visitDate || null,
+      nextFollowUp: visits
+        .filter(v => v.followUpDate && new Date(v.followUpDate) > new Date())
+        .sort((a, b) => new Date(a.followUpDate) - new Date(b.followUpDate))[0]?.followUpDate || null,
+    };
+  } catch (error) {
+    console.error('Error calculating visit stats:', error);
+    return null;
+  }
+}
+
+// ============================================================================
+// HELPER — Age calculation
+// ============================================================================
 
 function calculateAge(dateOfBirth) {
+  if (!dateOfBirth) return null;
   const today = new Date();
-  const birthDate = new Date(dateOfBirth);
-  let age = today.getFullYear() - birthDate.getFullYear();
-  const monthDiff = today.getMonth() - birthDate.getMonth();
-  
-  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-    age--;
+  const birth = new Date(dateOfBirth);
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+    age -= 1;
   }
-  
   return age;
 }
 
+// ============================================================================
+// HELPER — BMI calculation
+// ============================================================================
+
 function calculateBMI(height, weight) {
   if (!height || !weight) return null;
-  
-  const heightInMeters = height / 100;
-  const bmi = weight / (heightInMeters * heightInMeters);
-  
-  return Math.round(bmi * 10) / 10;
+  const meters = height / 100;
+  return Math.round((weight / (meters * meters)) * 10) / 10;
 }
 
+// ============================================================================
+// HELPER — Syrian phone number validation
+// ============================================================================
+
 function isValidPhoneNumber(phone) {
-  // Syrian phone format: +963XXXXXXXXX or 09XXXXXXXX
-  const phoneRegex = /^(\+963[0-9]{9}|09[0-9]{8})$/;
-  return phoneRegex.test(phone);
+  // +963XXXXXXXXX or 09XXXXXXXX (Syrian mobile)
+  return /^(\+963[0-9]{9}|09[0-9]{8})$/.test(phone);
 }
+
+exports.calculateVisitStats = calculateVisitStats;

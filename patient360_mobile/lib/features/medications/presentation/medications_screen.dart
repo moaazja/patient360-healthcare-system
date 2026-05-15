@@ -7,6 +7,7 @@ import '../../../core/theme/app_radii.dart';
 import '../../../shared/widgets/app_drawer.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../home/presentation/providers/home_providers.dart';
+import '../../notifications/presentation/providers/reminder_sync_provider.dart';
 import '../../prescriptions/presentation/prescriptions_screen.dart';
 import 'widgets/calendar_tab.dart';
 import 'widgets/today_schedule_tab.dart';
@@ -41,6 +42,11 @@ MedicationsTab? medicationsTabFromQuery(String? raw) => switch (raw) {
 /// Reads the `?tab=` query param on entry to decide the initial sub-tab.
 /// `?focusDose=<scheduleId>:<scheduledAtIso>` is forwarded to the schedule
 /// sub-tab so a notification tap can scroll to and pulse the matching row.
+///
+/// On entry we also touch [reminderSyncProvider] so the OS-level dose
+/// reminders stay in sync with [remindersProvider]. The provider is
+/// fire-and-forget — once read, its internal `ref.listen` keeps firing for
+/// the life of the [ProviderScope].
 class MedicationsScreen extends ConsumerStatefulWidget {
   const MedicationsScreen({super.key});
 
@@ -59,6 +65,14 @@ class _MedicationsScreenState extends ConsumerState<MedicationsScreen> {
   /// this, every dependency change (e.g. theme flip) would re-stomp the
   /// patient's current sub-tab back to the URL's value.
   bool _initialQueryApplied = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Activate the reminder → OS-notifications bridge. One read is enough;
+    // the provider keeps its own ref.listen alive for the session.
+    ref.read(reminderSyncProvider);
+  }
 
   @override
   void didChangeDependencies() {

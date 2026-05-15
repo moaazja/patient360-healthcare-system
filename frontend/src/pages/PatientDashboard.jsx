@@ -49,6 +49,7 @@ import {
 } from 'lucide-react';
 
 import { patientAPI, authAPI } from '../services/api';
+import { useTheme } from '../context/ThemeProvider';
 
 import InputModeToggle from '../components/ai/InputModeToggle';
 import InputText from '../components/ai/InputText';
@@ -1040,9 +1041,16 @@ export default function PatientDashboard() {
     return 'home';
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [darkMode, setDarkMode] = useState(
-    () => localStorage.getItem('pd-theme') === 'dark'
-  );
+
+  // ── Theme ───────────────────────────────────────────────────────────
+  // Uses the global ThemeProvider — single source of truth across all
+  // pages. Do NOT add local theme state here; it conflicts with the
+  // provider and breaks dark mode on navigation. (Same pattern as
+  // DoctorDashboard.) The provider exposes:
+  //   theme       → 'light' | 'dark'
+  //   toggleTheme → flips theme + persists to localStorage('p360-theme')
+  //   isDark      → boolean convenience flag
+  const { theme, toggleTheme, isDark } = useTheme();
 
   // Persist the section so the back-button + page-refresh both restore it.
   useEffect(() => {
@@ -1147,14 +1155,10 @@ export default function PatientDashboard() {
     size: 'md',
   });
 
-  // ── Theme: apply to <html> and persist to localStorage ──────────────
-  useEffect(() => {
-    document.documentElement.setAttribute(
-      'data-theme',
-      darkMode ? 'dark' : 'light'
-    );
-    localStorage.setItem('pd-theme', darkMode ? 'dark' : 'light');
-  }, [darkMode]);
+  // NOTE: <html data-theme="..."> attribute and CSS variable injection
+  // are managed by the global ThemeProvider. Do not duplicate that
+  // logic here — it caused the previous dark-mode bug where the
+  // attribute was toggled without updating the CSS custom properties.
 
   // ── Initial mount: load profile + overview in parallel ──────────────
   useEffect(() => {
@@ -1606,11 +1610,11 @@ const handleLogout = useCallback(() => {
           <button
             type="button"
             className="pd-theme-toggle"
-            onClick={() => setDarkMode((prev) => !prev)}
-            aria-label={darkMode ? 'الوضع النهاري' : 'الوضع الليلي'}
-            title={darkMode ? 'الوضع النهاري' : 'الوضع الليلي'}
+            onClick={toggleTheme}
+            aria-label={isDark ? 'الوضع النهاري' : 'الوضع الليلي'}
+            title={isDark ? 'الوضع النهاري' : 'الوضع الليلي'}
           >
-            {darkMode ? <Sun size={20} aria-hidden="true" /> : <Moon size={20} aria-hidden="true" />}
+            {isDark ? <Sun size={20} aria-hidden="true" /> : <Moon size={20} aria-hidden="true" />}
           </button>
           <button
             type="button"

@@ -186,6 +186,42 @@ exports.bookAppointment = async (req, res) => {
       }
     });
 
+    // ── PUSH NOTIFICATION TO PATIENT ──────────────────────────────────────
+    // Fire-and-forget — booking succeeds even if push fails.
+    try {
+      const Doctor = require('../models').Doctor;
+      let providerName = 'الطبيب';
+      if (appointment.doctorId) {
+        try {
+          const docRecord = await Doctor.findById(appointment.doctorId)
+            .populate('personId', 'firstName lastName')
+            .lean();
+          if (docRecord?.personId) {
+            providerName = `د. ${docRecord.personId.firstName || ''} ${docRecord.personId.lastName || ''}`.trim();
+          }
+        } catch (_) { /* fall through to default */ }
+      }
+      const dateStr = slot.date
+        ? new Date(slot.date).toLocaleDateString('ar-EG')
+        : '';
+      createNotification({
+        recipientPersonId: appointment.patientPersonId,
+        recipientChildId:  appointment.patientChildId,
+        recipientType: 'patient',
+        notificationType: 'appointment_confirmed',
+        title:       'تم حجز موعدك',
+        titleArabic: 'تم حجز موعدك',
+        body: `تم حجز موعدك مع ${providerName} يوم ${dateStr} الساعة ${slot.startTime}`,
+        channels: ['push', 'in_app'],
+        relatedType: 'appointment',
+        relatedId:   appointment._id,
+        deepLinkRoute: '/appointments',
+        priority: 'normal'
+      }).catch((err) => console.warn('⚠️  Booking notification failed:', err.message));
+    } catch (notifError) {
+      console.warn('⚠️  Notification dispatch error (non-fatal):', notifError.message);
+    }
+
     return res.status(201).json({
       success: true,
       message: 'تم حجز الموعد بنجاح',

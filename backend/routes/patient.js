@@ -51,6 +51,44 @@ const {
 const { protect, authorize } = require('../middleware/auth');
 
 // ============================================================================
+// POPULATE SPECS — single source of truth
+// ----------------------------------------------------------------------------
+// These resolve the doctor/dentist's display name by ALSO populating the
+// nested `personId` reference (where firstName/fatherName/lastName live).
+//
+// Why this matters:
+//   Without `personId` populated, the frontend helper getDoctorInfo() in
+//   detailHelpers.js cannot compose a display name. It then falls back to
+//   showing the localized specialization label, which makes the doctor
+//   row look like it's missing the doctor's name (and instead repeats
+//   the specialization). The bug surfaces on VisitDetailPage, Appointment
+//   DetailPage, PrescriptionDetailPage, and LabResultDetailPage.
+//
+// Convention: keep these as plain objects (not functions) so each route
+// gets a fresh literal at call time and Mongoose can't mutate a shared
+// reference accidentally.
+// ============================================================================
+
+const DOCTOR_REF_POPULATE = {
+  path: 'doctorId',
+  select: 'specialization medicalLicenseNumber personId',
+  populate: { path: 'personId', select: 'firstName fatherName lastName' }
+};
+
+const DENTIST_REF_POPULATE = {
+  path: 'dentistId',
+  select: 'specialization dentalLicenseNumber personId',
+  populate: { path: 'personId', select: 'firstName fatherName lastName' }
+};
+
+// Used by LabTest where the ordering doctor lives in `orderedBy`
+const ORDERED_BY_REF_POPULATE = {
+  path: 'orderedBy',
+  select: 'specialization medicalLicenseNumber personId',
+  populate: { path: 'personId', select: 'firstName fatherName lastName' }
+};
+
+// ============================================================================
 // MIDDLEWARE — verify patient ownership or admin/doctor access
 // ============================================================================
 
@@ -351,12 +389,12 @@ router.get('/overview', protect, authorize('patient'), async (req, res) => {
         status: { $in: ['scheduled', 'confirmed'] }
       })
         .sort({ appointmentDate: 1 })
-        .populate('doctorId', 'specialization')
-        .populate('dentistId', 'specialization')
+        .populate(DOCTOR_REF_POPULATE)
+        .populate(DENTIST_REF_POPULATE)
         .lean(),
       Visit.findOne(ref)
         .sort({ visitDate: -1 })
-        .populate('doctorId', 'specialization')
+        .populate(DOCTOR_REF_POPULATE)
         .lean()
     ]);
 
@@ -594,8 +632,8 @@ router.get('/reviews', protect, authorize('patient'), async (req, res) => {
       : { reviewerChildId: req.account.childId };
 
     const reviews = await Review.find(reviewerRef)
-      .populate('doctorId', 'specialization medicalLicenseNumber')
-      .populate('dentistId', 'specialization dentalLicenseNumber')
+      .populate(DOCTOR_REF_POPULATE)
+      .populate(DENTIST_REF_POPULATE)
       .populate('laboratoryId', 'name arabicName')
       .populate('pharmacyId', 'name arabicName')
       .populate('hospitalId', 'name arabicName')
@@ -1042,7 +1080,7 @@ router.get('/me/visits', protect, authorize('patient'), async (req, res) => {
 
     const [visits, total] = await Promise.all([
       Visit.find(ref)
-        .populate('doctorId', 'specialization medicalLicenseNumber')
+        .populate(DOCTOR_REF_POPULATE)
         .populate('hospitalId', 'name arabicName')
         .sort({ visitDate: -1 })
         .skip((page - 1) * limit)
@@ -1082,7 +1120,7 @@ router.get('/me/lab-tests', protect, authorize('patient'), async (req, res) => {
 
     const [labTests, total] = await Promise.all([
       LabTest.find(ref)
-        .populate('orderedBy', 'specialization medicalLicenseNumber')
+        .populate(ORDERED_BY_REF_POPULATE)
         .populate('laboratoryId', 'name arabicName')
         .sort({ orderDate: -1 })
         .skip((page - 1) * limit)
@@ -1122,8 +1160,8 @@ router.get('/me/prescriptions', protect, authorize('patient'), async (req, res) 
 
     const [prescriptions, total] = await Promise.all([
       Prescription.find(ref)
-        .populate('doctorId', 'specialization medicalLicenseNumber')
-        .populate('dentistId', 'specialization dentalLicenseNumber')
+        .populate(DOCTOR_REF_POPULATE)
+        .populate(DENTIST_REF_POPULATE)
         .sort({ prescriptionDate: -1 })
         .skip((page - 1) * limit)
         .limit(limit)
@@ -1166,8 +1204,8 @@ router.get('/me/appointments', protect, authorize('patient'), async (req, res) =
 
     const [appointments, total] = await Promise.all([
       Appointment.find(query)
-        .populate('doctorId', 'specialization medicalLicenseNumber')
-        .populate('dentistId', 'specialization dentalLicenseNumber')
+        .populate(DOCTOR_REF_POPULATE)
+        .populate(DENTIST_REF_POPULATE)
         .populate('laboratoryId', 'name arabicName')
         .populate('hospitalId', 'name arabicName')
         .sort({ appointmentDate: -1 })
@@ -1214,7 +1252,7 @@ router.get('/me/medical-summary', protect, authorize('patient'), async (req, res
     ] = await Promise.all([
       Visit.findOne(ref)
         .sort({ visitDate: -1 })
-        .populate('doctorId', 'specialization')
+        .populate(DOCTOR_REF_POPULATE)
         .lean(),
 
       Appointment.findOne({
@@ -1223,8 +1261,8 @@ router.get('/me/medical-summary', protect, authorize('patient'), async (req, res
         status: { $in: ['scheduled', 'confirmed'] }
       })
         .sort({ appointmentDate: 1 })
-        .populate('doctorId', 'specialization')
-        .populate('dentistId', 'specialization')
+        .populate(DOCTOR_REF_POPULATE)
+        .populate(DENTIST_REF_POPULATE)
         .lean(),
 
       Prescription.countDocuments({
@@ -1329,8 +1367,8 @@ router.get('/:identifier/visits', protect, verifyPatientAccess, async (req, res)
 
     const [visits, total] = await Promise.all([
       Visit.find(ref)
-        .populate('doctorId', 'specialization medicalLicenseNumber')
-        .populate('dentistId', 'specialization')
+        .populate(DOCTOR_REF_POPULATE)
+        .populate(DENTIST_REF_POPULATE)
         .populate('hospitalId', 'name arabicName')
         .sort({ visitDate: -1 })
         .skip((page - 1) * limit)
@@ -1364,7 +1402,7 @@ router.get('/:identifier/lab-tests', protect, verifyPatientAccess, async (req, r
 
     const [labTests, total] = await Promise.all([
       LabTest.find(ref)
-        .populate('orderedBy', 'specialization')
+        .populate(ORDERED_BY_REF_POPULATE)
         .populate('laboratoryId', 'name arabicName')
         .sort({ orderDate: -1 })
         .skip((page - 1) * limit)
@@ -1398,8 +1436,8 @@ router.get('/:identifier/prescriptions', protect, verifyPatientAccess, async (re
 
     const [prescriptions, total] = await Promise.all([
       Prescription.find(ref)
-        .populate('doctorId', 'specialization')
-        .populate('dentistId', 'specialization')
+        .populate(DOCTOR_REF_POPULATE)
+        .populate(DENTIST_REF_POPULATE)
         .sort({ prescriptionDate: -1 })
         .skip((page - 1) * limit)
         .limit(limit)

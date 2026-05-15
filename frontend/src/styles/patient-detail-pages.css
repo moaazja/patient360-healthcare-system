@@ -270,6 +270,11 @@
   color: var(--tm-text-primary);
   line-height: 1.5;
   word-break: break-word;
+  /* RTL layout: pin the value to the right side of the field column.
+     Without this, values that use dir="ltr" (dates, license numbers, IDs)
+     would inherit text-align: start which resolves to LEFT for LTR elements
+     — visually breaking the right-aligned column flow. */
+  text-align: right;
 }
 
 /* ── Action bar ─────────────────────────────────────────────────────── */
@@ -664,6 +669,8 @@
   font-weight: 500;
   color: var(--tm-text-primary);
   line-height: 1.4;
+  /* Same RTL alignment fix as .dpg-field dd — see comment there. */
+  text-align: right;
 }
 
 .dpg-med-instructions {

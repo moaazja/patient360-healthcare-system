@@ -1,68 +1,98 @@
-// backend/routes/auth.js
-// Authentication routes with file upload support
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  Authentication Routes — Patient 360°
+ *  ─────────────────────────────────────────────────────────────────────────
+ *  📁 Path: backend/routes/auth.js
+ *  🔧 Version: 2.1 (HOTFIX — correct middleware imports)
+ *
+ *  Changes from v2.0:
+ *    🔥 FIX: uploadDoctorFiles middleware exports an object
+ *           {uploadFields, uploadPharmacistFields, uploadLabTechFields,
+ *            handleUploadErrors} — not a single function. v2.0 imported it
+ *           incorrectly as default, causing TypeError at startup.
+ *
+ *  Changes from v1.0:
+ *    ✓ loginLimiter middleware now applied to /login (was unused before)
+ *    ✓ POST /logout endpoint added (was completely missing)
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
 
 const express = require('express');
-const router = express.Router();
 
-// Import controllers
-const authController = require('../controllers/authController');
+const authController   = require('../controllers/authController');
+const { protect }      = require('../middleware/auth');
+const { loginLimiter } = require('../middleware/security');
 
-// Import middleware
-const auth = require('../middleware/auth');
-
-// Import file upload middleware
+// 🔧 v2.1 FIX: Destructure the three specific upload middlewares.
+// Each professional type has its own file fields configuration.
 const {
-  uploadFields,
-  uploadPharmacistFields,
-  uploadLabTechFields,
-  handleUploadErrors
+  uploadFields,             // for doctor registration
+  uploadPharmacistFields,   // for pharmacist registration
+  uploadLabTechFields,      // for lab technician registration
+  handleUploadErrors,       // error handler — runs after upload middlewares
 } = require('../middleware/uploadDoctorFiles');
 
-// ==================== PUBLIC ROUTES ====================
+const router = express.Router();
 
-// Patient Signup
-router.post('/register', authController.signup);
-router.post('/signup', authController.signup);
+// ============================================================================
+// PUBLIC ROUTES — No authentication required
+// ============================================================================
 
-// Doctor Registration Request (WITH FILE UPLOADS)
-router.post('/register-doctor',
+// ── Patient signup (adult or minor) ────────────────────────────────────────
+router.post('/signup',   authController.signup);
+router.post('/register', authController.register); // Alias for signup
+
+// ── Professional registration (Doctor / Pharmacist / Lab Tech) ─────────────
+// Each professional type uses its own multer configuration to handle
+// the specific file fields it expects (licenseDocument, degreeDocument, etc).
+// handleUploadErrors runs immediately after to convert multer errors into
+// proper API responses.
+router.post(
+  '/register-doctor',
   uploadFields,
   handleUploadErrors,
-  authController.registerDoctorRequest
+  authController.registerDoctor,
 );
 
-// Pharmacist Registration Request (WITH FILE UPLOADS)
-router.post('/register-pharmacist',
+router.post(
+  '/register-pharmacist',
   uploadPharmacistFields,
   handleUploadErrors,
-  authController.registerPharmacistRequest
+  authController.registerPharmacist,
 );
 
-// Lab Technician Registration Request (WITH FILE UPLOADS)
-router.post('/register-lab-technician',
+router.post(
+  '/register-lab-technician',
   uploadLabTechFields,
   handleUploadErrors,
-  authController.registerLabTechnicianRequest
+  authController.registerLabTechnician,
 );
 
-// Check Doctor Request Status (legacy — kept for backward compatibility)
-router.post('/check-doctor-status', authController.checkDoctorRequestStatus);
+// ── Application status checks ──────────────────────────────────────────────
+router.get('/check-doctor-status',       authController.checkDoctorStatus);
+router.get('/check-professional-status', authController.checkProfessionalStatus);
 
-// Check Professional Status (unified — works for doctor, pharmacist, lab tech)
-router.post('/check-professional-status', authController.checkProfessionalStatus);
+// ── Login — RATE LIMITED to prevent brute-force ────────────────────────────
+// loginLimiter: 5 attempts per 15 minutes per IP
+router.post('/login', loginLimiter, authController.login);
 
-// Login
-router.post('/login', authController.login);
-
-// ==================== FORGET PASSWORD ROUTES ====================
-
+// ── Password reset flow ────────────────────────────────────────────────────
 router.post('/forgot-password', authController.forgotPassword);
-router.post('/verify-otp', authController.verifyOTP);
-router.post('/reset-password', authController.resetPassword);
+router.post('/verify-otp',      authController.verifyOTP);
+router.post('/reset-password',  authController.resetPassword);
 
-// ==================== PROTECTED ROUTES ====================
+// ============================================================================
+// PROTECTED ROUTES — Require valid JWT
+// ============================================================================
 
-router.get('/verify', auth.protect, authController.verifyToken);
-router.post('/update-last-login', auth.protect, authController.updateLastLogin);
+// ── Token verification (used by frontend bootstrap to check session) ───────
+router.get('/verify', protect, authController.verify);
+
+// ── Update last login timestamp + register FCM device token ────────────────
+router.post('/update-last-login', protect, authController.updateLastLogin);
+
+// ── Logout — invalidates FCM token + audit logs the event ──────────────────
+// NEW in v2.0: was completely missing before
+router.post('/logout', protect, authController.logout);
 
 module.exports = router;

@@ -1,71 +1,139 @@
-const Visit = require('../models/Visit');
-const Doctor = require('../models/Doctor');
-const Person = require('../models/Person');
-
 /**
- * Visit Service
- * Business logic for visit operations
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  Visit Service — Patient 360°
+ *  ─────────────────────────────────────────────────────────────────────────
+ *  📁 Path: backend/services/visitService.js
+ *  🔧 Version: 2.0 (CRITICAL SCHEMA FIX)
+ *
+ *  🚨 WHAT WAS BROKEN IN v1.0:
+ *
+ *  v1.0 queried Visit by a `patientId` field that does NOT EXIST in the
+ *  schema. The real schema (per patient360_db_final.js and Visit.js) uses:
+ *      patientPersonId  → adult patient (refs Person)
+ *      patientChildId   → child patient (refs Children)
+ *
+ *  This caused EVERY service method to return empty results silently,
+ *  which is the suspected root cause of the empty Patients/Doctors/Children
+ *  pages in the Admin Dashboard.
+ *
+ *  Other v1.0 bugs fixed in v2.0:
+ *    ✓ `visitTime` field — doesn't exist; only `visitDate` (Date) exists
+ *    ✓ `labTests` array on Visit — doesn't exist; LabTest is a separate collection
+ *    ✓ `status: 'scheduled'` — wrong enum; valid values are in_progress/completed/cancelled
+ *    ✓ Doctor populate path was wrong (.lastName instead of .personId.lastName)
+ *
+ *  📚 Schema reference (Visit.js):
+ *    Required:  visitType, visitDate, chiefComplaint
+ *    XOR:       patientPersonId  OR  patientChildId  (enforced by pre-validate)
+ *    Provider:  doctorId  OR  dentistId
+ *    Status:    'in_progress' | 'completed' | 'cancelled'
+ *    Type:      'regular' | 'follow_up' | 'emergency' | 'consultation' | 'dental' | 'lab_only'
+ * ═══════════════════════════════════════════════════════════════════════════
  */
 
+const { Visit, LabTest } = require('../models');
+
+// ============================================================================
+// HELPER — Resolve patient reference (adult or child)
+// ============================================================================
+
 /**
- * Get all visits for a patient with filters
+ * Normalizes a patient identifier into a Mongoose query filter that uses
+ * the CORRECT field names (patientPersonId or patientChildId).
+ *
+ * @param {string|object} patient
+ *   Either:
+ *     - A plain ObjectId/string → caller doesn't know type, we try both
+ *     - { personId: ObjectId }   → explicit adult
+ *     - { childId:  ObjectId }   → explicit child
+ *
+ * @returns {object} MongoDB filter
  */
-exports.getPatientVisits = async (patientId, filters = {}) => {
+function buildPatientFilter(patient) {
+  if (!patient) return {};
+
+  // Explicit shape: { personId } or { childId }
+  if (typeof patient === 'object' && !patient._bsontype && !patient.toString) {
+    if (patient.personId) return { patientPersonId: patient.personId };
+    if (patient.childId)  return { patientChildId: patient.childId };
+  }
+
+  // Plain ID — caller doesn't know if adult or child. Match either.
+  const id = patient.toString();
+  return {
+    $or: [
+      { patientPersonId: id },
+      { patientChildId:  id },
+    ],
+  };
+}
+
+// ============================================================================
+// 1. GET PATIENT VISITS — paginated + filtered
+// ============================================================================
+
+/**
+ * Fetches visits for a given patient with optional filters.
+ *
+ * @param {string|object} patient — ID or { personId } / { childId }
+ * @param {object} filters
+ *   - startDate, endDate         (Date strings)
+ *   - doctorId                   (ObjectId)
+ *   - searchTerm                 (free text across complaint/diagnosis/notes)
+ *   - status                     ('in_progress' | 'completed' | 'cancelled')
+ *   - visitType                  (regular/follow_up/emergency/consultation/dental/lab_only)
+ *   - page, limit                (pagination — default page=1, limit=50)
+ */
+exports.getPatientVisits = async (patient, filters = {}) => {
   try {
-    const { startDate, endDate, doctorId, searchTerm, page = 1, limit = 50, status } = filters;
+    const {
+      startDate, endDate, doctorId, searchTerm,
+      page = 1, limit = 50, status, visitType,
+    } = filters;
 
-    // Build query
-    const query = { patientId };
+    // ── Build query using CORRECT field names ──────────────────────────
+    const query = buildPatientFilter(patient);
 
-    // Date range filter
     if (startDate || endDate) {
       query.visitDate = {};
-      if (startDate) {
-        query.visitDate.$gte = new Date(startDate);
-      }
-      if (endDate) {
-        query.visitDate.$lte = new Date(endDate);
-      }
+      if (startDate) query.visitDate.$gte = new Date(startDate);
+      if (endDate)   query.visitDate.$lte = new Date(endDate);
     }
 
-    // Doctor filter
-    if (doctorId) {
-      query.doctorId = doctorId;
-    }
+    if (doctorId)  query.doctorId  = doctorId;
+    if (status)    query.status    = status;
+    if (visitType) query.visitType = visitType;
 
-    // Status filter
-    if (status) {
-      query.status = status;
-    }
-
-    // Search in diagnosis and chief complaint
     if (searchTerm) {
       query.$or = [
-        { diagnosis: { $regex: searchTerm, $options: 'i' } },
+        { diagnosis:      { $regex: searchTerm, $options: 'i' } },
         { chiefComplaint: { $regex: searchTerm, $options: 'i' } },
-        { doctorNotes: { $regex: searchTerm, $options: 'i' } }
+        { doctorNotes:    { $regex: searchTerm, $options: 'i' } },
       ];
     }
 
-    // Execute query with pagination
+    // ── Execute query ──────────────────────────────────────────────────
     const visits = await Visit.find(query)
       .populate({
         path: 'doctorId',
-        populate: {
-          path: 'personId',
-          select: 'firstName lastName'
-        },
-        select: 'personId specialization medicalLicenseNumber'
+        select: 'personId specialization medicalLicenseNumber',
+        populate: { path: 'personId', select: 'firstName lastName' },
       })
-      .sort({ visitDate: -1, visitTime: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
+      .populate({
+        path: 'dentistId',
+        select: 'personId specialization dentalLicenseNumber',
+        populate: { path: 'personId', select: 'firstName lastName' },
+      })
+      .sort({ visitDate: -1 })
+      .limit(Number(limit))
+      .skip((Number(page) - 1) * Number(limit))
       .lean();
 
     const count = await Visit.countDocuments(query);
 
-    // Format visits for frontend
-    const formattedVisits = visits.map(visit => formatVisitData(visit));
+    const formattedVisits = await Promise.all(
+      visits.map(visit => formatVisitData(visit, false)),
+    );
 
     return {
       success: true,
@@ -74,63 +142,76 @@ exports.getPatientVisits = async (patientId, filters = {}) => {
         total: count,
         page: Number(page),
         limit: Number(limit),
-        pages: Math.ceil(count / limit)
-      }
+        pages: Math.ceil(count / Number(limit)),
+      },
     };
   } catch (error) {
-    console.error('Error in getPatientVisits:', error);
+    console.error('❌ visitService.getPatientVisits error:', error);
     return {
       success: false,
-      message: 'حدث خطأ أثناء جلب الزيارات'
+      message: 'حدث خطأ أثناء جلب الزيارات',
     };
   }
 };
 
+// ============================================================================
+// 2. GET VISIT BY ID — with full details + linked lab tests
+// ============================================================================
+
 /**
- * Get single visit details
+ * Fetches a single visit with all relations.
+ *
+ * @param {string} visitId
+ * @param {string|object} patient — used for ownership validation
  */
-exports.getVisitById = async (visitId, patientId) => {
+exports.getVisitById = async (visitId, patient) => {
   try {
-    const visit = await Visit.findOne({ _id: visitId, patientId })
+    const patientFilter = buildPatientFilter(patient);
+
+    const visit = await Visit.findOne({ _id: visitId, ...patientFilter })
       .populate({
         path: 'doctorId',
-        populate: {
-          path: 'personId',
-          select: 'firstName lastName phoneNumber'
-        },
-        select: 'personId specialization medicalLicenseNumber yearsOfExperience'
+        select: 'personId specialization medicalLicenseNumber yearsOfExperience',
+        populate: { path: 'personId', select: 'firstName lastName phoneNumber' },
       })
+      .populate({
+        path: 'dentistId',
+        select: 'personId specialization dentalLicenseNumber yearsOfExperience',
+        populate: { path: 'personId', select: 'firstName lastName phoneNumber' },
+      })
+      .populate('hospitalId', 'name arabicName')
       .lean();
 
     if (!visit) {
       return {
         success: false,
-        message: 'الزيارة غير موجودة'
+        message: 'الزيارة غير موجودة',
       };
     }
 
-    // Format visit data
-    const formattedVisit = formatVisitData(visit, true); // true = include full details
+    const formatted = await formatVisitData(visit, true);
 
     return {
       success: true,
-      visit: formattedVisit
+      visit: formatted,
     };
   } catch (error) {
-    console.error('Error in getVisitById:', error);
+    console.error('❌ visitService.getVisitById error:', error);
     return {
       success: false,
-      message: 'حدث خطأ أثناء جلب تفاصيل الزيارة'
+      message: 'حدث خطأ أثناء جلب تفاصيل الزيارة',
     };
   }
 };
 
-/**
- * Get visit statistics
- */
-exports.getVisitStats = async (patientId) => {
+// ============================================================================
+// 3. GET VISIT STATS — for patient dashboard charts
+// ============================================================================
+
+exports.getVisitStats = async (patient) => {
   try {
-    const visits = await Visit.find({ patientId }).lean();
+    const patientFilter = buildPatientFilter(patient);
+    const visits = await Visit.find(patientFilter).lean();
 
     if (visits.length === 0) {
       return {
@@ -138,214 +219,239 @@ exports.getVisitStats = async (patientId) => {
         stats: {
           totalVisits: 0,
           completedVisits: 0,
-          scheduledVisits: 0,
+          inProgressVisits: 0,
           cancelledVisits: 0,
-          noShowVisits: 0,
           lastVisit: null,
-          nextVisit: null,
+          nextFollowUp: null,
           visitsByStatus: {},
-          visitsByMonth: [],
+          visitsByMonth: calculateVisitsByMonth([]),
+          visitsByType: {},
           commonDiagnoses: [],
-          doctorsVisited: []
-        }
+          doctorsVisited: 0,
+        },
       };
     }
 
-    // Calculate statistics
+    const completedVisits  = visits.filter(v => v.status === 'completed');
+    const inProgressVisits = visits.filter(v => v.status === 'in_progress');
+    const cancelledVisits  = visits.filter(v => v.status === 'cancelled');
+
     const stats = {
-      totalVisits: visits.length,
-      completedVisits: visits.filter(v => v.status === 'completed').length,
-      scheduledVisits: visits.filter(v => v.status === 'scheduled').length,
-      cancelledVisits: visits.filter(v => v.status === 'cancelled').length,
-      noShowVisits: visits.filter(v => v.status === 'no-show').length,
-      
-      // Dates
-      lastVisit: visits
-        .filter(v => v.status === 'completed')
+      totalVisits:      visits.length,
+      completedVisits:  completedVisits.length,
+      inProgressVisits: inProgressVisits.length,
+      cancelledVisits:  cancelledVisits.length,
+
+      // Most recent completed visit
+      lastVisit: completedVisits
         .sort((a, b) => new Date(b.visitDate) - new Date(a.visitDate))[0]?.visitDate || null,
-      
-      nextVisit: visits
-        .filter(v => v.status === 'scheduled' && new Date(v.visitDate) > new Date())
-        .sort((a, b) => new Date(a.visitDate) - new Date(b.visitDate))[0]?.visitDate || null,
+
+      // Next scheduled follow-up (from completed visits with followUpDate set)
+      nextFollowUp: visits
+        .filter(v => v.followUpDate && new Date(v.followUpDate) > new Date())
+        .sort((a, b) => new Date(a.followUpDate) - new Date(b.followUpDate))[0]?.followUpDate || null,
 
       // Visits by status
       visitsByStatus: {
-        completed: visits.filter(v => v.status === 'completed').length,
-        scheduled: visits.filter(v => v.status === 'scheduled').length,
-        cancelled: visits.filter(v => v.status === 'cancelled').length,
-        noShow: visits.filter(v => v.status === 'no-show').length
+        in_progress: inProgressVisits.length,
+        completed:   completedVisits.length,
+        cancelled:   cancelledVisits.length,
       },
 
       // Visits by month (last 12 months)
       visitsByMonth: calculateVisitsByMonth(visits),
 
+      // Visits by type
+      visitsByType: visits.reduce((acc, v) => {
+        acc[v.visitType] = (acc[v.visitType] || 0) + 1;
+        return acc;
+      }, {}),
+
       // Common diagnoses
       commonDiagnoses: getCommonDiagnoses(visits),
 
       // Unique doctors visited
-      doctorsVisited: [...new Set(visits.map(v => v.doctorId?.toString()))].length
+      doctorsVisited: [...new Set(
+        visits.map(v => v.doctorId?.toString()).filter(Boolean),
+      )].length,
     };
 
     return {
       success: true,
-      stats
+      stats,
     };
   } catch (error) {
-    console.error('Error in getVisitStats:', error);
+    console.error('❌ visitService.getVisitStats error:', error);
     return {
       success: false,
-      message: 'حدث خطأ أثناء حساب إحصائيات الزيارات'
+      message: 'حدث خطأ أثناء حساب إحصائيات الزيارات',
     };
   }
 };
 
-/**
- * Get visits grouped by doctor
- */
-exports.getVisitsByDoctor = async (patientId) => {
+// ============================================================================
+// 4. GET VISITS BY DOCTOR — grouped view
+// ============================================================================
+
+exports.getVisitsByDoctor = async (patient) => {
   try {
-    const visits = await Visit.find({ patientId })
+    const patientFilter = buildPatientFilter(patient);
+
+    const visits = await Visit.find(patientFilter)
       .populate({
         path: 'doctorId',
-        populate: {
-          path: 'personId',
-          select: 'firstName lastName'
-        },
-        select: 'personId specialization'
+        select: 'personId specialization',
+        populate: { path: 'personId', select: 'firstName lastName' },
       })
       .sort({ visitDate: -1 })
       .lean();
 
-    // Group visits by doctor
     const visitsByDoctor = {};
 
-    visits.forEach(visit => {
-      if (!visit.doctorId) return;
+    for (const visit of visits) {
+      if (!visit.doctorId) continue;
 
       const doctorId = visit.doctorId._id.toString();
-      const doctorName = visit.doctorId.personId 
-        ? `${visit.doctorId.personId.firstName} ${visit.doctorId.personId.lastName}`
-        : 'Unknown Doctor';
+      const doctorName = visit.doctorId.personId
+        ? `د. ${visit.doctorId.personId.firstName} ${visit.doctorId.personId.lastName}`
+        : 'طبيب غير محدد';
 
       if (!visitsByDoctor[doctorId]) {
         visitsByDoctor[doctorId] = {
           doctorId,
           doctorName,
           specialization: visit.doctorId.specialization,
-          visits: []
+          visits: [],
         };
       }
 
-      visitsByDoctor[doctorId].visits.push(formatVisitData(visit));
-    });
+      // eslint-disable-next-line no-await-in-loop
+      visitsByDoctor[doctorId].visits.push(await formatVisitData(visit, false));
+    }
 
-    // Convert to array and sort by number of visits
     const groupedVisits = Object.values(visitsByDoctor)
       .sort((a, b) => b.visits.length - a.visits.length);
 
     return {
       success: true,
-      visitsByDoctor: groupedVisits
+      visitsByDoctor: groupedVisits,
     };
   } catch (error) {
-    console.error('Error in getVisitsByDoctor:', error);
+    console.error('❌ visitService.getVisitsByDoctor error:', error);
     return {
       success: false,
-      message: 'حدث خطأ أثناء تجميع الزيارات حسب الطبيب'
+      message: 'حدث خطأ أثناء تجميع الزيارات حسب الطبيب',
     };
   }
 };
 
-/**
- * Helper Functions
- */
+// ============================================================================
+// HELPER — Format a single visit document for frontend consumption
+// ============================================================================
 
 /**
- * Format visit data for frontend
+ * Shapes a raw visit document into the frontend's expected format.
+ *
+ * @param {object} visit                 — Mongoose .lean() result
+ * @param {boolean} includeFullDetails  — true = embed medications + linked lab tests
  */
-function formatVisitData(visit, includeFullDetails = false) {
+async function formatVisitData(visit, includeFullDetails = false) {
   const formatted = {
-    _id: visit._id,
-    visitDate: visit.visitDate,
-    visitTime: visit.visitTime,
-    status: visit.status,
-    chiefComplaint: visit.chiefComplaint,
-    diagnosis: visit.diagnosis,
-    
-    // Doctor information
-    doctorId: visit.doctorId?._id,
-    doctorName: visit.doctorId?.personId 
+    _id:             visit._id,
+    visitDate:       visit.visitDate,
+    visitType:       visit.visitType,
+    status:          visit.status,
+    chiefComplaint:  visit.chiefComplaint,
+    diagnosis:       visit.diagnosis,
+
+    // Provider (doctor OR dentist)
+    doctorId: visit.doctorId?._id || visit.doctorId || null,
+    doctorName: visit.doctorId?.personId
       ? `د. ${visit.doctorId.personId.firstName} ${visit.doctorId.personId.lastName}`
-      : 'غير محدد',
-    specialization: visit.doctorId?.specialization || 'غير محدد',
+      : (visit.dentistId?.personId
+          ? `د. ${visit.dentistId.personId.firstName} ${visit.dentistId.personId.lastName}`
+          : 'غير محدد'),
+    specialization: visit.doctorId?.specialization
+                  || visit.dentistId?.specialization
+                  || 'غير محدد',
 
-
-    // Medication count
+    // Embedded data counts
     medicationsCount: visit.prescribedMedications?.length || 0,
-    
-    // Lab tests count
-    labTestsCount: visit.labTests?.length || 0,
+    hasECGAnalysis:   !!visit.ecgAnalysis,
+    hasVitalSigns:    !!visit.vitalSigns,
+    hasPhoto:         !!visit.visitPhotoUrl,
 
     createdAt: visit.createdAt,
-    updatedAt: visit.updatedAt
+    updatedAt: visit.updatedAt,
   };
 
-  // Include full details if requested
   if (includeFullDetails) {
     formatted.prescribedMedications = visit.prescribedMedications || [];
-    formatted.labTests = visit.labTests || [];
-    formatted.doctorNotes = visit.doctorNotes;
+    formatted.vitalSigns             = visit.vitalSigns || null;
+    formatted.doctorNotes            = visit.doctorNotes || null;
+    formatted.followUpDate           = visit.followUpDate || null;
+    formatted.followUpNotes          = visit.followUpNotes || null;
+    formatted.visitPhotoUrl          = visit.visitPhotoUrl || null;
+    formatted.ecgAnalysis            = visit.ecgAnalysis || null;
+    formatted.paymentStatus          = visit.paymentStatus;
+
+    // ── Lab tests are in a SEPARATE collection, query by visitId ───────
+    try {
+      const labTests = await LabTest.find({ visitId: visit._id })
+        .select('testNumber testsOrdered status resultPdfUrl completedAt isCritical')
+        .lean();
+      formatted.labTests      = labTests;
+      formatted.labTestsCount = labTests.length;
+    } catch (e) {
+      formatted.labTests      = [];
+      formatted.labTestsCount = 0;
+    }
+
     formatted.doctorInfo = visit.doctorId ? {
       medicalLicenseNumber: visit.doctorId.medicalLicenseNumber,
-      yearsOfExperience: visit.doctorId.yearsOfExperience,
-      phoneNumber: visit.doctorId.personId?.phoneNumber
+      yearsOfExperience:    visit.doctorId.yearsOfExperience,
+      phoneNumber:          visit.doctorId.personId?.phoneNumber,
     } : null;
   }
 
   return formatted;
 }
 
-/**
- * Calculate visits by month (last 12 months)
- */
+// ============================================================================
+// HELPER — Calculate visits by month for the last 12 months
+// ============================================================================
+
 function calculateVisitsByMonth(visits) {
   const now = new Date();
   const months = [];
 
-  // Generate last 12 months
-  for (let i = 11; i >= 0; i--) {
+  for (let i = 11; i >= 0; i -= 1) {
     const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const monthKey = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-    
-    months.push({
-      month: monthKey,
-      count: 0
-    });
+    months.push({ month: monthKey, count: 0 });
   }
 
-  // Count visits per month
-  visits.forEach(visit => {
+  visits.forEach((visit) => {
+    if (!visit.visitDate) return;
     const visitDate = new Date(visit.visitDate);
     const monthKey = `${visitDate.getFullYear()}-${String(visitDate.getMonth() + 1).padStart(2, '0')}`;
-    
     const monthData = months.find(m => m.month === monthKey);
-    if (monthData) {
-      monthData.count++;
-    }
+    if (monthData) monthData.count += 1;
   });
 
   return months;
 }
 
-/**
- * Get most common diagnoses
- */
+// ============================================================================
+// HELPER — Top 10 most common diagnoses
+// ============================================================================
+
 function getCommonDiagnoses(visits) {
   const diagnosisCounts = {};
 
   visits
     .filter(v => v.diagnosis && v.status === 'completed')
-    .forEach(visit => {
+    .forEach((visit) => {
       const diagnosis = visit.diagnosis.trim();
       diagnosisCounts[diagnosis] = (diagnosisCounts[diagnosis] || 0) + 1;
     });
@@ -353,5 +459,8 @@ function getCommonDiagnoses(visits) {
   return Object.entries(diagnosisCounts)
     .map(([diagnosis, count]) => ({ diagnosis, count }))
     .sort((a, b) => b.count - a.count)
-    .slice(0, 10); // Top 10
+    .slice(0, 10);
 }
+
+// Export helper for use by other services
+exports.buildPatientFilter = buildPatientFilter;

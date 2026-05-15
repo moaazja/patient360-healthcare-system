@@ -38,6 +38,7 @@ const morgan = require('morgan');
 const path = require('path');
 const fs = require('fs');
 const fcmService = require('./services/fcmService');
+const cronJobs = require('./services/cronJobs');
 const PORT = process.env.PORT || 5000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/PATIENT360';
@@ -258,22 +259,35 @@ app.get('/', (req, res) => {
       auth: {
         signup: 'POST   /api/auth/signup',
         login: 'POST   /api/auth/login',
-        verify: 'GET    /api/auth/verify-token',
+        logout: 'POST   /api/auth/logout',
+        verify: 'GET    /api/auth/verify',
+        verifyToken: 'GET    /api/auth/verify-token',
         forgotPassword: 'POST   /api/auth/forgot-password',
         verifyOTP: 'POST   /api/auth/verify-otp',
         resetPassword: 'POST   /api/auth/reset-password',
-        registerDoctor: 'POST   /api/auth/register-doctor-request',
-        checkDoctorReq: 'GET    /api/auth/doctor-request-status/:requestId'
+        updateLastLogin: 'POST   /api/auth/update-last-login',
+        registerDoctor: 'POST   /api/auth/register-doctor',
+        registerPharmacist: 'POST   /api/auth/register-pharmacist',
+        registerLabTech: 'POST   /api/auth/register-lab-technician',
+        checkDoctorStatus: 'GET    /api/auth/check-doctor-status',
+        checkProStatus: 'GET    /api/auth/check-professional-status'
       },
       admin: {
         statistics: 'GET    /api/admin/statistics',
         doctors: 'GET    /api/admin/doctors',
         doctorRequests: 'GET    /api/admin/doctor-requests',
-        approveRequest: 'POST   /api/admin/doctor-requests/:id/approve',
+        approveRequest: 'POST   /api/admin/doctor-requests/:id/accept',
         rejectRequest: 'POST   /api/admin/doctor-requests/:id/reject',
         patients: 'GET    /api/admin/patients',
-        deactivate: 'POST   /api/admin/accounts/:id/deactivate',
-        auditLogs: 'GET    /api/admin/audit-logs'
+        children: 'GET    /api/admin/children',
+        migrateChild: 'POST   /api/admin/children/:id/migrate',
+        hospitals: 'GET    /api/admin/hospitals',
+        pharmacies: 'GET    /api/admin/pharmacies',
+        nearbyPharmacies: 'GET    /api/admin/pharmacies/nearby',
+        laboratories: 'GET    /api/admin/laboratories',
+        nearbyLabs: 'GET    /api/admin/laboratories/nearby',
+        auditLogs: 'GET    /api/admin/audit-logs',
+        userActivity: 'GET    /api/admin/audit-logs/user-activity?email='
       },
       patient: {
         me: 'GET    /api/patient/me',
@@ -474,6 +488,9 @@ async function start() {
   await syncAllIndexes(); // No-op unless SYNC_INDEXES=true
 
   fcmService.init();
+
+  // Start scheduled background jobs (Damascus timezone)
+  cronJobs.init();
 
   app.listen(PORT, () => {
     console.log('');

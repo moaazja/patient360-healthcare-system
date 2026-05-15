@@ -998,6 +998,24 @@ exports.dispensePrescription = async (req, res) => {
       success: true
     }).catch(() => {});
 
+    try {
+      createNotification({
+        recipientPersonId: prescription.patientPersonId,
+        recipientChildId:  prescription.patientChildId,
+        recipientType: 'patient',
+        notificationType: 'prescription_dispensed',
+        title: 'تم صرف وصفتك',
+        body: `تم صرف وصفتك رقم ${prescription.prescriptionNumber} (${normalizedMeds.length} دواء)`,
+        channels: ['push', 'in_app'],
+        relatedType: 'prescription',
+        relatedId: prescription._id,
+        deepLinkRoute: '/medications',
+        priority: 'normal'
+      }).catch((err) => console.warn('⚠️  Dispense notification failed:', err.message));
+    } catch (notifError) {
+      console.warn('⚠️  Notification dispatch error:', notifError.message);
+    }
+
     return res.status(201).json({
       success: true,
       message: 'تم صرف الوصفة بنجاح',

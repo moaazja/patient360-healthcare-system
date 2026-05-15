@@ -130,7 +130,9 @@ import {
   TestTube,
   Beaker,
   ChevronDown,
+  ChevronUp,
   Building2,
+  UserCheck,
 } from 'lucide-react';
 
 import Navbar from '../components/common/Navbar';
@@ -807,6 +809,21 @@ const DoctorDashboard = () => {
   const [patientTab, setPatientTab] = useState('overview'); // overview | history | newVisit
 
   /* ─────────────────────────────────────────────────────────────────
+     STATE — visit history filters & expansion
+     ─────────────────────────────────────────────────────────────────
+     Client-side filtering over patientHistory:
+       - visitSearch:     free-text search in chiefComplaint + diagnosis
+       - visitDateRange:  '1m' | '3m' | '6m' | '1y' | 'all'
+       - visitTypeFilter: 'all' | 'regular' | 'follow_up' | 'emergency' | 'consultation'
+     Each card collapses to a compact summary by default; the doctor
+     expands the ones they want to inspect. We use a Set of visit IDs
+     so opening/closing one card does not rebuild the whole list. */
+  const [visitSearch,       setVisitSearch]       = useState('');
+  const [visitDateRange,    setVisitDateRange]    = useState('all');
+  const [visitTypeFilter,   setVisitTypeFilter]   = useState('all');
+  const [expandedVisitIds,  setExpandedVisitIds]  = useState(() => new Set());
+
+  /* ─────────────────────────────────────────────────────────────────
      STATE — new visit form
      ───────────────────────────────────────────────────────────────── */
 
@@ -986,6 +1003,75 @@ const DoctorDashboard = () => {
       })
       .sort((a, b) => (a.appointmentTime || '').localeCompare(b.appointmentTime || ''));
   }, [appointments]);
+
+  /* ─────────────────────────────────────────────────────────────────
+     MEMOIZED — visit history filtering
+     ─────────────────────────────────────────────────────────────────
+     Three independent filters compose linearly. The Set-based filter
+     for the type is overkill at one item but mirrors the future case
+     where multi-select might be allowed without a refactor.
+
+     Date math note: we anchor the cutoff to "now" each render rather
+     than caching a Date object — this keeps the boundary correct if
+     the user leaves the dashboard open across midnight.                */
+  const filteredVisits = useMemo(() => {
+    let result = patientHistory;
+
+    // 1) Free-text search — case-insensitive, matches complaint or diagnosis
+    const q = visitSearch.trim().toLowerCase();
+    if (q) {
+      result = result.filter((v) =>
+        (v.chiefComplaint || '').toLowerCase().includes(q) ||
+        (v.diagnosis || '').toLowerCase().includes(q)
+      );
+    }
+
+    // 2) Date range — months back from "now"
+    if (visitDateRange !== 'all') {
+      const monthsBack = { '1m': 1, '3m': 3, '6m': 6, '1y': 12 }[visitDateRange];
+      if (monthsBack) {
+        const cutoff = new Date();
+        cutoff.setMonth(cutoff.getMonth() - monthsBack);
+        const cutoffMs = cutoff.getTime();
+        result = result.filter((v) => {
+          const visitTime = new Date(v.visitDate || v.createdAt).getTime();
+          return Number.isFinite(visitTime) && visitTime >= cutoffMs;
+        });
+      }
+    }
+
+    // 3) Visit type
+    if (visitTypeFilter !== 'all') {
+      result = result.filter((v) => v.visitType === visitTypeFilter);
+    }
+
+    return result;
+  }, [patientHistory, visitSearch, visitDateRange, visitTypeFilter]);
+
+  // Number of filters currently narrowing the list — used to show
+  // the "clear filters" button and the filtered/total counter.
+  const activeVisitFilterCount = useMemo(() => {
+    let n = 0;
+    if (visitSearch.trim())          n++;
+    if (visitDateRange !== 'all')    n++;
+    if (visitTypeFilter !== 'all')   n++;
+    return n;
+  }, [visitSearch, visitDateRange, visitTypeFilter]);
+
+  const resetVisitFilters = useCallback(() => {
+    setVisitSearch('');
+    setVisitDateRange('all');
+    setVisitTypeFilter('all');
+  }, []);
+
+  const toggleVisitExpansion = useCallback((visitId) => {
+    setExpandedVisitIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(visitId)) next.delete(visitId);
+      else next.add(visitId);
+      return next;
+    });
+  }, []);
 
   // Week days for the calendar
   const weekDays = useMemo(() => getWeekDays(weekStart), [weekStart]);
@@ -3666,7 +3752,7 @@ const DoctorDashboard = () => {
 
               {/* ═══ TAB: History ═══ */}
               {patientTab === 'history' && (
-                <section className="dd-card">
+                <section className="dd-card dd-vh-section">
                   <div className="dd-card-header">
                     <h3 className="dd-card-title">
                       <span className="dd-card-title-icon">
@@ -3674,11 +3760,109 @@ const DoctorDashboard = () => {
                       </span>
                       سجل الزيارات الطبية
                     </h3>
-                    <span style={{ fontSize: '0.78rem', color: 'var(--tm-text-muted)', fontFamily: 'Cairo, sans-serif' }}>
-                      {patientHistory.length} زيارة
+                    <span className="dd-vh-counter">
+                      {activeVisitFilterCount > 0
+                        ? <>عرض <strong>{filteredVisits.length}</strong> من أصل <strong>{patientHistory.length}</strong> زيارة</>
+                        : <><strong>{patientHistory.length}</strong> زيارة</>}
                     </span>
                   </div>
 
+                  {/* ── Filters toolbar ─────────────────────────────────── */}
+                  {patientHistory.length > 0 && (
+                    <div className="dd-vh-filters" role="search" aria-label="تصفية سجل الزيارات">
+                      {/* Row 1: search input */}
+                      <div className="dd-vh-filter-row">
+                        <div className="dd-vh-search">
+                          <Search size={16} strokeWidth={2.2} className="dd-vh-search-icon" aria-hidden="true" />
+                          <input
+                            type="search"
+                            className="dd-vh-search-input"
+                            placeholder="ابحث في الشكوى الرئيسية أو التشخيص..."
+                            value={visitSearch}
+                            onChange={(e) => setVisitSearch(e.target.value)}
+                            aria-label="بحث في الزيارات"
+                          />
+                          {visitSearch && (
+                            <button
+                              type="button"
+                              className="dd-vh-search-clear"
+                              onClick={() => setVisitSearch('')}
+                              aria-label="مسح البحث"
+                              title="مسح البحث"
+                            >
+                              <X size={14} strokeWidth={2.5} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Row 2: date + type chips */}
+                      <div className="dd-vh-filter-row dd-vh-filter-row--chips">
+                        <div className="dd-vh-filter-group">
+                          <label className="dd-vh-filter-label">
+                            <Calendar size={13} strokeWidth={2.4} aria-hidden="true" />
+                            <span>الفترة</span>
+                          </label>
+                          <div className="dd-vh-select-wrap">
+                            <select
+                              className="dd-vh-select"
+                              value={visitDateRange}
+                              onChange={(e) => setVisitDateRange(e.target.value)}
+                              aria-label="الفترة الزمنية"
+                            >
+                              <option value="all">كل الفترات</option>
+                              <option value="1m">آخر شهر</option>
+                              <option value="3m">آخر 3 أشهر</option>
+                              <option value="6m">آخر 6 أشهر</option>
+                              <option value="1y">آخر سنة</option>
+                            </select>
+                            <ChevronDown size={14} strokeWidth={2.4} className="dd-vh-select-caret" aria-hidden="true" />
+                          </div>
+                        </div>
+
+                        <div className="dd-vh-filter-group dd-vh-filter-group--flex">
+                          <label className="dd-vh-filter-label">
+                            <Filter size={13} strokeWidth={2.4} aria-hidden="true" />
+                            <span>النوع</span>
+                          </label>
+                          <div className="dd-vh-chips" role="radiogroup" aria-label="نوع الزيارة">
+                            {[
+                              { value: 'all',          label: 'الكل' },
+                              { value: 'regular',      label: 'عادية' },
+                              { value: 'follow_up',    label: 'متابعة' },
+                              { value: 'emergency',    label: 'طوارئ' },
+                              { value: 'consultation', label: 'استشارة' },
+                            ].map(({ value, label }) => (
+                              <button
+                                key={value}
+                                type="button"
+                                role="radio"
+                                aria-checked={visitTypeFilter === value}
+                                className={`dd-vh-chip${visitTypeFilter === value ? ' is-active' : ''}`}
+                                onClick={() => setVisitTypeFilter(value)}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {activeVisitFilterCount > 0 && (
+                          <button
+                            type="button"
+                            className="dd-vh-reset-btn"
+                            onClick={resetVisitFilters}
+                            title="مسح كل الفلاتر"
+                          >
+                            <RotateCcw size={14} strokeWidth={2.4} />
+                            <span>مسح الفلاتر</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Empty states ─────────────────────────────────────── */}
                   {patientHistory.length === 0 ? (
                     <div className="dd-empty">
                       <div className="dd-empty-icon">
@@ -3687,172 +3871,268 @@ const DoctorDashboard = () => {
                       <h3>لا توجد زيارات سابقة</h3>
                       <p>لم يتم تسجيل أي زيارات طبية لهذا المريض بعد</p>
                     </div>
+                  ) : filteredVisits.length === 0 ? (
+                    <div className="dd-empty dd-empty--filtered">
+                      <div className="dd-empty-icon">
+                        <Search size={28} strokeWidth={1.8} />
+                      </div>
+                      <h3>لا توجد نتائج مطابقة</h3>
+                      <p>لم نعثر على أي زيارة تطابق معايير البحث الحالية</p>
+                      <button
+                        type="button"
+                        className="dd-vh-reset-btn dd-vh-reset-btn--inline"
+                        onClick={resetVisitFilters}
+                      >
+                        <RotateCcw size={14} strokeWidth={2.4} />
+                        <span>مسح الفلاتر وعرض الكل</span>
+                      </button>
+                    </div>
                   ) : (
-                    <div className="dd-visits-list">
-                      {patientHistory.map((visit, idx) => {
+                    <ul className="dd-vh-list" role="list">
+                      {filteredVisits.map((visit, idx) => {
+                        const visitId = visit._id || `visit-${idx}`;
+                        const isExpanded = expandedVisitIds.has(visitId);
+
                         const visitTypeMap = {
-                          regular: 'عادية',
-                          follow_up: 'متابعة',
-                          emergency: 'طوارئ',
+                          regular:      'عادية',
+                          follow_up:    'متابعة',
+                          emergency:    'طوارئ',
                           consultation: 'استشارة',
                         };
+
+                        const hasVitals = visit.vitalSigns && Object.values(visit.vitalSigns).some((v) => v);
+                        const hasMeds   = visit.prescribedMedications?.length > 0;
+                        const hasLabs   = visit.labTests?.length > 0;
+                        const hasNotes  = !!visit.doctorNotes;
+                        const hasExpandableContent = hasVitals || hasMeds || hasLabs || hasNotes;
+
                         return (
-                          <article key={visit._id || idx} className="dd-visit-card">
-                            <div className="dd-visit-card-header">
-                              <span className="dd-visit-date">
-                                <Calendar size={12} strokeWidth={2.5} />
-                                {formatArabicDateTime(visit.visitDate || visit.createdAt)}
-                              </span>
-                              <span className="dd-visit-doctor">
-                                <Stethoscope size={12} strokeWidth={2.2} />
-                                {visit.doctorName || 'طبيب'}
-                                {visit.doctorSpecialization && (
-                                  <span style={{ opacity: 0.7 }}> • {visit.doctorSpecialization}</span>
+                          <li key={visitId}>
+                            <article
+                              className={`dd-vh-card${isExpanded ? ' is-expanded' : ''}`}
+                              aria-expanded={isExpanded}
+                            >
+                              {/* ── Card header: date + provider + type badge ── */}
+                              <header className="dd-vh-card-header">
+                                <div className="dd-vh-card-header-meta">
+                                  <span className="dd-vh-meta-item">
+                                    <Calendar size={13} strokeWidth={2.3} aria-hidden="true" />
+                                    <time dateTime={visit.visitDate || visit.createdAt}>
+                                      {formatArabicDateTime(visit.visitDate || visit.createdAt)}
+                                    </time>
+                                  </span>
+                                  <span className="dd-vh-meta-item">
+                                    <Stethoscope size={13} strokeWidth={2.3} aria-hidden="true" />
+                                    <span>{visit.doctorName || 'طبيب'}</span>
+                                    {visit.doctorSpecialization && (
+                                      <span className="dd-vh-meta-sub"> • {visit.doctorSpecialization}</span>
+                                    )}
+                                  </span>
+                                </div>
+
+                                {visit.visitType && (
+                                  <span className={`dd-vh-type-badge dd-vh-type-${visit.visitType}`}>
+                                    {visitTypeMap[visit.visitType] || visit.visitType}
+                                  </span>
                                 )}
-                              </span>
-                              {visit.visitType && (
-                                <span className={`dd-visit-type-pill ${visit.visitType}`}>
-                                  {visitTypeMap[visit.visitType] || visit.visitType}
-                                </span>
-                              )}
-                            </div>
+                              </header>
 
-                            {visit.chiefComplaint && (
-                              <div className="dd-visit-section">
-                                <span className="dd-visit-label">الشكوى الرئيسية</span>
-                                <p className="dd-visit-text">{visit.chiefComplaint}</p>
+                              {/* ── Compact summary (always visible) ────────── */}
+                              <div className="dd-vh-card-summary">
+                                {visit.chiefComplaint && (
+                                  <div className="dd-vh-summary-row">
+                                    <span className="dd-vh-summary-label">
+                                      <FileText size={13} strokeWidth={2.3} aria-hidden="true" />
+                                      <span>الشكوى</span>
+                                    </span>
+                                    <p className={`dd-vh-summary-text${!isExpanded ? ' is-clamped' : ''}`}>
+                                      {visit.chiefComplaint}
+                                    </p>
+                                  </div>
+                                )}
+
+                                {visit.diagnosis && (
+                                  <div className="dd-vh-summary-row">
+                                    <span className="dd-vh-summary-label">
+                                      <Activity size={13} strokeWidth={2.3} aria-hidden="true" />
+                                      <span>التشخيص</span>
+                                    </span>
+                                    <p className={`dd-vh-summary-text${!isExpanded ? ' is-clamped' : ''}`}>
+                                      {visit.diagnosis}
+                                    </p>
+                                  </div>
+                                )}
                               </div>
-                            )}
 
-                            {visit.diagnosis && (
-                              <div className="dd-visit-section">
-                                <span className="dd-visit-label">التشخيص</span>
-                                <p className="dd-visit-text">{visit.diagnosis}</p>
-                              </div>
-                            )}
-
-                            {visit.vitalSigns && Object.values(visit.vitalSigns).some((v) => v) && (
-                              <div className="dd-visit-section">
-                                <span className="dd-visit-label">العلامات الحيوية</span>
-                                <div className="dd-visit-vitals-mini">
-                                  {visit.vitalSigns.bloodPressureSystolic && visit.vitalSigns.bloodPressureDiastolic && (
-                                    <span className="dd-visit-vital-chip">
-                                      <HeartPulse size={12} strokeWidth={2.2} />
-                                      {visit.vitalSigns.bloodPressureSystolic}/{visit.vitalSigns.bloodPressureDiastolic} mmHg
-                                    </span>
-                                  )}
-                                  {visit.vitalSigns.heartRate && (
-                                    <span className="dd-visit-vital-chip">
-                                      <Heart size={12} strokeWidth={2.2} />
-                                      {visit.vitalSigns.heartRate} BPM
-                                    </span>
-                                  )}
-                                  {visit.vitalSigns.temperature && (
-                                    <span className="dd-visit-vital-chip">
-                                      <Thermometer size={12} strokeWidth={2.2} />
-                                      {visit.vitalSigns.temperature}°C
-                                    </span>
-                                  )}
-                                  {visit.vitalSigns.oxygenSaturation && (
-                                    <span className="dd-visit-vital-chip">
-                                      <Wind size={12} strokeWidth={2.2} />
-                                      SpO₂ {visit.vitalSigns.oxygenSaturation}%
-                                    </span>
-                                  )}
-                                  {visit.vitalSigns.bloodGlucose && (
-                                    <span className="dd-visit-vital-chip">
-                                      <Droplet size={12} strokeWidth={2.2} />
-                                      {visit.vitalSigns.bloodGlucose} mg/dL
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-                            )}
-
-                            {visit.prescribedMedications?.length > 0 && (
-                              <div className="dd-visit-section">
-                                <span className="dd-visit-label">الأدوية الموصوفة</span>
-                                <div className="dd-visit-meds">
-                                  {visit.prescribedMedications.map((med, i) => (
-                                    <div key={i} className="dd-visit-med">
-                                      <Pill size={16} strokeWidth={2.2} />
-                                      <strong>{med.medicationName}</strong>
-                                      <span>{med.dosage} • {med.frequency}</span>
-                                      {med.duration && (
-                                        <span className="dd-visit-med-dosage">{med.duration}</span>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {visit.labTests && visit.labTests.length > 0 && (
-                              <div className="dd-visit-section">
-                                <span className="dd-visit-label">التحاليل المختبرية ({visit.labTests.length})</span>
-                                <div className="dd-visit-labs">
-                                  {visit.labTests.map((lab) => (
-                                    <div key={lab._id} className="dd-visit-lab-item">
-                                      <div className="dd-visit-lab-icon">
-                                        <FlaskConical size={18} />
-                                      </div>
-                                      <div className="dd-visit-lab-info">
-                                        <div className="dd-visit-lab-header">
-                                          <span className="dd-visit-lab-number">{lab.testNumber}</span>
-                                          <span className={`dd-visit-lab-status ${lab.status}`}>
-                                            {lab.status === 'completed' && 'مكتمل'}
-                                            {lab.status === 'ordered' && 'معلّق'}
-                                            {lab.status === 'scheduled' && 'مجدول'}
-                                            {lab.status === 'sample_collected' && 'تم جمع العينة'}
-                                            {lab.status === 'in_progress' && 'قيد المعالجة'}
-                                            {lab.status === 'rejected' && 'مرفوض'}
-                                            {lab.status === 'cancelled' && 'ملغى'}
+                              {/* ── Expanded details (visible only when isExpanded) ─ */}
+                              {isExpanded && (
+                                <div className="dd-vh-card-details">
+                                  {hasVitals && (
+                                    <div className="dd-vh-detail-section">
+                                      <h4 className="dd-vh-detail-title">
+                                        <HeartPulse size={14} strokeWidth={2.3} aria-hidden="true" />
+                                        <span>العلامات الحيوية</span>
+                                      </h4>
+                                      <div className="dd-vh-vitals">
+                                        {visit.vitalSigns.bloodPressureSystolic && visit.vitalSigns.bloodPressureDiastolic && (
+                                          <span className="dd-vh-vital-chip">
+                                            <HeartPulse size={12} strokeWidth={2.2} />
+                                            <span>{visit.vitalSigns.bloodPressureSystolic}/{visit.vitalSigns.bloodPressureDiastolic}</span>
+                                            <small>mmHg</small>
                                           </span>
-                                        </div>
-                                        {lab.testsOrdered?.length > 0 && (
-                                          <div className="dd-visit-lab-tests">
-                                            {lab.testsOrdered.map((t, i) => (
-                                              <span key={i} className="dd-visit-lab-test-chip">
-                                                {t.testName}{t.testCode ? ` (${t.testCode})` : ''}
-                                              </span>
-                                            ))}
-                                          </div>
                                         )}
-                                        {lab.laboratoryId && (
-                                          <div className="dd-visit-lab-lab">
-                                            <Building2 size={12} />
-                                            <span>{lab.laboratoryId.arabicName || lab.laboratoryId.name}</span>
-                                          </div>
+                                        {visit.vitalSigns.heartRate && (
+                                          <span className="dd-vh-vital-chip">
+                                            <Heart size={12} strokeWidth={2.2} />
+                                            <span>{visit.vitalSigns.heartRate}</span>
+                                            <small>BPM</small>
+                                          </span>
+                                        )}
+                                        {visit.vitalSigns.temperature && (
+                                          <span className="dd-vh-vital-chip">
+                                            <Thermometer size={12} strokeWidth={2.2} />
+                                            <span>{visit.vitalSigns.temperature}</span>
+                                            <small>°C</small>
+                                          </span>
+                                        )}
+                                        {visit.vitalSigns.oxygenSaturation && (
+                                          <span className="dd-vh-vital-chip">
+                                            <Wind size={12} strokeWidth={2.2} />
+                                            <span>SpO₂ {visit.vitalSigns.oxygenSaturation}</span>
+                                            <small>%</small>
+                                          </span>
+                                        )}
+                                        {visit.vitalSigns.bloodGlucose && (
+                                          <span className="dd-vh-vital-chip">
+                                            <Droplet size={12} strokeWidth={2.2} />
+                                            <span>{visit.vitalSigns.bloodGlucose}</span>
+                                            <small>mg/dL</small>
+                                          </span>
                                         )}
                                       </div>
-                                      {lab.resultPdfUrl && (
-                                        <a
-                                          href={`http://localhost:5000${lab.resultPdfUrl}`}
-                                          target="_blank"
-                                          rel="noopener noreferrer"
-                                          className="dd-visit-lab-pdf-btn"
-                                          title="عرض تقرير النتائج"
-                                        >
-                                          <FileText size={16} />
-                                          <span>عرض التقرير</span>
-                                        </a>
-                                      )}
                                     </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
+                                  )}
 
-                            {visit.doctorNotes && (
-                              <div className="dd-visit-section">
-                                <span className="dd-visit-label">ملاحظات الطبيب</span>
-                                <p className="dd-visit-text">{visit.doctorNotes}</p>
-                              </div>
-                            )}
-                          </article>
+                                  {hasMeds && (
+                                    <div className="dd-vh-detail-section">
+                                      <h4 className="dd-vh-detail-title">
+                                        <Pill size={14} strokeWidth={2.3} aria-hidden="true" />
+                                        <span>الأدوية الموصوفة</span>
+                                        <span className="dd-vh-detail-count">{visit.prescribedMedications.length}</span>
+                                      </h4>
+                                      <ul className="dd-vh-meds-list" role="list">
+                                        {visit.prescribedMedications.map((med, i) => (
+                                          <li key={i} className="dd-vh-med-item">
+                                            <span className="dd-vh-med-icon" aria-hidden="true">
+                                              <Pill size={14} strokeWidth={2.3} />
+                                            </span>
+                                            <div className="dd-vh-med-body">
+                                              <strong className="dd-vh-med-name">{med.medicationName}</strong>
+                                              <span className="dd-vh-med-detail">
+                                                {med.dosage}
+                                                {med.frequency ? ` • ${med.frequency}` : ''}
+                                              </span>
+                                              {med.duration && (
+                                                <span className="dd-vh-med-duration">{med.duration}</span>
+                                              )}
+                                            </div>
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+
+                                  {hasLabs && (
+                                    <div className="dd-vh-detail-section">
+                                      <h4 className="dd-vh-detail-title">
+                                        <FlaskConical size={14} strokeWidth={2.3} aria-hidden="true" />
+                                        <span>التحاليل المختبرية</span>
+                                        <span className="dd-vh-detail-count">{visit.labTests.length}</span>
+                                      </h4>
+                                      <ul className="dd-vh-labs-list" role="list">
+                                        {visit.labTests.map((lab) => (
+                                          <li key={lab._id} className="dd-vh-lab-item">
+                                            <span className="dd-vh-lab-icon" aria-hidden="true">
+                                              <FlaskConical size={16} />
+                                            </span>
+                                            <div className="dd-vh-lab-body">
+                                              <div className="dd-vh-lab-header">
+                                                <span className="dd-vh-lab-number">{lab.testNumber}</span>
+                                                <span className={`dd-vh-lab-status dd-vh-lab-status--${lab.status}`}>
+                                                  {lab.status === 'completed'        && 'مكتمل'}
+                                                  {lab.status === 'ordered'          && 'معلّق'}
+                                                  {lab.status === 'scheduled'        && 'مجدول'}
+                                                  {lab.status === 'sample_collected' && 'تم جمع العينة'}
+                                                  {lab.status === 'in_progress'      && 'قيد المعالجة'}
+                                                  {lab.status === 'rejected'         && 'مرفوض'}
+                                                  {lab.status === 'cancelled'        && 'ملغى'}
+                                                </span>
+                                              </div>
+                                              {lab.testsOrdered?.length > 0 && (
+                                                <div className="dd-vh-lab-tests">
+                                                  {lab.testsOrdered.map((t, i) => (
+                                                    <span key={i} className="dd-vh-lab-test-chip">
+                                                      {t.testName}{t.testCode ? ` (${t.testCode})` : ''}
+                                                    </span>
+                                                  ))}
+                                                </div>
+                                              )}
+                                              {lab.laboratoryId && (
+                                                <div className="dd-vh-lab-lab">
+                                                  <Building2 size={12} aria-hidden="true" />
+                                                  <span>{lab.laboratoryId.arabicName || lab.laboratoryId.name}</span>
+                                                </div>
+                                              )}
+                                            </div>
+                                            {lab.resultPdfUrl && (
+                                              <a
+                                                href={`http://localhost:5000${lab.resultPdfUrl}`}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="dd-vh-lab-pdf-btn"
+                                                title="عرض تقرير النتائج"
+                                              >
+                                                <FileText size={14} aria-hidden="true" />
+                                                <span>التقرير</span>
+                                              </a>
+                                            )}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+
+                                  {hasNotes && (
+                                    <div className="dd-vh-detail-section">
+                                      <h4 className="dd-vh-detail-title">
+                                        <FileText size={14} strokeWidth={2.3} aria-hidden="true" />
+                                        <span>ملاحظات الطبيب</span>
+                                      </h4>
+                                      <p className="dd-vh-notes" dir="auto">{visit.doctorNotes}</p>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* ── Expand / collapse trigger ──────────────── */}
+                              {hasExpandableContent && (
+                                <button
+                                  type="button"
+                                  className="dd-vh-expand-btn"
+                                  onClick={() => toggleVisitExpansion(visitId)}
+                                  aria-expanded={isExpanded}
+                                >
+                                  <span>{isExpanded ? 'طي التفاصيل' : 'عرض التفاصيل'}</span>
+                                  {isExpanded
+                                    ? <ChevronUp size={16} strokeWidth={2.3} aria-hidden="true" />
+                                    : <ChevronDown size={16} strokeWidth={2.3} aria-hidden="true" />}
+                                </button>
+                              )}
+                            </article>
+                          </li>
                         );
                       })}
-                    </div>
+                    </ul>
                   )}
                 </section>
               )}

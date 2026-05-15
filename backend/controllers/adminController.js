@@ -31,18 +31,28 @@
  *    - Uses req.user._id (auth middleware aliases this to req.account)
  *
  *  ───────────────────────────────────────────────────────────────────────
- *  v2 CHANGES (this file) — approveDoctorRequest rewritten:
- *   • Handles newLaboratoryData / newPharmacyData (creates Laboratory/Pharmacy
- *     on-the-fly if request.laboratoryId / pharmacyId is absent).
- *   • Manual rollback across all create steps (no MongoDB transactions — the
- *     local deployment is a standalone mongod, not a replica set).
- *   • All prior functions are preserved byte-for-byte — only approve changed.
+ *  📁 Path: backend/controllers/adminController.js
+ *
+ *  v3.0 CHANGES (this file):
+ *   ✓ getStatistics — added Hospital/Pharmacy/Laboratory/Children counts,
+ *                     monthVisits, criticalEmergencies, activeSessions,
+ *                     monthly visit trend
+ *   ✓ getAllDoctorRequests — added requestType query param filter
+ *                            (uses existing compound index)
+ *   ✓ getAuditLogs — expanded response shape with userAgent, metadata,
+ *                    patientPersonId, patientChildId, errorMessage
+ *   ✓ getUserActivityReport — NEW: security report for Account Activity feature
+ *   ✓ getAllPatients — fixed children visibility (was hidden behind Patient profile)
+ *
+ *  v2 CHANGES (preserved) — approveDoctorRequest:
+ *   • Handles newLaboratoryData / newPharmacyData
+ *   • Manual rollback across all create steps
  *  ═══════════════════════════════════════════════════════════════════════════
  */
 
 const {
   Account, Person, Children, Patient, Doctor, Pharmacist, LabTechnician,
-  Pharmacy, Laboratory,
+  Hospital, Pharmacy, Laboratory,
   Visit, AuditLog, DoctorRequest
 } = require('../models');
 
@@ -62,41 +72,181 @@ const ALLOWED_DEACTIVATION_REASONS = [
 
 exports.getStatistics = async (req, res) => {
   try {
-    const startOfToday = new Date(new Date().setHours(0, 0, 0, 0));
+    const now = new Date();
+    const startOfToday = new Date(now.setHours(0, 0, 0, 0));
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const oneHourAgo   = new Date(Date.now() - 60 * 60 * 1000);
 
+    // Run all counts in parallel for performance
     const [
+      // Users
+      totalAccounts,
+      activeAccounts,
       totalDoctors,
+      activeDoctors,
+      totalPharmacists,
+      totalLabTechnicians,
+
+      // Patients
       totalAdultPatients,
       totalChildPatients,
+      totalChildren,
+      activeChildren,
+      childrenReadyToMigrate,
+
+      // Facilities
+      totalHospitals,
+      activeHospitals,
+      totalPharmacies,
+      activePharmacies,
+      totalLaboratories,
+      activeLaboratories,
+
+      // Visits
       totalVisits,
       todayVisits,
-      pendingDoctorRequests
+      monthVisits,
+      criticalEmergencies,
+
+      // Requests
+      pendingDoctorRequests,
+      pendingPharmacistRequests,
+      pendingLabTechRequests,
+      rejectedRequestsThisMonth,
+
+      // Audit / Activity
+      todayAuditLogs,
+      todayLoginAttempts,
+      todayFailedLogins,
+      activeSessions,
     ] = await Promise.all([
+      // Users
+      Account.countDocuments(),
+      Account.countDocuments({ isActive: true }),
       Doctor.countDocuments(),
+      Doctor.countDocuments({ isAvailable: true }),
+      Pharmacist.countDocuments(),
+      LabTechnician.countDocuments(),
+
+      // Patients (adult via personId, child via childId)
       Patient.countDocuments({ personId: { $exists: true, $ne: null } }),
-      Patient.countDocuments({ childId: { $exists: true, $ne: null } }),
+      Patient.countDocuments({ childId:  { $exists: true, $ne: null } }),
+      Children.countDocuments({ isDeleted: false }),
+      Children.countDocuments({ isDeleted: false, isActive: true }),
+      Children.countDocuments({ hasReceivedNationalId: true, migrationStatus: { $ne: 'migrated' } }),
+
+      // Facilities
+      Hospital.countDocuments(),
+      Hospital.countDocuments({ isActive: true }),
+      Pharmacy.countDocuments(),
+      Pharmacy.countDocuments({ isActive: true }),
+      Laboratory.countDocuments(),
+      Laboratory.countDocuments({ isActive: true }),
+
+      // Visits
       Visit.countDocuments(),
       Visit.countDocuments({ visitDate: { $gte: startOfToday } }),
-      DoctorRequest.countDocuments({ status: 'pending' })
+      Visit.countDocuments({ visitDate: { $gte: startOfMonth } }),
+      Visit.countDocuments({ visitType: 'emergency', status: { $ne: 'cancelled' } }),
+
+      // Requests
+      DoctorRequest.countDocuments({ status: 'pending', requestType: 'doctor' }),
+      DoctorRequest.countDocuments({ status: 'pending', requestType: 'pharmacist' }),
+      DoctorRequest.countDocuments({ status: 'pending', requestType: 'lab_technician' }),
+      DoctorRequest.countDocuments({ status: 'rejected', reviewedAt: { $gte: startOfMonth } }),
+
+      // Audit
+      AuditLog.countDocuments({ createdAt: { $gte: startOfToday } }),
+      AuditLog.countDocuments({ action: 'LOGIN_SUCCESS', createdAt: { $gte: startOfToday } }),
+      AuditLog.countDocuments({ action: 'LOGIN_FAILED',  createdAt: { $gte: startOfToday } }),
+      Account.countDocuments({ lastLogin: { $gte: oneHourAgo }, isActive: true }),
     ]);
+
+    // ── 12-month visit trend (for chart) ──────────────────────────────────
+    const twelveMonthsAgo = new Date();
+    twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 11);
+    twelveMonthsAgo.setDate(1);
+    twelveMonthsAgo.setHours(0, 0, 0, 0);
+
+    const monthlyTrend = await Visit.aggregate([
+      { $match: { visitDate: { $gte: twelveMonthsAgo } } },
+      {
+        $group: {
+          _id: {
+            year:  { $year:  '$visitDate' },
+            month: { $month: '$visitDate' },
+          },
+          count: { $sum: 1 },
+        },
+      },
+      { $sort: { '_id.year': 1, '_id.month': 1 } },
+    ]);
+
+    const visitsByMonth = monthlyTrend.map((m) => ({
+      month: `${m._id.year}-${String(m._id.month).padStart(2, '0')}`,
+      count: m.count,
+    }));
 
     return res.json({
       success: true,
       statistics: {
+        // ── User counts ────────────────────────────────────────────────
+        totalAccounts,
+        activeAccounts,
         totalDoctors,
+        activeDoctors,
+        totalPharmacists,
+        totalLabTechnicians,
+
+        // ── Patient counts ─────────────────────────────────────────────
         totalPatients: totalAdultPatients + totalChildPatients,
         totalAdultPatients,
         totalChildPatients,
+        totalChildren,
+        activeChildren,
+        childrenReadyToMigrate,
+
+        // ── Facility counts ────────────────────────────────────────────
+        totalHospitals,
+        activeHospitals,
+        totalPharmacies,
+        activePharmacies,
+        totalLaboratories,
+        activeLaboratories,
+
+        // ── Visit counts ───────────────────────────────────────────────
         totalVisits,
         todayVisits,
-        pendingDoctorRequests
-      }
+        monthVisits,
+        criticalEmergencies,
+
+        // ── Requests ───────────────────────────────────────────────────
+        pendingDoctorRequests,
+        pendingPharmacistRequests,
+        pendingLabTechRequests,
+        totalPendingRequests:
+          pendingDoctorRequests + pendingPharmacistRequests + pendingLabTechRequests,
+        rejectedRequestsThisMonth,
+
+        // ── Activity / Security ────────────────────────────────────────
+        todayAuditLogs,
+        todayLoginAttempts,
+        todayFailedLogins,
+        activeSessions,
+
+        // ── Trends ─────────────────────────────────────────────────────
+        visitsByMonth,
+
+        // ── Computed at ────────────────────────────────────────────────
+        computedAt: new Date(),
+      },
     });
   } catch (error) {
-    console.error('Get statistics error:', error);
+    console.error('❌ Get statistics error:', error);
     return res.status(500).json({
       success: false,
-      message: 'حدث خطأ في جلب الإحصائيات'
+      message: 'حدث خطأ في جلب الإحصائيات',
+      error: error.message,
     });
   }
 };
@@ -554,42 +704,69 @@ exports.getAllPatients = async (req, res) => {
   try {
     console.log('📥 getAllPatients called');
 
-    const patients = await Patient.find().lean();
-    console.log(`✅ Found ${patients.length} patient profiles`);
+    // v3.0: pagination + filters + ensures children are visible
+    const {
+      page = 1,
+      limit = 100,
+      search,
+      governorate,
+      gender,
+      isMinor,         // 'true' to show only children, 'false' to show only adults
+      isActive,
+      bloodType,
+      sortBy = 'createdAt',
+      sortOrder = 'desc',
+    } = req.query;
 
-    if (patients.length === 0) {
-      return res.json({ success: true, count: 0, patients: [] });
+    // ── Build Patient query (medical-side filters) ──────────────────────
+    const patientQuery = {};
+    if (bloodType) patientQuery.bloodType = bloodType;
+
+    // Apply minor filter at the Patient level
+    if (isMinor === 'true')  patientQuery.childId  = { $exists: true, $ne: null };
+    if (isMinor === 'false') patientQuery.personId = { $exists: true, $ne: null };
+
+    const allPatients = await Patient.find(patientQuery).lean();
+    console.log(`✅ Found ${allPatients.length} patient profiles (raw)`);
+
+    if (allPatients.length === 0) {
+      return res.json({
+        success: true,
+        count: 0,
+        total: 0,
+        patients: [],
+        pagination: { total: 0, page: Number(page), limit: Number(limit), pages: 0 },
+      });
     }
 
-    const adultPersonIds = patients
-      .filter(p => p.personId)
-      .map(p => p.personId);
-    const childChildIds = patients
-      .filter(p => p.childId)
-      .map(p => p.childId);
+    // ── Batch-load related collections ──────────────────────────────────
+    const adultPersonIds = allPatients.filter(p => p.personId).map(p => p.personId);
+    const childChildIds  = allPatients.filter(p => p.childId).map(p => p.childId);
 
     const [persons, children, accounts] = await Promise.all([
       Person.find({ _id: { $in: adultPersonIds } }).lean(),
-      Children.find({ _id: { $in: childChildIds } }).lean(),
+      Children.find({ _id: { $in: childChildIds }, isDeleted: false }).lean(),
       Account.find({
         $or: [
           { personId: { $in: adultPersonIds } },
-          { childId: { $in: childChildIds } }
-        ]
-      }).lean()
+          { childId:  { $in: childChildIds }  },
+        ],
+      }).lean(),
     ]);
 
-    const personById = new Map(persons.map(p => [String(p._id), p]));
-    const childById = new Map(children.map(c => [String(c._id), c]));
+    const personById = new Map(persons.map(p  => [String(p._id), p]));
+    const childById  = new Map(children.map(c => [String(c._id), c]));
+
     const accountByPersonId = new Map();
-    const accountByChildId = new Map();
-    accounts.forEach(a => {
+    const accountByChildId  = new Map();
+    accounts.forEach((a) => {
       if (a.personId) accountByPersonId.set(String(a.personId), a);
-      if (a.childId) accountByChildId.set(String(a.childId), a);
+      if (a.childId)  accountByChildId.set(String(a.childId),  a);
     });
 
-    const validPatients = patients
-      .map(patient => {
+    // ── Build patient objects ───────────────────────────────────────────
+    let formattedPatients = allPatients
+      .map((patient) => {
         const isChild = !!patient.childId;
         const profile = isChild
           ? childById.get(String(patient.childId))
@@ -605,46 +782,134 @@ exports.getAllPatients = async (req, res) => {
           : accountByPersonId.get(String(patient.personId));
 
         return {
-          id: patient._id,
-          isMinor: isChild,
-          firstName: profile.firstName || '',
-          fatherName: profile.fatherName || '',
-          lastName: profile.lastName || '',
-          motherName: profile.motherName || '',
-          nationalId: profile.nationalId || null,
+          id:          patient._id,
+          patientId:   patient._id,
+          type:        isChild ? 'minor' : 'adult',
+          isMinor:     isChild,
+
+          // Identity
+          firstName:               profile.firstName  || '',
+          fatherName:              profile.fatherName || '',
+          lastName:                profile.lastName   || '',
+          motherName:              profile.motherName || '',
+          fullName: `${profile.firstName || ''} ${profile.fatherName || ''} ${profile.lastName || ''}`.trim(),
+          nationalId:              profile.nationalId              || null,
           childRegistrationNumber: profile.childRegistrationNumber || null,
-          phoneNumber: profile.phoneNumber || '',
-          email: account?.email || '',
-          isActive: account?.isActive ?? true,
-          gender: profile.gender || '',
+          parentNationalId:        profile.parentNationalId        || null,
+
+          // Demographics
+          gender:      profile.gender || '',
           dateOfBirth: profile.dateOfBirth,
+          age:         calculateAge(profile.dateOfBirth),
+
+          // Contact
+          phoneNumber: profile.phoneNumber || '',
+          email:       account?.email     || (isChild ? null : profile.email) || '',
           governorate: profile.governorate || '',
-          city: profile.city || '',
-          bloodType: patient.bloodType || 'unknown',
-          totalVisits: patient.totalVisits || 0,
-          lastVisitDate: patient.lastVisitDate || null,
-          lastLogin: account?.lastLogin || null,
-          createdAt: patient.createdAt
+          city:        profile.city        || '',
+
+          // Account state
+          isActive:    account?.isActive ?? true,
+          lastLogin:   account?.lastLogin || null,
+          isVerified:  account?.isVerified ?? false,
+
+          // Medical summary (admin metadata only, NO allergies/chronic diseases per policy)
+          bloodType:          patient.bloodType         || 'unknown',
+          totalVisits:        patient.totalVisits       || 0,
+          lastVisitDate:      patient.lastVisitDate     || null,
+          chronicDiseasesCount: (patient.chronicDiseases || []).length,
+          allergiesCount:       (patient.allergies      || []).length,
+
+          // For minors only
+          ...(isChild && {
+            migrationStatus:       profile.migrationStatus,
+            hasReceivedNationalId: profile.hasReceivedNationalId,
+            parentPersonId:        profile.parentPersonId,
+          }),
+
+          createdAt: patient.createdAt,
+          updatedAt: patient.updatedAt,
         };
       })
-      .filter(p => p !== null);
+      .filter((p) => p !== null);
 
-    console.log(`✅ Returning ${validPatients.length} valid patients`);
-    return res.json({
-      success: true,
-      count: validPatients.length,
-      patients: validPatients
+    // ── Apply post-load filters (across joined data) ────────────────────
+    if (governorate) {
+      formattedPatients = formattedPatients.filter(p => p.governorate === governorate);
+    }
+    if (gender) {
+      formattedPatients = formattedPatients.filter(p => p.gender === gender);
+    }
+    if (isActive !== undefined) {
+      const want = isActive === 'true';
+      formattedPatients = formattedPatients.filter(p => p.isActive === want);
+    }
+    if (search) {
+      const s = search.toLowerCase();
+      formattedPatients = formattedPatients.filter((p) =>
+        (p.firstName  || '').toLowerCase().includes(s)
+        || (p.lastName   || '').toLowerCase().includes(s)
+        || (p.fullName   || '').toLowerCase().includes(s)
+        || (p.nationalId || '').toString().includes(search)
+        || (p.childRegistrationNumber || '').toLowerCase().includes(s)
+        || (p.email      || '').toLowerCase().includes(s)
+        || (p.phoneNumber || '').includes(search),
+      );
+    }
+
+    // ── Sort ────────────────────────────────────────────────────────────
+    const direction = sortOrder === 'asc' ? 1 : -1;
+    formattedPatients.sort((a, b) => {
+      const aVal = a[sortBy] || 0;
+      const bVal = b[sortBy] || 0;
+      if (aVal < bVal) return -1 * direction;
+      if (aVal > bVal) return 1 * direction;
+      return 0;
     });
 
+    // ── Paginate ────────────────────────────────────────────────────────
+    const total       = formattedPatients.length;
+    const pageNum     = Number(page);
+    const limitNum    = Number(limit);
+    const startIdx    = (pageNum - 1) * limitNum;
+    const paginated   = formattedPatients.slice(startIdx, startIdx + limitNum);
+
+    console.log(`✅ Returning ${paginated.length} of ${total} patients`);
+
+    return res.json({
+      success: true,
+      count:    paginated.length,
+      total,
+      patients: paginated,
+      pagination: {
+        total,
+        page:  pageNum,
+        limit: limitNum,
+        pages: Math.ceil(total / limitNum),
+      },
+    });
   } catch (error) {
     console.error('❌ Get patients error:', error);
     return res.status(500).json({
       success: false,
       message: 'حدث خطأ في جلب المرضى',
-      error: error.message
+      error: error.message,
     });
   }
 };
+
+// HELPER — age calculation
+function calculateAge(dateOfBirth) {
+  if (!dateOfBirth) return null;
+  const today = new Date();
+  const birth = new Date(dateOfBirth);
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+    age -= 1;
+  }
+  return age;
+}
 
 // ============================================================================
 // 9. GET PATIENT BY ID
@@ -921,18 +1186,51 @@ exports.activatePatient = async (req, res) => {
 
 exports.getAuditLogs = async (req, res) => {
   try {
-    const { page = 1, limit = 50, action, startDate, endDate } = req.query;
+    // v3.0: expanded filters + complete response shape with all fields
+    const {
+      page = 1,
+      limit = 50,
+      action,
+      userId,
+      userEmail,
+      userRole,
+      platform,
+      success,
+      ipAddress,
+      resourceType,
+      search,
+      startDate,
+      endDate,
+    } = req.query;
 
     const query = {};
-    if (action) query.action = action.toUpperCase();
+    if (action)       query.action       = action.toUpperCase();
+    if (userId)       query.userId       = userId;
+    if (userEmail)    query.userEmail    = userEmail.toLowerCase();
+    if (userRole)     query.userRole     = userRole;
+    if (platform)     query.platform     = platform;
+    if (ipAddress)    query.ipAddress    = ipAddress;
+    if (resourceType) query.resourceType = resourceType;
+    if (success !== undefined) query.success = success === 'true';
+
     if (startDate || endDate) {
       query.timestamp = {};
       if (startDate) query.timestamp.$gte = new Date(startDate);
-      if (endDate) query.timestamp.$lte = new Date(endDate);
+      if (endDate)   query.timestamp.$lte = new Date(endDate);
+    }
+
+    if (search) {
+      const searchRegex = { $regex: search, $options: 'i' };
+      query.$or = [
+        { description: searchRegex },
+        { userEmail:   searchRegex },
+        { ipAddress:   searchRegex },
+        { action:      searchRegex },
+      ];
     }
 
     const safeLimit = Math.min(parseInt(limit, 10) || 50, 200);
-    const safePage = Math.max(parseInt(page, 10) || 1, 1);
+    const safePage  = Math.max(parseInt(page,  10) || 1,  1);
 
     const [logs, count] = await Promise.all([
       AuditLog.find(query)
@@ -941,34 +1239,226 @@ exports.getAuditLogs = async (req, res) => {
         .limit(safeLimit)
         .skip((safePage - 1) * safeLimit)
         .lean(),
-      AuditLog.countDocuments(query)
+      AuditLog.countDocuments(query),
     ]);
 
     return res.json({
       success: true,
       count,
-      page: safePage,
+      total: count,
+      page:  safePage,
       pages: Math.ceil(count / safeLimit),
-      logs: logs.map(log => ({
-        id: log._id,
-        action: log.action,
-        description: log.description,
+      pagination: {
+        total: count,
+        page:  safePage,
+        limit: safeLimit,
+        pages: Math.ceil(count / safeLimit),
+      },
+      // v3.0: full audit fields exposed for Account Activity / forensic review
+      logs: logs.map((log) => ({
+        id:           log._id,
+        action:       log.action,
+        description:  log.description,
         resourceType: log.resourceType,
-        resourceId: log.resourceId,
-        userEmail: log.userEmail || log.userId?.email,
-        userRole: log.userRole,
-        ipAddress: log.ipAddress,
-        platform: log.platform,
-        timestamp: log.timestamp,
-        success: log.success,
-        errorMessage: log.errorMessage
-      }))
+        resourceId:   log.resourceId,
+        userId:       log.userId?._id || log.userId,
+        userEmail:    log.userEmail   || log.userId?.email || null,
+        userRole:     log.userRole,
+        ipAddress:    log.ipAddress,
+        userAgent:    log.userAgent || null,
+        platform:     log.platform,
+        deviceInfo:   log.deviceInfo || null,
+        // Patient identifiers (XOR — only one is set per event)
+        patientPersonId: log.patientPersonId || null,
+        patientChildId:  log.patientChildId  || null,
+        // Outcome
+        success:       log.success,
+        errorMessage:  log.errorMessage || null,
+        statusCode:    log.statusCode   || null,
+        // Extra context bag
+        metadata:      log.metadata     || {},
+        // Timestamps
+        timestamp:     log.timestamp,
+        createdAt:     log.createdAt,
+      })),
     });
   } catch (error) {
-    console.error('Get audit logs error:', error);
+    console.error('❌ Get audit logs error:', error);
     return res.status(500).json({
       success: false,
-      message: 'حدث خطأ في جلب سجلات التدقيق'
+      message: 'حدث خطأ في جلب سجلات التدقيق',
+      error: error.message,
+    });
+  }
+};
+
+// ============================================================================
+// 13b. USER ACTIVITY REPORT — NEW in v3.0 (Account Activity security feature)
+// ============================================================================
+
+/**
+ * GET /api/admin/audit-logs/user-activity?email=user@example.com&days=30
+ *
+ * Generates a comprehensive activity report for a single user account.
+ * Used by the Account Activity panel in the Admin Dashboard System Log section.
+ *
+ * Returns:
+ *   - Profile summary (account metadata)
+ *   - Login statistics (success/failure counts, unique IPs, devices)
+ *   - Security events timeline (locks, password changes, OTPs)
+ *   - Resource actions (visits, prescriptions, lab tests)
+ *   - Recent activity feed (last 50 events)
+ */
+exports.getUserActivityReport = async (req, res) => {
+  try {
+    const { email, days = 30 } = req.query;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'البريد الإلكتروني مطلوب',
+      });
+    }
+
+    const sinceDate = new Date();
+    sinceDate.setDate(sinceDate.getDate() - parseInt(days, 10));
+
+    // ── Find account ────────────────────────────────────────────────────
+    const account = await Account.findOne({ email: email.toLowerCase() })
+      .populate('personId', 'firstName lastName nationalId phoneNumber')
+      .populate('childId',  'firstName lastName childRegistrationNumber')
+      .lean();
+
+    if (!account) {
+      return res.status(404).json({
+        success: false,
+        message: 'الحساب غير موجود',
+      });
+    }
+
+    // ── Fetch all audit logs for this user in the date range ────────────
+    const logs = await AuditLog.find({
+      $or: [
+        { userId:    account._id },
+        { userEmail: account.email },
+      ],
+      timestamp: { $gte: sinceDate },
+    }).sort({ timestamp: -1 }).lean();
+
+    // ── Categorize events ──────────────────────────────────────────────
+    const loginSuccess  = logs.filter(l => l.action === 'LOGIN_SUCCESS');
+    const loginFailed   = logs.filter(l => l.action === 'LOGIN_FAILED');
+    const logouts       = logs.filter(l => l.action === 'LOGOUT');
+    const passwordEvents = logs.filter(l =>
+      ['PASSWORD_CHANGED', 'PASSWORD_RESET_REQUESTED', 'OTP_VERIFIED', 'OTP_FAILED'].includes(l.action),
+    );
+    const lockEvents    = logs.filter(l => l.action === 'ACCOUNT_LOCKED');
+    const securityEvents = [...passwordEvents, ...lockEvents]
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    // ── Unique IP and device analysis ──────────────────────────────────
+    const uniqueIPs        = [...new Set(logs.map(l => l.ipAddress).filter(Boolean))];
+    const uniqueUserAgents = [...new Set(logs.map(l => l.userAgent).filter(Boolean))];
+    const platformBreakdown = logs.reduce((acc, log) => {
+      const platform = log.platform || 'unknown';
+      acc[platform] = (acc[platform] || 0) + 1;
+      return acc;
+    }, {});
+
+    // ── Resource action counts ─────────────────────────────────────────
+    const resourceActionCounts = logs.reduce((acc, log) => {
+      if (log.resourceType) {
+        acc[log.resourceType] = (acc[log.resourceType] || 0) + 1;
+      }
+      return acc;
+    }, {});
+
+    // ── Find suspicious patterns (failed logins from different IPs) ────
+    const failedFromIPs = [...new Set(loginFailed.map(l => l.ipAddress))];
+    const hasSuspiciousActivity = failedFromIPs.length >= 3 || loginFailed.length >= 5;
+
+    return res.json({
+      success: true,
+      report: {
+        // ── Profile ────────────────────────────────────────────────────
+        profile: {
+          accountId:   account._id,
+          email:       account.email,
+          roles:       account.roles,
+          isActive:    account.isActive,
+          isVerified:  account.isVerified,
+          createdAt:   account.createdAt,
+          lastLogin:   account.lastLogin,
+          lastLoginIp: account.lastLoginIp,
+          language:    account.language,
+          person:      account.personId,
+          child:       account.childId,
+          isLocked:    account.accountLockedUntil
+                       && new Date(account.accountLockedUntil) > new Date(),
+          failedLoginAttempts: account.failedLoginAttempts || 0,
+        },
+
+        // ── Time range covered ─────────────────────────────────────────
+        dateRange: {
+          since: sinceDate,
+          until: new Date(),
+          days:  parseInt(days, 10),
+        },
+
+        // ── Login statistics ───────────────────────────────────────────
+        loginStats: {
+          successfulLogins: loginSuccess.length,
+          failedLogins:     loginFailed.length,
+          logouts:          logouts.length,
+          uniqueIPs:        uniqueIPs.length,
+          uniqueDevices:    uniqueUserAgents.length,
+          ipAddresses:      uniqueIPs,
+          platformBreakdown,
+        },
+
+        // ── Security events ────────────────────────────────────────────
+        security: {
+          accountLocks:          lockEvents.length,
+          passwordChanges:       passwordEvents.filter(e => e.action === 'PASSWORD_CHANGED').length,
+          passwordResetRequests: passwordEvents.filter(e => e.action === 'PASSWORD_RESET_REQUESTED').length,
+          otpVerified:           passwordEvents.filter(e => e.action === 'OTP_VERIFIED').length,
+          otpFailed:             passwordEvents.filter(e => e.action === 'OTP_FAILED').length,
+          hasSuspiciousActivity,
+          suspiciousReason:      hasSuspiciousActivity
+            ? `${loginFailed.length} failed logins from ${failedFromIPs.length} different IPs`
+            : null,
+          recentSecurityEvents:  securityEvents.slice(0, 10),
+        },
+
+        // ── Resource actions ───────────────────────────────────────────
+        resourceActions: {
+          counts:     resourceActionCounts,
+          totalActions: logs.filter(l => l.resourceType).length,
+        },
+
+        // ── Recent activity feed (last 50 events) ──────────────────────
+        recentActivity: logs.slice(0, 50).map((log) => ({
+          id:          log._id,
+          action:      log.action,
+          description: log.description,
+          ipAddress:   log.ipAddress,
+          userAgent:   log.userAgent,
+          platform:    log.platform,
+          success:     log.success,
+          timestamp:   log.timestamp,
+          metadata:    log.metadata,
+        })),
+
+        // ── Total event count in range ─────────────────────────────────
+        totalEvents: logs.length,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Get user activity report error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في إنشاء تقرير النشاط',
+      error: error.message,
     });
   }
 };
@@ -1018,17 +1508,47 @@ exports.getAllDoctorRequests = async (req, res) => {
   try {
     console.log('📋 Fetching doctor requests...');
 
-    const { status } = req.query;
+    // v3.0: added requestType + search + pagination filters
+    const {
+      status,
+      requestType,         // 'doctor' | 'pharmacist' | 'lab_technician'
+      specialization,
+      governorate,
+      search,
+      page = 1,
+      limit = 100,
+    } = req.query;
+
     const query = {};
-    if (status) query.status = status;
+    if (status)         query.status         = status;
+    if (requestType)    query.requestType    = requestType;
+    if (specialization) query.specialization = specialization;
+    if (governorate)    query.governorate    = governorate;
+
+    if (search) {
+      const searchRegex = { $regex: search, $options: 'i' };
+      query.$or = [
+        { firstName:            searchRegex },
+        { lastName:             searchRegex },
+        { nationalId:           searchRegex },
+        { email:                searchRegex },
+        { phoneNumber:          searchRegex },
+        { medicalLicenseNumber: searchRegex },
+      ];
+    }
+
+    // Get count BEFORE pagination so the frontend chip badges are accurate
+    const total = await DoctorRequest.countDocuments(query);
 
     const requests = await DoctorRequest.find(query)
       .populate('reviewedBy', 'email')
       .populate('createdPersonId', 'firstName lastName')
       .sort({ createdAt: -1 })
+      .limit(Number(limit))
+      .skip((Number(page) - 1) * Number(limit))
       .lean();
 
-    console.log(`✅ Found ${requests.length} requests`);
+    console.log(`✅ Found ${requests.length} of ${total} matching requests`);
 
     // Flatten to the shape AdminDashboard.jsx expects. Professional-specific
     // fields (pharmacist/lab tech) are included alongside doctor fields so
@@ -1101,7 +1621,14 @@ exports.getAllDoctorRequests = async (req, res) => {
     return res.json({
       success: true,
       count: flattened.length,
-      requests: flattened
+      total,
+      requests: flattened,
+      pagination: {
+        total,
+        page:  Number(page),
+        limit: Number(limit),
+        pages: Math.ceil(total / Number(limit)),
+      },
     });
   } catch (error) {
     console.error('❌ Error fetching doctor requests:', error);

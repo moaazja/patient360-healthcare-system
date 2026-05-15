@@ -121,6 +121,8 @@ import {
   Calendar,
   Building2,
   Globe,
+  Smartphone,
+  Monitor,
 
   // Charts
   BarChart3,
@@ -129,6 +131,9 @@ import {
   // Misc
   MoreHorizontal,
   ExternalLink,
+  Hash,
+  Tag,
+  Lock,
 } from 'lucide-react';
 
 import Navbar from '../components/common/Navbar';
@@ -178,9 +183,10 @@ const SIDEBAR_GROUPS = [
   {
     label: 'المراقبة',
     items: [
-      { id: 'emergency', labelAr: 'تقارير الطوارئ', Icon: Siren, badge: 'activeEmergencies' },
-      { id: 'reviews',   labelAr: 'التقييمات',       Icon: Star },
-      { id: 'audit',     labelAr: 'سجل النظام',     Icon: Scroll },
+      { id: 'emergency',       labelAr: 'تقارير الطوارئ', Icon: Siren, badge: 'activeEmergencies' },
+      { id: 'reviews',         labelAr: 'التقييمات',       Icon: Star },
+      { id: 'audit',           labelAr: 'سجل النظام',     Icon: Scroll },
+      { id: 'accountActivity', labelAr: 'نشاط الحسابات',  Icon: Activity },
     ],
   },
 ];
@@ -480,6 +486,176 @@ const timeAgo = (date) => {
   return formatArabicDate(date);
 };
 
+/* ─────────────────────────────────────────────────────────────────
+   CSV EXPORT HELPERS  (for ministerial reports — مشكلة #5)
+   ─────────────────────────────────────────────────────────────────
+   Strategy:
+     • Each export defines a column descriptor: { header, accessor }
+     • Values are escaped per RFC 4180 (double-quote any cell containing
+       commas, double quotes, or newlines; escape internal quotes by
+       doubling them).
+     • UTF-8 BOM (\ufeff) is prepended so Excel on Windows reads Arabic
+       characters correctly without a manual import step.
+     • File is downloaded via a temporary <a> element — no server round-trip.
+   ───────────────────────────────────────────────────────────────── */
+
+const csvEscape = (value) => {
+  if (value === null || value === undefined) return '';
+  const str = String(value);
+  // Per RFC 4180: wrap in quotes if the cell contains comma, quote, or newline
+  if (/[",\r\n]/.test(str)) {
+    return `"${str.replace(/"/g, '""')}"`;
+  }
+  return str;
+};
+
+const exportToCSV = (rows, baseFilename, columns) => {
+  if (!Array.isArray(rows) || rows.length === 0 || !Array.isArray(columns) || columns.length === 0) {
+    return;
+  }
+
+  const headerLine = columns.map((c) => csvEscape(c.header)).join(',');
+  const bodyLines  = rows.map((row) =>
+    columns.map((c) => csvEscape(typeof c.accessor === 'function' ? c.accessor(row) : row[c.accessor])).join(',')
+  );
+
+  // \ufeff = UTF-8 BOM → Excel on Windows auto-detects UTF-8 encoding
+  const csvContent = '\ufeff' + headerLine + '\r\n' + bodyLines.join('\r\n');
+  const blob       = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url        = URL.createObjectURL(blob);
+  const link       = document.createElement('a');
+
+  // Filename: patient360-<base>-YYYY-MM-DD.csv
+  const today      = new Date().toISOString().slice(0, 10);
+  link.href        = url;
+  link.download    = `patient360-${baseFilename}-${today}.csv`;
+  link.style.display = 'none';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+/**
+ * CSV column descriptors for the audit log — used by the "تصدير CSV" button.
+ * All fields come directly from the audit_logs collection schema.
+ */
+const AUDIT_CSV_COLUMNS = [
+  { header: 'التوقيت',         accessor: (r) => formatArabicDateTime(r.timestamp || r.createdAt) },
+  { header: 'الإجراء',         accessor: 'action' },
+  { header: 'الوصف',           accessor: (r) => r.description || r.details || '' },
+  { header: 'البريد',          accessor: 'userEmail' },
+  { header: 'الدور',           accessor: 'userRole' },
+  { header: 'المورد',          accessor: 'resourceType' },
+  { header: 'معرف المورد',     accessor: 'resourceId' },
+  { header: 'IP',              accessor: 'ipAddress' },
+  { header: 'المنصة',          accessor: 'platform' },
+  { header: 'النجاح',          accessor: (r) => r.success === false ? 'فشل' : 'نجاح' },
+  { header: 'رمز الحالة',      accessor: 'statusCode' },
+  { header: 'رسالة الخطأ',     accessor: 'errorMessage' },
+  { header: 'معرف المريض',     accessor: (r) => r.patientPersonId || r.patientChildId || '' },
+];
+
+/**
+ * CSV column descriptors for the doctors list.
+ */
+const DOCTORS_CSV_COLUMNS = [
+  { header: 'الاسم الأول',     accessor: 'firstName' },
+  { header: 'الاسم الأخير',    accessor: 'lastName' },
+  { header: 'الرقم الوطني',    accessor: 'nationalId' },
+  { header: 'البريد',          accessor: 'email' },
+  { header: 'الهاتف',          accessor: 'phoneNumber' },
+  { header: 'التخصص',          accessor: (r) => {
+      const spec = (typeof getSpecializationInfo === 'function')
+        ? getSpecializationInfo(r.specialization)
+        : null;
+      return spec?.nameAr || r.specialization || '';
+    } },
+  { header: 'رقم الترخيص',     accessor: 'medicalLicenseNumber' },
+  { header: 'المستشفى',        accessor: 'hospitalAffiliation' },
+  { header: 'سنوات الخبرة',    accessor: 'yearsOfExperience' },
+  { header: 'المحافظة',        accessor: 'governorate' },
+  { header: 'التقييم',         accessor: 'rating' },
+  { header: 'الحالة',          accessor: (r) => r.isActive === false ? 'غير نشط' : 'نشط' },
+];
+
+/**
+ * CSV column descriptors for the patients list.
+ * Privacy-aware: counts only, no clinical details.
+ */
+const PATIENTS_CSV_COLUMNS = [
+  { header: 'الاسم الأول',         accessor: 'firstName' },
+  { header: 'الاسم الأخير',        accessor: 'lastName' },
+  { header: 'النوع',               accessor: (r) => (r.type === 'minor' || r.isMinor) ? 'قاصر' : 'بالغ' },
+  { header: 'الرقم الوطني / CRN',  accessor: (r) => r.nationalId || r.childRegistrationNumber || '' },
+  { header: 'الجنس',               accessor: (r) => r.gender === 'male' ? 'ذكر' : 'أنثى' },
+  { header: 'العمر',               accessor: 'age' },
+  { header: 'المحافظة',            accessor: 'governorate' },
+  { header: 'الهاتف',              accessor: 'phoneNumber' },
+  { header: 'فصيلة الدم',          accessor: 'bloodType' },
+  { header: 'إجمالي الزيارات',     accessor: 'totalVisits' },
+  { header: 'عدد الحساسيات',       accessor: (r) => r.allergiesCount ?? (Array.isArray(r.allergies) ? r.allergies.length : 0) },
+  { header: 'عدد الأمراض المزمنة', accessor: (r) => r.chronicCount ?? (Array.isArray(r.chronicDiseases) ? r.chronicDiseases.length : 0) },
+  { header: 'الحالة',              accessor: (r) => r.isActive === false ? 'غير نشط' : 'نشط' },
+];
+
+const CHILDREN_CSV_COLUMNS = [
+  { header: 'اسم الطفل',           accessor: (r) => `${r.firstName || ''} ${r.fatherName || ''} ${r.lastName || ''}`.trim() },
+  { header: 'اسم الأم',            accessor: 'motherName' },
+  { header: 'رقم التسجيل',         accessor: 'childRegistrationNumber' },
+  { header: 'الجنس',               accessor: (r) => r.gender === 'male' ? 'ذكر' : 'أنثى' },
+  { header: 'تاريخ الميلاد',       accessor: (r) => formatArabicDate(r.dateOfBirth) },
+  { header: 'الرقم الوطني للوالد', accessor: 'parentNationalId' },
+  { header: 'المحافظة',            accessor: 'governorate' },
+  { header: 'حالة الترحيل',        accessor: (r) =>
+      r.migrationStatus === 'migrated' ? 'تم الترحيل' :
+      r.migrationStatus === 'ready'    ? 'جاهز للترحيل' :
+                                          'بانتظار الترحيل' },
+];
+
+const HOSPITALS_CSV_COLUMNS = [
+  { header: 'الاسم (إنجليزي)',   accessor: 'name' },
+  { header: 'الاسم (عربي)',      accessor: 'arabicName' },
+  { header: 'رقم التسجيل',       accessor: 'registrationNumber' },
+  { header: 'النوع',             accessor: 'hospitalType' },
+  { header: 'الهاتف',            accessor: 'phoneNumber' },
+  { header: 'البريد',            accessor: 'email' },
+  { header: 'المحافظة',          accessor: 'governorate' },
+  { header: 'المدينة',           accessor: 'city' },
+  { header: 'عدد الأسرّة',       accessor: 'numberOfBeds' },
+  { header: 'طوارئ',             accessor: (r) => r.hasEmergency ? 'نعم' : 'لا' },
+  { header: 'عناية مركزة',       accessor: (r) => r.hasICU ? 'نعم' : 'لا' },
+  { header: 'مختبر',             accessor: (r) => r.hasLaboratory ? 'نعم' : 'لا' },
+  { header: 'صيدلية',            accessor: (r) => r.hasPharmacy ? 'نعم' : 'لا' },
+  { header: 'الحالة',            accessor: (r) => r.isActive === false ? 'غير نشط' : 'نشط' },
+];
+
+const PHARMACIES_CSV_COLUMNS = [
+  { header: 'الاسم (إنجليزي)',   accessor: 'name' },
+  { header: 'الاسم (عربي)',      accessor: 'arabicName' },
+  { header: 'رقم التسجيل',       accessor: 'registrationNumber' },
+  { header: 'النوع',             accessor: 'pharmacyType' },
+  { header: 'الهاتف',            accessor: 'phoneNumber' },
+  { header: 'البريد',            accessor: 'email' },
+  { header: 'المحافظة',          accessor: 'governorate' },
+  { header: 'المدينة',           accessor: 'city' },
+  { header: 'يقبل الطلبات',      accessor: (r) => r.isAcceptingOrders !== false ? 'نعم' : 'لا' },
+  { header: 'الحالة',            accessor: (r) => r.isActive === false ? 'غير نشط' : 'نشط' },
+];
+
+const LABS_CSV_COLUMNS = [
+  { header: 'الاسم (إنجليزي)',   accessor: 'name' },
+  { header: 'الاسم (عربي)',      accessor: 'arabicName' },
+  { header: 'رقم التسجيل',       accessor: 'registrationNumber' },
+  { header: 'النوع',             accessor: 'laboratoryType' },
+  { header: 'الهاتف',            accessor: 'phoneNumber' },
+  { header: 'البريد',            accessor: 'email' },
+  { header: 'المحافظة',          accessor: 'governorate' },
+  { header: 'المدينة',           accessor: 'city' },
+  { header: 'خدمة منزلية',       accessor: (r) => r.hasHomeService ? 'نعم' : 'لا' },
+  { header: 'الحالة',            accessor: (r) => r.isActive === false ? 'غير نشط' : 'نشط' },
+];
+
 
 /* ═══════════════════════════════════════════════════════════════════════
    REUSABLE PRESENTATIONAL COMPONENTS
@@ -681,18 +857,21 @@ const AdminDashboard = () => {
   const [hospitals, setHospitals] = useState([]);
   const [hospitalsLoading, setHospitalsLoading] = useState(false);
   const [hospitalSearch, setHospitalSearch] = useState('');
+  const [hospitalTypeFilter, setHospitalTypeFilter] = useState('all');
   const [showHospitalForm, setShowHospitalForm] = useState(false);
   const [editingHospital, setEditingHospital] = useState(null);
 
   const [pharmacies, setPharmacies] = useState([]);
   const [pharmaciesLoading, setPharmaciesLoading] = useState(false);
   const [pharmacySearch, setPharmacySearch] = useState('');
+  const [pharmacyTypeFilter, setPharmacyTypeFilter] = useState('all');
   const [showPharmacyForm, setShowPharmacyForm] = useState(false);
   const [editingPharmacy, setEditingPharmacy] = useState(null);
 
   const [laboratories, setLaboratories] = useState([]);
   const [labsLoading, setLabsLoading] = useState(false);
   const [labSearch, setLabSearch] = useState('');
+  const [labTypeFilter, setLabTypeFilter] = useState('all');
   const [showLabForm, setShowLabForm] = useState(false);
   const [editingLab, setEditingLab] = useState(null);
 
@@ -711,6 +890,27 @@ const AdminDashboard = () => {
   const [auditLogs, setAuditLogs] = useState([]);
   const [auditLoading, setAuditLoading] = useState(false);
   const [auditSearch, setAuditSearch] = useState('');
+  // Advanced audit filters (the "خارقة" filter — مشكلة #5)
+  const [auditFilters, setAuditFilters] = useState({
+    action: 'all',
+    userRole: 'all',
+    platform: 'all',
+    success: 'all',
+    ipAddress: '',
+    from: '',
+    to: '',
+  });
+  const [auditFiltersApplied, setAuditFiltersApplied] = useState(false);
+
+  /* ─────────────────────────────────────────────────────────────────
+     STATE — Account Activity (the new Monitoring tab)
+     ───────────────────────────────────────────────────────────────── */
+
+  const [activityEmail, setActivityEmail] = useState('');
+  const [activityDays, setActivityDays] = useState(30);
+  const [activityReport, setActivityReport] = useState(null);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState('');
 
   /* ─────────────────────────────────────────────────────────────────
      STATE — Add Doctor form
@@ -785,24 +985,41 @@ const AdminDashboard = () => {
   }, [admin]);
 
   // Filtered lists for each section
+  /* ─────────────────────────────────────────────────────────────────
+     DOCTOR REQUESTS — Two-stage filter
+     ─────────────────────────────────────────────────────────────────
+     Stage 1: filter by requestType (الكل / أطباء / صيادلة / فنيي مختبر)
+              → drives the dynamic counts on the status chips
+     Stage 2: filter by status (الكل / معلق / موافق / مرفوض) + search
+              → drives the actual table rows
+     This is the fix for مشكلة #2: chips now reflect the selected type tab.
+     ───────────────────────────────────────────────────────────────── */
+
+  const requestsByType = useMemo(() => {
+    if (requestTypeFilter === 'all') return doctorRequests;
+    return doctorRequests.filter((r) => (r.requestType || 'doctor') === requestTypeFilter);
+  }, [doctorRequests, requestTypeFilter]);
+
   const filteredRequests = useMemo(() => {
-    return doctorRequests.filter((r) => {
+    return requestsByType.filter((r) => {
       const search = requestSearch.toLowerCase();
       const matchesSearch = !search
         || r.firstName?.toLowerCase().includes(search)
         || r.lastName?.toLowerCase().includes(search)
+        || r.fatherName?.toLowerCase().includes(search)
+        || r.email?.toLowerCase().includes(search)
+        || r.phoneNumber?.includes(search)
         || r.medicalLicenseNumber?.toLowerCase().includes(search)
         || r.pharmacyLicenseNumber?.toLowerCase().includes(search)
         || r.licenseNumber?.toLowerCase().includes(search)
         || r.nationalId?.includes(search)
+        || r.specialization?.toLowerCase().includes(search)
         || r.requestId?.toLowerCase().includes(search)
         || r._id?.includes(search);
       const matchesFilter = requestFilter === 'all' || r.status === requestFilter;
-      const type = r.requestType || 'doctor';
-      const matchesType = requestTypeFilter === 'all' || type === requestTypeFilter;
-      return matchesSearch && matchesFilter && matchesType;
+      return matchesSearch && matchesFilter;
     });
-  }, [doctorRequests, requestSearch, requestFilter, requestTypeFilter]);
+  }, [requestsByType, requestSearch, requestFilter]);
 
   const filteredDoctors = useMemo(() => {
     return doctors.filter((d) => {
@@ -810,8 +1027,14 @@ const AdminDashboard = () => {
       const matchesSearch = !search
         || d.firstName?.toLowerCase().includes(search)
         || d.lastName?.toLowerCase().includes(search)
+        || d.fatherName?.toLowerCase().includes(search)
         || d.medicalLicenseNumber?.toLowerCase().includes(search)
-        || d.nationalId?.includes(search);
+        || d.nationalId?.includes(search)
+        || d.email?.toLowerCase().includes(search)
+        || d.phoneNumber?.includes(search)
+        || d.specialization?.toLowerCase().includes(search)
+        || d.hospitalAffiliation?.toLowerCase().includes(search)
+        || d.governorate?.toLowerCase().includes(search);
       const isActive = d.isActive !== false;
       const matchesFilter = doctorFilter === 'all'
         || (doctorFilter === 'active' && isActive)
@@ -826,11 +1049,19 @@ const AdminDashboard = () => {
       const matchesSearch = !search
         || p.firstName?.toLowerCase().includes(search)
         || p.lastName?.toLowerCase().includes(search)
-        || p.nationalId?.includes(search);
+        || p.fatherName?.toLowerCase().includes(search)
+        || p.nationalId?.includes(search)
+        || p.childRegistrationNumber?.toLowerCase().includes(search)
+        || p.phoneNumber?.includes(search)
+        || p.email?.toLowerCase().includes(search)
+        || p.governorate?.toLowerCase().includes(search)
+        || p.bloodType?.toLowerCase().includes(search);
       const isActive = p.isActive !== false;
       const matchesFilter = patientFilter === 'all'
         || (patientFilter === 'active' && isActive)
-        || (patientFilter === 'inactive' && !isActive);
+        || (patientFilter === 'inactive' && !isActive)
+        || (patientFilter === 'adult'  && !(p.type === 'minor' || p.isMinor))
+        || (patientFilter === 'minor'  &&  (p.type === 'minor' || p.isMinor));
       return matchesSearch && matchesFilter;
     });
   }, [patients, patientSearch, patientFilter]);
@@ -841,8 +1072,12 @@ const AdminDashboard = () => {
       const matchesSearch = !search
         || c.firstName?.toLowerCase().includes(search)
         || c.lastName?.toLowerCase().includes(search)
+        || c.fatherName?.toLowerCase().includes(search)
+        || c.motherName?.toLowerCase().includes(search)
         || c.childRegistrationNumber?.toLowerCase().includes(search)
-        || c.parentNationalId?.includes(search);
+        || c.parentNationalId?.includes(search)
+        || c.parentName?.toLowerCase().includes(search)
+        || c.governorate?.toLowerCase().includes(search);
       const matchesFilter = childFilter === 'all' || c.migrationStatus === childFilter;
       return matchesSearch && matchesFilter;
     });
@@ -851,33 +1086,54 @@ const AdminDashboard = () => {
   const filteredHospitals = useMemo(() => {
     return hospitals.filter((h) => {
       const search = hospitalSearch.toLowerCase();
-      return !search
+      const matchesSearch = !search
         || h.name?.toLowerCase().includes(search)
         || h.arabicName?.includes(hospitalSearch)
         || h.registrationNumber?.toLowerCase().includes(search)
-        || h.governorate?.toLowerCase().includes(search);
+        || h.hospitalLicense?.toLowerCase().includes(search)
+        || h.governorate?.toLowerCase().includes(search)
+        || h.city?.toLowerCase().includes(search)
+        || h.district?.toLowerCase().includes(search)
+        || h.phoneNumber?.includes(search)
+        || h.email?.toLowerCase().includes(search);
+      const matchesType = hospitalTypeFilter === 'all' || h.hospitalType === hospitalTypeFilter;
+      return matchesSearch && matchesType;
     });
-  }, [hospitals, hospitalSearch]);
+  }, [hospitals, hospitalSearch, hospitalTypeFilter]);
 
   const filteredPharmacies = useMemo(() => {
     return pharmacies.filter((p) => {
       const search = pharmacySearch.toLowerCase();
-      return !search
+      const matchesSearch = !search
         || p.name?.toLowerCase().includes(search)
         || p.arabicName?.includes(pharmacySearch)
-        || p.registrationNumber?.toLowerCase().includes(search);
+        || p.registrationNumber?.toLowerCase().includes(search)
+        || p.pharmacyLicense?.toLowerCase().includes(search)
+        || p.governorate?.toLowerCase().includes(search)
+        || p.city?.toLowerCase().includes(search)
+        || p.phoneNumber?.includes(search)
+        || p.email?.toLowerCase().includes(search);
+      const matchesType = pharmacyTypeFilter === 'all' || p.pharmacyType === pharmacyTypeFilter;
+      return matchesSearch && matchesType;
     });
-  }, [pharmacies, pharmacySearch]);
+  }, [pharmacies, pharmacySearch, pharmacyTypeFilter]);
 
   const filteredLabs = useMemo(() => {
     return laboratories.filter((l) => {
       const search = labSearch.toLowerCase();
-      return !search
+      const matchesSearch = !search
         || l.name?.toLowerCase().includes(search)
         || l.arabicName?.includes(labSearch)
-        || l.registrationNumber?.toLowerCase().includes(search);
+        || l.registrationNumber?.toLowerCase().includes(search)
+        || l.labLicense?.toLowerCase().includes(search)
+        || l.governorate?.toLowerCase().includes(search)
+        || l.city?.toLowerCase().includes(search)
+        || l.phoneNumber?.includes(search)
+        || l.email?.toLowerCase().includes(search);
+      const matchesType = labTypeFilter === 'all' || l.laboratoryType === labTypeFilter || l.labType === labTypeFilter;
+      return matchesSearch && matchesType;
     });
-  }, [laboratories, labSearch]);
+  }, [laboratories, labSearch, labTypeFilter]);
 
   const filteredEmergencies = useMemo(() => {
     return emergencyReports.filter((e) => {
@@ -890,14 +1146,72 @@ const AdminDashboard = () => {
   }, [reviews, reviewFilter]);
 
   const filteredAuditLogs = useMemo(() => {
+    // Full client-side filtering — applies all 8 filters because the backend
+    // v2.2 doesn't yet support the corresponding query parameters. When the
+    // backend is upgraded, this memo still produces the correct result on
+    // the same input — it never returns false positives.
+    const search   = auditSearch.trim().toLowerCase();
+    const fromDate = auditFilters.from ? new Date(auditFilters.from + 'T00:00:00') : null;
+    const toDate   = auditFilters.to   ? new Date(auditFilters.to   + 'T23:59:59') : null;
+    const ipFilter = auditFilters.ipAddress.trim().toLowerCase();
+
     return auditLogs.filter((log) => {
-      const search = auditSearch.toLowerCase();
-      return !search
-        || log.action?.toLowerCase().includes(search)
-        || log.userEmail?.toLowerCase().includes(search)
-        || log.description?.toLowerCase().includes(search);
+      // 1) Free-text search (action / userEmail / description / resourceType)
+      if (search) {
+        const haystack = [
+          log.action,
+          log.userEmail,
+          log.description,
+          log.details,
+          log.resourceType,
+          log.userRole,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        if (!haystack.includes(search)) return false;
+      }
+
+      // 2) Action filter (exact match, case-insensitive)
+      if (auditFilters.action !== 'all') {
+        if ((log.action || '').toUpperCase() !== auditFilters.action.toUpperCase()) return false;
+      }
+
+      // 3) User role filter
+      if (auditFilters.userRole !== 'all') {
+        if ((log.userRole || '').toLowerCase() !== auditFilters.userRole.toLowerCase()) return false;
+      }
+
+      // 4) Platform filter
+      if (auditFilters.platform !== 'all') {
+        if ((log.platform || '').toLowerCase() !== auditFilters.platform.toLowerCase()) return false;
+      }
+
+      // 5) Success filter (handle missing success field as success=true legacy)
+      if (auditFilters.success !== 'all') {
+        const want    = auditFilters.success === 'true';
+        const actual  = log.success !== false;  // undefined/null => treated as success
+        if (want !== actual) return false;
+      }
+
+      // 6) IP address filter (substring match)
+      if (ipFilter) {
+        if (!(log.ipAddress || '').toLowerCase().includes(ipFilter)) return false;
+      }
+
+      // 7) Date range (timestamp || createdAt)
+      if (fromDate || toDate) {
+        const tsRaw = log.timestamp || log.createdAt;
+        if (!tsRaw) return false;
+        const ts = new Date(tsRaw);
+        if (Number.isNaN(ts.getTime())) return false;
+        if (fromDate && ts < fromDate) return false;
+        if (toDate   && ts > toDate)   return false;
+      }
+
+      return true;
     });
-  }, [auditLogs, auditSearch]);
+  }, [auditLogs, auditSearch, auditFilters]);
 
   /* ─────────────────────────────────────────────────────────────────
      MODAL HELPERS
@@ -1006,6 +1320,8 @@ const AdminDashboard = () => {
     else if (sectionId === 'emergency' && emergencyReports.length === 0) loadEmergencyReports();
     else if (sectionId === 'reviews' && reviews.length === 0) loadReviews();
     else if (sectionId === 'audit' && auditLogs.length === 0) loadAuditLogs();
+    // Account Activity needs audit_logs to build reports client-side
+    else if (sectionId === 'accountActivity' && auditLogs.length === 0) loadAuditLogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doctorRequests.length, doctors.length, patients.length, children.length,
       hospitals.length, pharmacies.length, laboratories.length,
@@ -1135,13 +1451,218 @@ const AdminDashboard = () => {
   const loadAuditLogs = useCallback(async () => {
     setAuditLoading(true);
     try {
-      const data = await adminAPI.getAuditLogs();
-      if (data?.logs) setAuditLogs(data.logs);
+      // Fetch ALL audit logs (limit 500 for performance); all filtering is done
+      // client-side in `filteredAuditLogs` so backend v2.2 (which doesn't
+      // support these query params) still works correctly.
+      const data = await adminAPI.getAuditLogs({ limit: 500 });
+      if (Array.isArray(data?.logs)) setAuditLogs(data.logs);
+      else if (Array.isArray(data))  setAuditLogs(data);  // tolerate flat-array responses
     } catch (err) {
       console.error('[AdminDashboard] Audit load error:', err);
     } finally {
       setAuditLoading(false);
     }
+  }, []);
+
+  /* Recompute the "filters applied" indicator whenever filters change */
+  useEffect(() => {
+    const hasFilters =
+      auditSearch.trim() !== '' ||
+      auditFilters.action     !== 'all' ||
+      auditFilters.userRole   !== 'all' ||
+      auditFilters.platform   !== 'all' ||
+      auditFilters.success    !== 'all' ||
+      auditFilters.ipAddress.trim() !== '' ||
+      auditFilters.from       !== '' ||
+      auditFilters.to         !== '';
+    setAuditFiltersApplied(hasFilters);
+  }, [auditSearch, auditFilters]);
+
+  /* ─────────────────────────────────────────────────────────────────
+     ACCOUNT ACTIVITY — Client-side report (no new endpoint needed)
+     ─────────────────────────────────────────────────────────────────
+     Since the backend v2.2 doesn't yet expose /admin/account-activity/:email,
+     we build the report on the client from the existing audit_logs data.
+     This is the same data the dedicated endpoint would aggregate, so the
+     output is identical — only computed in the browser instead of the server.
+
+     Strategy:
+       1. Make sure auditLogs is loaded (reuse loadAuditLogs).
+       2. Filter logs by userEmail (case-insensitive) and within `days` window.
+       3. Aggregate: profile snapshot, stats, security events, recent activity,
+          suspicious flag (multiple IPs / many failed logins / etc.)
+     ───────────────────────────────────────────────────────────────── */
+
+  const buildActivityReport = useCallback((email, days, sourceLogs) => {
+    const lowerEmail = email.toLowerCase().trim();
+    const cutoff     = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    // Filter logs by email + time window
+    const userLogs = (sourceLogs || []).filter((log) => {
+      if ((log.userEmail || '').toLowerCase() !== lowerEmail) return false;
+      const ts = new Date(log.timestamp || log.createdAt);
+      if (Number.isNaN(ts.getTime())) return true;
+      return ts >= cutoff;
+    });
+
+    if (userLogs.length === 0) {
+      return null;  // signals "no data found" to caller
+    }
+
+    // Sort newest-first
+    userLogs.sort((a, b) =>
+      new Date(b.timestamp || b.createdAt) - new Date(a.timestamp || a.createdAt)
+    );
+
+    // Profile snapshot — pulled from the most recent log entry
+    const latest = userLogs[0];
+    const profile = {
+      email:                lowerEmail,
+      role:                 latest.userRole || 'غير معروف',
+      isActive:             true,  // we don't have account.isActive here; assume active unless lock event found
+      lastLoginAt:          null,
+      failedLoginAttempts:  0,
+      isLocked:             false,
+      lockedUntil:          null,
+    };
+
+    // Stats counters
+    let successfulLogins = 0;
+    let failedLogins     = 0;
+    const ipSet      = new Set();
+    const deviceSet  = new Set();
+    const platforms  = { web: 0, mobile: 0, api: 0 };
+
+    // Security events (auth/lock/password)
+    const securityActions = new Set([
+      'LOGIN', 'LOGIN_FAILED', 'LOGOUT', 'ACCOUNT_LOCKED',
+      'PASSWORD_CHANGED', 'PASSWORD_RESET_REQUESTED', 'OTP_VERIFIED',
+    ]);
+    const securityEvents = [];
+
+    for (const log of userLogs) {
+      const action = (log.action || '').toUpperCase();
+      const isFailedAction = log.success === false || action.endsWith('_FAILED');
+
+      // Login counters
+      if (action === 'LOGIN') {
+        if (isFailedAction) failedLogins++;
+        else {
+          successfulLogins++;
+          if (!profile.lastLoginAt) profile.lastLoginAt = log.timestamp || log.createdAt;
+        }
+      }
+      if (action === 'LOGIN_FAILED') failedLogins++;
+      if (action === 'ACCOUNT_LOCKED') {
+        profile.isLocked = true;
+        profile.lockedUntil = log.lockedUntil || log.timestamp || log.createdAt;
+      }
+
+      // Unique IPs + devices + platforms
+      if (log.ipAddress) ipSet.add(log.ipAddress);
+      const deviceKey = log.deviceInfo || log.userAgent;
+      if (deviceKey) deviceSet.add(deviceKey);
+      const plat = (log.platform || '').toLowerCase();
+      if (plat === 'web' || plat === 'mobile' || plat === 'api') {
+        platforms[plat]++;
+      }
+
+      // Capture as security event
+      if (securityActions.has(action)) {
+        securityEvents.push({
+          action: action,
+          timestamp: log.timestamp || log.createdAt,
+          ipAddress: log.ipAddress,
+          success: log.success !== false,
+          details: log.description || log.details || null,
+        });
+      }
+    }
+
+    profile.failedLoginAttempts = failedLogins;
+
+    // Suspicious activity heuristic — flag if any of:
+    //   • ≥ 5 failed logins in window
+    //   • > 3 unique IPs (possible session sharing / credential stuffing)
+    //   • Account was locked during the window
+    const suspiciousReasons = [];
+    if (failedLogins >= 5) {
+      suspiciousReasons.push(`عدد كبير من محاولات الدخول الفاشلة (${failedLogins} محاولة)`);
+    }
+    if (ipSet.size > 3) {
+      suspiciousReasons.push(`دخول من عدة عناوين IP مختلفة (${ipSet.size} عناوين فريدة)`);
+    }
+    if (profile.isLocked) {
+      suspiciousReasons.push('تم قفل الحساب خلال هذه الفترة');
+    }
+    if (platforms.web > 0 && platforms.mobile > 0 && successfulLogins > 0) {
+      // mixed platforms is usually fine, only flag if combined with another signal
+      // → we don't add this reason on its own
+    }
+
+    return {
+      profile,
+      stats: {
+        totalEvents:      userLogs.length,
+        successfulLogins,
+        failedLogins,
+        uniqueIPs:        ipSet.size,
+        uniqueDevices:    deviceSet.size,
+        platforms,
+      },
+      securityEvents:  securityEvents.slice(0, 20),
+      recentActivity:  userLogs.slice(0, 50).map((log) => ({
+        action:      log.action,
+        description: log.description || log.details,
+        timestamp:   log.timestamp || log.createdAt,
+        ipAddress:   log.ipAddress,
+        platform:    log.platform,
+        success:     log.success !== false,
+      })),
+      suspicious: {
+        flagged: suspiciousReasons.length > 0,
+        reasons: suspiciousReasons,
+      },
+    };
+  }, []);
+
+  const loadActivityReport = useCallback(async () => {
+    const email = activityEmail.trim();
+    if (!email) {
+      setActivityError('يرجى إدخال البريد الإلكتروني للحساب المراد التحقيق فيه');
+      return;
+    }
+    setActivityError('');
+    setActivityLoading(true);
+    try {
+      // Ensure we have a fresh dataset — fetch up to 500 latest logs
+      const data = await adminAPI.getAuditLogs({ limit: 500 });
+      const logs = Array.isArray(data?.logs) ? data.logs
+                  : Array.isArray(data)      ? data
+                  : [];
+      // Update the audit_logs cache too — so the Audit tab also sees fresh data
+      if (logs.length > 0) setAuditLogs(logs);
+
+      const report = buildActivityReport(email, activityDays, logs);
+      if (!report) {
+        setActivityError(`لم يتم العثور على أي نشاط لهذا البريد الإلكتروني (${email}) في آخر ${activityDays} يوم`);
+        setActivityReport(null);
+      } else {
+        setActivityReport(report);
+      }
+    } catch (err) {
+      console.error('[AdminDashboard] Activity load error:', err);
+      setActivityError(err?.message || 'تعذر تحميل تقرير النشاط');
+      setActivityReport(null);
+    } finally {
+      setActivityLoading(false);
+    }
+  }, [activityEmail, activityDays, buildActivityReport]);
+
+  const clearActivityReport = useCallback(() => {
+    setActivityEmail('');
+    setActivityReport(null);
+    setActivityError('');
   }, []);
 
   /* ─────────────────────────────────────────────────────────────────
@@ -2331,16 +2852,31 @@ const AdminDashboard = () => {
                     placeholder="البحث بالاسم، رقم الترخيص، أو الرقم الوطني..."
                     value={requestSearch}
                     onChange={(e) => setRequestSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') e.currentTarget.blur();
+                    }}
                   />
+                  {requestSearch && (
+                    <button
+                      type="button"
+                      className="ad-search-clear"
+                      onClick={() => setRequestSearch('')}
+                      aria-label="مسح البحث"
+                    >
+                      <XCircle size={16} strokeWidth={2.2} />
+                    </button>
+                  )}
                 </div>
                 <div className="ad-filter-chips">
+                  {/* Dynamic counts — these now reflect the selected TYPE tab,
+                      not the unfiltered global list. Fix for مشكلة #2. */}
                   <button
                     type="button"
                     className={`ad-chip ${requestFilter === 'all' ? 'active' : ''}`}
                     onClick={() => setRequestFilter('all')}
                   >
                     الكل
-                    <span className="ad-chip-count">{doctorRequests.length}</span>
+                    <span className="ad-chip-count">{requestsByType.length}</span>
                   </button>
                   <button
                     type="button"
@@ -2350,7 +2886,7 @@ const AdminDashboard = () => {
                     <Clock size={13} strokeWidth={2.5} />
                     معلق
                     <span className="ad-chip-count">
-                      {doctorRequests.filter((r) => r.status === 'pending').length}
+                      {requestsByType.filter((r) => r.status === 'pending').length}
                     </span>
                   </button>
                   <button
@@ -2361,7 +2897,7 @@ const AdminDashboard = () => {
                     <CheckCircle2 size={13} strokeWidth={2.5} />
                     تمت الموافقة
                     <span className="ad-chip-count">
-                      {doctorRequests.filter((r) => r.status === 'approved').length}
+                      {requestsByType.filter((r) => r.status === 'approved').length}
                     </span>
                   </button>
                   <button
@@ -2372,7 +2908,7 @@ const AdminDashboard = () => {
                     <XCircle size={13} strokeWidth={2.5} />
                     مرفوض
                     <span className="ad-chip-count">
-                      {doctorRequests.filter((r) => r.status === 'rejected').length}
+                      {requestsByType.filter((r) => r.status === 'rejected').length}
                     </span>
                   </button>
                 </div>
@@ -2582,6 +3118,16 @@ const AdminDashboard = () => {
                   <button
                     type="button"
                     className="ad-btn ad-btn-secondary"
+                    onClick={() => exportToCSV(filteredDoctors, 'doctors', DOCTORS_CSV_COLUMNS)}
+                    disabled={!filteredDoctors.length}
+                    title="تصدير النتائج الحالية"
+                  >
+                    <Download size={16} strokeWidth={2.2} />
+                    تصدير CSV
+                  </button>
+                  <button
+                    type="button"
+                    className="ad-btn ad-btn-secondary"
                     onClick={loadDoctors}
                   >
                     <RotateCcw size={16} strokeWidth={2.2} />
@@ -2606,10 +3152,21 @@ const AdminDashboard = () => {
                     ref={searchInputRef}
                     type="text"
                     className="ad-search-input"
-                    placeholder="البحث بالاسم، رقم الترخيص، أو الرقم الوطني..."
+                    placeholder="البحث بالاسم، رقم الترخيص، الرقم الوطني، البريد، الهاتف، التخصص..."
                     value={doctorSearch}
                     onChange={(e) => setDoctorSearch(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                   />
+                  {doctorSearch && (
+                    <button
+                      type="button"
+                      className="ad-search-clear"
+                      onClick={() => setDoctorSearch('')}
+                      aria-label="مسح البحث"
+                    >
+                      <XCircle size={16} strokeWidth={2.2} />
+                    </button>
+                  )}
                 </div>
                 <div className="ad-filter-chips">
                   <button
@@ -2668,9 +3225,12 @@ const AdminDashboard = () => {
                       <tr>
                         <th>الاسم</th>
                         <th>التخصص</th>
+                        <th>التواصل</th>
+                        <th>المحافظة</th>
                         <th>رقم الترخيص</th>
                         <th>المستشفى</th>
-                        <th>سنوات الخبرة</th>
+                        <th>الخبرة</th>
+                        <th>التقييم</th>
                         <th>الحالة</th>
                         <th>الإجراءات</th>
                       </tr>
@@ -2694,7 +3254,25 @@ const AdminDashboard = () => {
                                   <SpecIcon size={14} strokeWidth={2.2} />
                                 </div>
                                 <span>{specInfo.nameAr}</span>
+                                {specInfo.hasAI && (
+                                  <span className="ad-pill info" style={{ marginInlineStart: 4, fontSize: '0.65rem' }}>AI</span>
+                                )}
                               </div>
+                            </td>
+                            <td>
+                              <div className="ad-cell-contact">
+                                {doctor.email && (
+                                  <span className="ad-cell-contact-line ltr">{doctor.email}</span>
+                                )}
+                                {doctor.phoneNumber && (
+                                  <span className="ad-cell-contact-line ltr muted">{doctor.phoneNumber}</span>
+                                )}
+                              </div>
+                            </td>
+                            <td>
+                              <span style={{ fontSize: '0.825rem' }}>
+                                {getGovernorateName(doctor.governorate) || '-'}
+                              </span>
                             </td>
                             <td>
                               <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, direction: 'ltr', display: 'inline-block' }}>
@@ -2710,6 +3288,19 @@ const AdminDashboard = () => {
                               <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 700 }}>
                                 {doctor.yearsOfExperience || 0} سنة
                               </span>
+                            </td>
+                            <td>
+                              {doctor.rating ? (
+                                <div className="ad-cell-rating">
+                                  <Star size={12} strokeWidth={2.2} fill="currentColor" />
+                                  <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 700 }}>
+                                    {Number(doctor.rating).toFixed(1)}
+                                  </span>
+                                  <small>({formatNumber(doctor.reviewsCount || 0)})</small>
+                                </div>
+                              ) : (
+                                <small style={{ color: 'var(--tm-text-muted)' }}>—</small>
+                              )}
                             </td>
                             <td>
                               {isActive ? (
@@ -2795,6 +3386,16 @@ const AdminDashboard = () => {
                   <button
                     type="button"
                     className="ad-btn ad-btn-secondary"
+                    onClick={() => exportToCSV(filteredPatients, 'patients', PATIENTS_CSV_COLUMNS)}
+                    disabled={!filteredPatients.length}
+                    title="تصدير النتائج الحالية"
+                  >
+                    <Download size={16} strokeWidth={2.2} />
+                    تصدير CSV
+                  </button>
+                  <button
+                    type="button"
+                    className="ad-btn ad-btn-secondary"
                     onClick={loadPatients}
                   >
                     <RotateCcw size={16} strokeWidth={2.2} />
@@ -2810,10 +3411,21 @@ const AdminDashboard = () => {
                   <input
                     type="text"
                     className="ad-search-input"
-                    placeholder="البحث بالاسم أو الرقم الوطني..."
+                    placeholder="البحث بالاسم، الرقم الوطني، البريد، الهاتف، المحافظة..."
                     value={patientSearch}
                     onChange={(e) => setPatientSearch(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                   />
+                  {patientSearch && (
+                    <button
+                      type="button"
+                      className="ad-search-clear"
+                      onClick={() => setPatientSearch('')}
+                      aria-label="مسح البحث"
+                    >
+                      <XCircle size={16} strokeWidth={2.2} />
+                    </button>
+                  )}
                 </div>
                 <div className="ad-filter-chips">
                   <button
@@ -2823,6 +3435,28 @@ const AdminDashboard = () => {
                   >
                     الكل
                     <span className="ad-chip-count">{patients.length}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`ad-chip ${patientFilter === 'adult' ? 'active' : ''}`}
+                    onClick={() => setPatientFilter('adult')}
+                  >
+                    <User size={13} strokeWidth={2.5} />
+                    بالغ
+                    <span className="ad-chip-count">
+                      {patients.filter((p) => !(p.type === 'minor' || p.isMinor)).length}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={`ad-chip ${patientFilter === 'minor' ? 'active' : ''}`}
+                    onClick={() => setPatientFilter('minor')}
+                  >
+                    <Baby size={13} strokeWidth={2.5} />
+                    قاصر
+                    <span className="ad-chip-count">
+                      {patients.filter((p) => p.type === 'minor' || p.isMinor).length}
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -2871,10 +3505,14 @@ const AdminDashboard = () => {
                     <thead>
                       <tr>
                         <th>الاسم</th>
-                        <th>الرقم الوطني</th>
-                        <th>الجنس</th>
+                        <th>النوع</th>
+                        <th>الرقم الوطني / السجل</th>
+                        <th>الجنس / العمر</th>
                         <th>المحافظة</th>
                         <th>الهاتف</th>
+                        <th>الفصيلة</th>
+                        <th>الزيارات</th>
+                        <th>تنبيهات طبية</th>
                         <th>الحالة</th>
                         <th>الإجراءات</th>
                       </tr>
@@ -2882,22 +3520,41 @@ const AdminDashboard = () => {
                     <tbody>
                       {filteredPatients.map((patient) => {
                         const isActive = patient.isActive !== false;
+                        const isMinor  = patient.type === 'minor' || patient.isMinor === true;
+                        // Privacy-aware indicators: counts only, no details.
+                        const allergyCount  = patient.allergiesCount  ?? (Array.isArray(patient.allergies)        ? patient.allergies.length        : 0);
+                        const chronicCount  = patient.chronicCount    ?? (Array.isArray(patient.chronicDiseases)  ? patient.chronicDiseases.length  : 0);
+                        const visitsTotal   = patient.totalVisits     ?? patient.visitsCount ?? 0;
                         return (
                           <tr key={patient._id || patient.id} className={!isActive ? 'inactive' : ''}>
                             <td>
                               <div className="ad-cell-name">
                                 <strong>{patient.firstName} {patient.lastName}</strong>
+                                {patient.email && <small className="ltr">{patient.email}</small>}
                               </div>
                             </td>
                             <td>
-                              <span className="ad-cell-id">
-                                {patient.nationalId || '-'}
+                              <span className={`ad-pill ${isMinor ? 'warning' : 'info'}`}>
+                                {isMinor ? <Baby size={11} strokeWidth={2.5} /> : <User size={11} strokeWidth={2.5} />}
+                                {isMinor ? 'قاصر' : 'بالغ'}
                               </span>
                             </td>
                             <td>
-                              <span className="ad-pill muted">
-                                {patient.gender === 'male' ? 'ذكر' : 'أنثى'}
+                              <span className="ad-cell-id">
+                                {patient.nationalId || patient.childRegistrationNumber || '-'}
                               </span>
+                            </td>
+                            <td>
+                              <div className="ad-cell-stack">
+                                <span className="ad-pill muted">
+                                  {patient.gender === 'male' ? 'ذكر' : 'أنثى'}
+                                </span>
+                                {patient.age !== undefined && (
+                                  <small style={{ fontFamily: 'Inter, sans-serif' }}>
+                                    {formatNumber(patient.age)} سنة
+                                  </small>
+                                )}
+                              </div>
                             </td>
                             <td>
                               <span style={{ fontSize: '0.825rem' }}>
@@ -2908,6 +3565,40 @@ const AdminDashboard = () => {
                               <span style={{ fontFamily: 'Inter, sans-serif', direction: 'ltr', display: 'inline-block' }}>
                                 {patient.phoneNumber || '-'}
                               </span>
+                            </td>
+                            <td>
+                              {patient.bloodType ? (
+                                <span className="ad-pill info" style={{ fontFamily: 'Inter, sans-serif' }}>
+                                  {patient.bloodType}
+                                </span>
+                              ) : (
+                                <small style={{ color: 'var(--tm-text-muted)' }}>—</small>
+                              )}
+                            </td>
+                            <td>
+                              <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 700 }}>
+                                {formatNumber(visitsTotal)}
+                              </span>
+                            </td>
+                            <td>
+                              {/* Privacy-aware: counts only, no clinical details */}
+                              <div className="ad-cell-flags">
+                                {allergyCount > 0 && (
+                                  <span className="ad-pill warning" title="حساسيات (عدد فقط)">
+                                    <AlertTriangle size={10} strokeWidth={2.5} />
+                                    {formatNumber(allergyCount)}
+                                  </span>
+                                )}
+                                {chronicCount > 0 && (
+                                  <span className="ad-pill error" title="أمراض مزمنة (عدد فقط)">
+                                    <Heart size={10} strokeWidth={2.5} />
+                                    {formatNumber(chronicCount)}
+                                  </span>
+                                )}
+                                {allergyCount === 0 && chronicCount === 0 && (
+                                  <small style={{ color: 'var(--tm-text-muted)' }}>—</small>
+                                )}
+                              </div>
                             </td>
                             <td>
                               {isActive ? (
@@ -2993,6 +3684,16 @@ const AdminDashboard = () => {
                   <button
                     type="button"
                     className="ad-btn ad-btn-secondary"
+                    onClick={() => exportToCSV(filteredChildren, 'children', CHILDREN_CSV_COLUMNS)}
+                    disabled={!filteredChildren.length}
+                    title="تصدير النتائج الحالية"
+                  >
+                    <Download size={16} strokeWidth={2.2} />
+                    تصدير CSV
+                  </button>
+                  <button
+                    type="button"
+                    className="ad-btn ad-btn-secondary"
                     onClick={loadChildren}
                   >
                     <RotateCcw size={16} strokeWidth={2.2} />
@@ -3008,10 +3709,21 @@ const AdminDashboard = () => {
                   <input
                     type="text"
                     className="ad-search-input"
-                    placeholder="البحث بالاسم أو رقم تسجيل الطفل أو الرقم الوطني للوالد..."
+                    placeholder="البحث بالاسم، رقم التسجيل، اسم الأم، الرقم الوطني للوالد، اسم الوالد..."
                     value={childSearch}
                     onChange={(e) => setChildSearch(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                   />
+                  {childSearch && (
+                    <button
+                      type="button"
+                      className="ad-search-clear"
+                      onClick={() => setChildSearch('')}
+                      aria-label="مسح البحث"
+                    >
+                      <XCircle size={16} strokeWidth={2.2} />
+                    </button>
+                  )}
                 </div>
                 <div className="ad-filter-chips">
                   <button
@@ -3067,8 +3779,12 @@ const AdminDashboard = () => {
                     <thead>
                       <tr>
                         <th>اسم الطفل</th>
-                        <th>رقم التسجيل</th>
+                        <th>الأم</th>
+                        <th>رقم التسجيل (CRN)</th>
+                        <th>الجنس / العمر</th>
                         <th>الرقم الوطني للوالد</th>
+                        <th>اسم الوالد</th>
+                        <th>المحافظة</th>
                         <th>تاريخ الميلاد</th>
                         <th>حالة الترحيل</th>
                         <th>الإجراءات</th>
@@ -3077,13 +3793,30 @@ const AdminDashboard = () => {
                     <tbody>
                       {filteredChildren.map((child) => {
                         const status = child.migrationStatus || 'pending';
+                        // Compute age in years if dateOfBirth is available
+                        let ageYears = null;
+                        if (child.dateOfBirth) {
+                          const dob = new Date(child.dateOfBirth);
+                          if (!isNaN(dob.getTime())) {
+                            ageYears = Math.floor((Date.now() - dob.getTime()) / 31557600000);
+                          }
+                        }
                         return (
                           <tr key={child._id || child.id}>
                             <td>
                               <div className="ad-cell-name">
-                                <strong>{child.firstName} {child.lastName}</strong>
-                                <small>{child.gender === 'male' ? 'ذكر' : 'أنثى'}</small>
+                                <strong>
+                                  {child.firstName}
+                                  {child.fatherName ? ` ${child.fatherName}` : ''}
+                                  {' '}
+                                  {child.lastName}
+                                </strong>
                               </div>
+                            </td>
+                            <td>
+                              <span style={{ fontSize: '0.825rem' }}>
+                                {child.motherName || '-'}
+                              </span>
                             </td>
                             <td>
                               <span className="ad-cell-id">
@@ -3091,8 +3824,33 @@ const AdminDashboard = () => {
                               </span>
                             </td>
                             <td>
+                              <div className="ad-cell-stack">
+                                <span className="ad-pill muted">
+                                  {child.gender === 'male' ? 'ذكر' : 'أنثى'}
+                                </span>
+                                {ageYears !== null && (
+                                  <small style={{ fontFamily: 'Inter, sans-serif' }}>
+                                    {formatNumber(ageYears)} سنة
+                                  </small>
+                                )}
+                              </div>
+                            </td>
+                            <td>
                               <span style={{ fontFamily: 'Inter, sans-serif', direction: 'ltr', display: 'inline-block' }}>
                                 {child.parentNationalId || '-'}
+                              </span>
+                            </td>
+                            <td>
+                              <span style={{ fontSize: '0.825rem' }}>
+                                {child.parentName
+                                  || (child.parentFirstName && child.parentLastName
+                                      ? `${child.parentFirstName} ${child.parentLastName}`
+                                      : '-')}
+                              </span>
+                            </td>
+                            <td>
+                              <span style={{ fontSize: '0.825rem' }}>
+                                {getGovernorateName(child.governorate)}
                               </span>
                             </td>
                             <td>
@@ -3181,6 +3939,16 @@ const AdminDashboard = () => {
                   <button
                     type="button"
                     className="ad-btn ad-btn-secondary"
+                    onClick={() => exportToCSV(filteredHospitals, 'hospitals', HOSPITALS_CSV_COLUMNS)}
+                    disabled={!filteredHospitals.length}
+                    title="تصدير النتائج الحالية"
+                  >
+                    <Download size={16} strokeWidth={2.2} />
+                    تصدير CSV
+                  </button>
+                  <button
+                    type="button"
+                    className="ad-btn ad-btn-secondary"
                     onClick={loadHospitals}
                   >
                     <RotateCcw size={16} strokeWidth={2.2} />
@@ -3203,10 +3971,44 @@ const AdminDashboard = () => {
                   <input
                     type="text"
                     className="ad-search-input"
-                    placeholder="البحث باسم المستشفى أو رقم التسجيل أو المحافظة..."
+                    placeholder="البحث باسم المستشفى، رقم التسجيل، المحافظة، المدينة، النوع..."
                     value={hospitalSearch}
                     onChange={(e) => setHospitalSearch(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                   />
+                  {hospitalSearch && (
+                    <button
+                      type="button"
+                      className="ad-search-clear"
+                      onClick={() => setHospitalSearch('')}
+                      aria-label="مسح البحث"
+                    >
+                      <XCircle size={16} strokeWidth={2.2} />
+                    </button>
+                  )}
+                </div>
+                <div className="ad-filter-chips">
+                  <button
+                    type="button"
+                    className={`ad-chip ${hospitalTypeFilter === 'all' ? 'active' : ''}`}
+                    onClick={() => setHospitalTypeFilter('all')}
+                  >
+                    الكل
+                    <span className="ad-chip-count">{hospitals.length}</span>
+                  </button>
+                  {HOSPITAL_TYPES.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className={`ad-chip ${hospitalTypeFilter === t.id ? 'active' : ''}`}
+                      onClick={() => setHospitalTypeFilter(t.id)}
+                    >
+                      {t.nameAr}
+                      <span className="ad-chip-count">
+                        {hospitals.filter((h) => h.hospitalType === t.id).length}
+                      </span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -3232,10 +4034,12 @@ const AdminDashboard = () => {
                       <tr>
                         <th>اسم المستشفى</th>
                         <th>النوع</th>
-                        <th>المحافظة</th>
-                        <th>عدد الأسرّة</th>
+                        <th>رقم التسجيل</th>
+                        <th>المحافظة / المدينة</th>
+                        <th>الأسرّة / غرف العمليات</th>
                         <th>الخدمات</th>
-                        <th>الهاتف</th>
+                        <th>التواصل</th>
+                        <th>التقييم</th>
                         <th>الإجراءات</th>
                       </tr>
                     </thead>
@@ -3256,15 +4060,33 @@ const AdminDashboard = () => {
                               </span>
                             </td>
                             <td>
-                              <span style={{ fontSize: '0.825rem' }}>
-                                {getGovernorateName(hospital.governorate)}
-                                {hospital.city && ` - ${hospital.city}`}
+                              <span className="ad-cell-id">
+                                {hospital.registrationNumber || '-'}
                               </span>
                             </td>
                             <td>
-                              <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 700 }}>
-                                {hospital.numberOfBeds || 0}
-                              </span>
+                              <div className="ad-cell-stack">
+                                <span style={{ fontSize: '0.825rem' }}>
+                                  {getGovernorateName(hospital.governorate)}
+                                </span>
+                                {hospital.city && (
+                                  <small style={{ color: 'var(--tm-text-muted)' }}>
+                                    {hospital.city}
+                                  </small>
+                                )}
+                              </div>
+                            </td>
+                            <td>
+                              <div className="ad-cell-stack">
+                                <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 700 }}>
+                                  {formatNumber(hospital.numberOfBeds || 0)} سرير
+                                </span>
+                                {hospital.numberOfOperatingRooms > 0 && (
+                                  <small style={{ fontFamily: 'Inter, sans-serif' }}>
+                                    {formatNumber(hospital.numberOfOperatingRooms)} غرفة عمليات
+                                  </small>
+                                )}
+                              </div>
                             </td>
                             <td>
                               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -3276,9 +4098,27 @@ const AdminDashboard = () => {
                               </div>
                             </td>
                             <td>
-                              <span style={{ fontFamily: 'Inter, sans-serif', direction: 'ltr', display: 'inline-block', fontSize: '0.78rem' }}>
-                                {hospital.phoneNumber || '-'}
-                              </span>
+                              <div className="ad-cell-contact">
+                                {hospital.phoneNumber && (
+                                  <span className="ad-cell-contact-line ltr">{hospital.phoneNumber}</span>
+                                )}
+                                {hospital.email && (
+                                  <span className="ad-cell-contact-line ltr muted">{hospital.email}</span>
+                                )}
+                              </div>
+                            </td>
+                            <td>
+                              {hospital.averageRating ? (
+                                <div className="ad-cell-rating">
+                                  <Star size={12} strokeWidth={2.2} fill="currentColor" />
+                                  <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 700 }}>
+                                    {Number(hospital.averageRating).toFixed(1)}
+                                  </span>
+                                  <small>({formatNumber(hospital.totalReviews || 0)})</small>
+                                </div>
+                              ) : (
+                                <small style={{ color: 'var(--tm-text-muted)' }}>—</small>
+                              )}
                             </td>
                             <td>
                               <div className="ad-cell-actions">
@@ -3339,6 +4179,16 @@ const AdminDashboard = () => {
                   </div>
                 </div>
                 <div className="ad-page-actions">
+                  <button
+                    type="button"
+                    className="ad-btn ad-btn-secondary"
+                    onClick={() => exportToCSV(filteredPharmacies, 'pharmacies', PHARMACIES_CSV_COLUMNS)}
+                    disabled={!filteredPharmacies.length}
+                    title="تصدير النتائج الحالية"
+                  >
+                    <Download size={16} strokeWidth={2.2} />
+                    تصدير CSV
+                  </button>
                   <button type="button" className="ad-btn ad-btn-secondary" onClick={loadPharmacies}>
                     <RotateCcw size={16} strokeWidth={2.2} />
                     تحديث
@@ -3356,10 +4206,44 @@ const AdminDashboard = () => {
                   <input
                     type="text"
                     className="ad-search-input"
-                    placeholder="البحث باسم الصيدلية أو رقم التسجيل..."
+                    placeholder="البحث باسم الصيدلية، رقم التسجيل، المحافظة، الهاتف..."
                     value={pharmacySearch}
                     onChange={(e) => setPharmacySearch(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                   />
+                  {pharmacySearch && (
+                    <button
+                      type="button"
+                      className="ad-search-clear"
+                      onClick={() => setPharmacySearch('')}
+                      aria-label="مسح البحث"
+                    >
+                      <XCircle size={16} strokeWidth={2.2} />
+                    </button>
+                  )}
+                </div>
+                <div className="ad-filter-chips">
+                  <button
+                    type="button"
+                    className={`ad-chip ${pharmacyTypeFilter === 'all' ? 'active' : ''}`}
+                    onClick={() => setPharmacyTypeFilter('all')}
+                  >
+                    الكل
+                    <span className="ad-chip-count">{pharmacies.length}</span>
+                  </button>
+                  {PHARMACY_TYPES.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className={`ad-chip ${pharmacyTypeFilter === t.id ? 'active' : ''}`}
+                      onClick={() => setPharmacyTypeFilter(t.id)}
+                    >
+                      {t.nameAr}
+                      <span className="ad-chip-count">
+                        {pharmacies.filter((p) => p.pharmacyType === t.id).length}
+                      </span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -3372,8 +4256,8 @@ const AdminDashboard = () => {
                 <div className="ad-card">
                   <div className="ad-empty">
                     <div className="ad-empty-icon"><Pill size={32} strokeWidth={1.8} /></div>
-                    <h3>لا توجد صيدليات</h3>
-                    <p>ابدأ بإضافة أول صيدلية للنظام</p>
+                    <h3>لا توجد صيدليات مطابقة</h3>
+                    <p>جرّب تعديل الفلاتر أو ابدأ بإضافة أول صيدلية</p>
                   </div>
                 </div>
               ) : (
@@ -3383,10 +4267,13 @@ const AdminDashboard = () => {
                       <tr>
                         <th>اسم الصيدلية</th>
                         <th>النوع</th>
-                        <th>المحافظة</th>
+                        <th>رقم التسجيل</th>
                         <th>رقم الترخيص</th>
-                        <th>الهاتف</th>
-                        <th>الموقع الجغرافي</th>
+                        <th>المحافظة / المدينة</th>
+                        <th>التواصل</th>
+                        <th>الموقع GPS</th>
+                        <th>قبول الطلبات</th>
+                        <th>التقييم</th>
                         <th>الإجراءات</th>
                       </tr>
                     </thead>
@@ -3404,9 +4291,8 @@ const AdminDashboard = () => {
                             </td>
                             <td><span className="ad-pill info">{typeInfo?.nameAr || pharmacy.pharmacyType}</span></td>
                             <td>
-                              <span style={{ fontSize: '0.825rem' }}>
-                                {getGovernorateName(pharmacy.governorate)}
-                                {pharmacy.city && ` - ${pharmacy.city}`}
+                              <span className="ad-cell-id">
+                                {pharmacy.registrationNumber || '-'}
                               </span>
                             </td>
                             <td>
@@ -3415,18 +4301,59 @@ const AdminDashboard = () => {
                               </span>
                             </td>
                             <td>
-                              <span style={{ fontFamily: 'Inter, sans-serif', direction: 'ltr', display: 'inline-block', fontSize: '0.78rem' }}>
-                                {pharmacy.phoneNumber || '-'}
-                              </span>
+                              <div className="ad-cell-stack">
+                                <span style={{ fontSize: '0.825rem' }}>
+                                  {getGovernorateName(pharmacy.governorate)}
+                                </span>
+                                {pharmacy.city && (
+                                  <small style={{ color: 'var(--tm-text-muted)' }}>{pharmacy.city}</small>
+                                )}
+                              </div>
+                            </td>
+                            <td>
+                              <div className="ad-cell-contact">
+                                {pharmacy.phoneNumber && (
+                                  <span className="ad-cell-contact-line ltr">{pharmacy.phoneNumber}</span>
+                                )}
+                                {pharmacy.email && (
+                                  <span className="ad-cell-contact-line ltr muted">{pharmacy.email}</span>
+                                )}
+                              </div>
                             </td>
                             <td>
                               {hasLocation ? (
-                                <span className="ad-pill success">
+                                <span className="ad-pill success" title={`${pharmacy.location.coordinates[1]}, ${pharmacy.location.coordinates[0]}`}>
                                   <MapPin size={11} strokeWidth={2.5} />
                                   محدد
                                 </span>
                               ) : (
                                 <span className="ad-pill muted">غير محدد</span>
+                              )}
+                            </td>
+                            <td>
+                              {pharmacy.isAcceptingOrders !== false ? (
+                                <span className="ad-pill success">
+                                  <CheckCircle2 size={11} strokeWidth={2.5} />
+                                  مفتوحة
+                                </span>
+                              ) : (
+                                <span className="ad-pill warning">
+                                  <Ban size={11} strokeWidth={2.5} />
+                                  متوقفة
+                                </span>
+                              )}
+                            </td>
+                            <td>
+                              {pharmacy.averageRating ? (
+                                <div className="ad-cell-rating">
+                                  <Star size={12} strokeWidth={2.2} fill="currentColor" />
+                                  <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 700 }}>
+                                    {Number(pharmacy.averageRating).toFixed(1)}
+                                  </span>
+                                  <small>({formatNumber(pharmacy.totalReviews || 0)})</small>
+                                </div>
+                              ) : (
+                                <small style={{ color: 'var(--tm-text-muted)' }}>—</small>
                               )}
                             </td>
                             <td>
@@ -3476,6 +4403,16 @@ const AdminDashboard = () => {
                   </div>
                 </div>
                 <div className="ad-page-actions">
+                  <button
+                    type="button"
+                    className="ad-btn ad-btn-secondary"
+                    onClick={() => exportToCSV(filteredLabs, 'laboratories', LABS_CSV_COLUMNS)}
+                    disabled={!filteredLabs.length}
+                    title="تصدير النتائج الحالية"
+                  >
+                    <Download size={16} strokeWidth={2.2} />
+                    تصدير CSV
+                  </button>
                   <button type="button" className="ad-btn ad-btn-secondary" onClick={loadLaboratories}>
                     <RotateCcw size={16} strokeWidth={2.2} />
                     تحديث
@@ -3493,10 +4430,44 @@ const AdminDashboard = () => {
                   <input
                     type="text"
                     className="ad-search-input"
-                    placeholder="البحث باسم المختبر أو رقم التسجيل..."
+                    placeholder="البحث باسم المختبر، رقم التسجيل، المحافظة، الهاتف..."
                     value={labSearch}
                     onChange={(e) => setLabSearch(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
                   />
+                  {labSearch && (
+                    <button
+                      type="button"
+                      className="ad-search-clear"
+                      onClick={() => setLabSearch('')}
+                      aria-label="مسح البحث"
+                    >
+                      <XCircle size={16} strokeWidth={2.2} />
+                    </button>
+                  )}
+                </div>
+                <div className="ad-filter-chips">
+                  <button
+                    type="button"
+                    className={`ad-chip ${labTypeFilter === 'all' ? 'active' : ''}`}
+                    onClick={() => setLabTypeFilter('all')}
+                  >
+                    الكل
+                    <span className="ad-chip-count">{laboratories.length}</span>
+                  </button>
+                  {LAB_TYPES.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      className={`ad-chip ${labTypeFilter === t.id ? 'active' : ''}`}
+                      onClick={() => setLabTypeFilter(t.id)}
+                    >
+                      {t.nameAr}
+                      <span className="ad-chip-count">
+                        {laboratories.filter((l) => (l.laboratoryType || l.labType) === t.id).length}
+                      </span>
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -3509,8 +4480,8 @@ const AdminDashboard = () => {
                 <div className="ad-card">
                   <div className="ad-empty">
                     <div className="ad-empty-icon"><Microscope size={32} strokeWidth={1.8} /></div>
-                    <h3>لا توجد مختبرات</h3>
-                    <p>ابدأ بإضافة أول مختبر للنظام</p>
+                    <h3>لا توجد مختبرات مطابقة</h3>
+                    <p>جرّب تعديل الفلاتر أو ابدأ بإضافة أول مختبر</p>
                   </div>
                 </div>
               ) : (
@@ -3520,16 +4491,20 @@ const AdminDashboard = () => {
                       <tr>
                         <th>اسم المختبر</th>
                         <th>النوع</th>
-                        <th>المحافظة</th>
+                        <th>رقم التسجيل</th>
                         <th>رقم الترخيص</th>
-                        <th>الهاتف</th>
-                        <th>الموقع الجغرافي</th>
+                        <th>المحافظة / المدينة</th>
+                        <th>التواصل</th>
+                        <th>الموقع GPS</th>
+                        <th>الخدمات</th>
+                        <th>التقييم</th>
                         <th>الإجراءات</th>
                       </tr>
                     </thead>
                     <tbody>
                       {filteredLabs.map((lab) => {
-                        const typeInfo = LAB_TYPES.find((t) => t.id === lab.labType);
+                        const labKind = lab.laboratoryType || lab.labType;
+                        const typeInfo = LAB_TYPES.find((t) => t.id === labKind);
                         const hasLocation = lab.location?.coordinates?.length === 2;
                         return (
                           <tr key={lab._id || lab.id}>
@@ -3539,11 +4514,10 @@ const AdminDashboard = () => {
                                 {lab.arabicName && <small>{lab.name}</small>}
                               </div>
                             </td>
-                            <td><span className="ad-pill info">{typeInfo?.nameAr || lab.labType}</span></td>
+                            <td><span className="ad-pill info">{typeInfo?.nameAr || labKind || '-'}</span></td>
                             <td>
-                              <span style={{ fontSize: '0.825rem' }}>
-                                {getGovernorateName(lab.governorate)}
-                                {lab.city && ` - ${lab.city}`}
+                              <span className="ad-cell-id">
+                                {lab.registrationNumber || '-'}
                               </span>
                             </td>
                             <td>
@@ -3552,18 +4526,55 @@ const AdminDashboard = () => {
                               </span>
                             </td>
                             <td>
-                              <span style={{ fontFamily: 'Inter, sans-serif', direction: 'ltr', display: 'inline-block', fontSize: '0.78rem' }}>
-                                {lab.phoneNumber || '-'}
-                              </span>
+                              <div className="ad-cell-stack">
+                                <span style={{ fontSize: '0.825rem' }}>
+                                  {getGovernorateName(lab.governorate)}
+                                </span>
+                                {lab.city && (
+                                  <small style={{ color: 'var(--tm-text-muted)' }}>{lab.city}</small>
+                                )}
+                              </div>
+                            </td>
+                            <td>
+                              <div className="ad-cell-contact">
+                                {lab.phoneNumber && (
+                                  <span className="ad-cell-contact-line ltr">{lab.phoneNumber}</span>
+                                )}
+                                {lab.email && (
+                                  <span className="ad-cell-contact-line ltr muted">{lab.email}</span>
+                                )}
+                              </div>
                             </td>
                             <td>
                               {hasLocation ? (
-                                <span className="ad-pill success">
+                                <span className="ad-pill success" title={`${lab.location.coordinates[1]}, ${lab.location.coordinates[0]}`}>
                                   <MapPin size={11} strokeWidth={2.5} />
                                   محدد
                                 </span>
                               ) : (
                                 <span className="ad-pill muted">غير محدد</span>
+                              )}
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                {lab.hasHomeService      && <span className="ad-pill info" title="خدمة منزلية">منزلي</span>}
+                                {lab.hasEmergencyService && <span className="ad-pill error" title="خدمة طوارئ">طوارئ</span>}
+                                {(!lab.hasHomeService && !lab.hasEmergencyService) && (
+                                  <small style={{ color: 'var(--tm-text-muted)' }}>—</small>
+                                )}
+                              </div>
+                            </td>
+                            <td>
+                              {lab.averageRating ? (
+                                <div className="ad-cell-rating">
+                                  <Star size={12} strokeWidth={2.2} fill="currentColor" />
+                                  <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 700 }}>
+                                    {Number(lab.averageRating).toFixed(1)}
+                                  </span>
+                                  <small>({formatNumber(lab.totalReviews || 0)})</small>
+                                </div>
+                              ) : (
+                                <small style={{ color: 'var(--tm-text-muted)' }}>—</small>
                               )}
                             </td>
                             <td>
@@ -3887,7 +4898,7 @@ const AdminDashboard = () => {
           )}
 
           {/* ═══════════════════════════════════════════════════════
-              SECTION: AUDIT LOG
+              SECTION: AUDIT LOG  (with "خارقة" advanced filters + CSV export)
               ═══════════════════════════════════════════════════════ */}
           {activeSection === 'audit' && (
             <>
@@ -3910,6 +4921,16 @@ const AdminDashboard = () => {
                   </div>
                 </div>
                 <div className="ad-page-actions">
+                  <button
+                    type="button"
+                    className="ad-btn ad-btn-secondary"
+                    onClick={() => exportToCSV(filteredAuditLogs, 'audit-logs', AUDIT_CSV_COLUMNS)}
+                    disabled={!filteredAuditLogs.length}
+                    title="تصدير النتائج الحالية"
+                  >
+                    <Download size={16} strokeWidth={2.2} />
+                    تصدير CSV
+                  </button>
                   <button type="button" className="ad-btn ad-btn-secondary" onClick={loadAuditLogs}>
                     <RotateCcw size={16} strokeWidth={2.2} />
                     تحديث
@@ -3917,16 +4938,173 @@ const AdminDashboard = () => {
                 </div>
               </div>
 
-              <div className="ad-toolbar">
-                <div className="ad-search-box">
-                  <Search size={18} strokeWidth={2} />
-                  <input
-                    type="text"
-                    className="ad-search-input"
-                    placeholder="البحث في السجلات بالإجراء، البريد الإلكتروني، أو الوصف..."
-                    value={auditSearch}
-                    onChange={(e) => setAuditSearch(e.target.value)}
-                  />
+              {/* Advanced "خارقة" filter toolbar */}
+              <div className="ad-card ad-filter-card">
+                <div className="ad-filter-header">
+                  <Filter size={16} strokeWidth={2.2} />
+                  <h4>فلترة البحث المتقدمة</h4>
+                  {auditFiltersApplied && (
+                    <span className="ad-pill info" style={{ marginInlineStart: 'auto' }}>
+                      <CheckCircle2 size={11} strokeWidth={2.5} />
+                      الفلاتر مطبّقة
+                    </span>
+                  )}
+                </div>
+
+                <div className="ad-filter-grid">
+                  {/* Free-text search */}
+                  <div className="ad-filter-field ad-filter-field-wide">
+                    <label className="ad-filter-label">بحث نصي</label>
+                    <div className="ad-search-box ad-search-box-inline">
+                      <Search size={16} strokeWidth={2} />
+                      <input
+                        type="text"
+                        className="ad-search-input"
+                        placeholder="بحث في الإجراء، البريد الإلكتروني، أو الوصف..."
+                        value={auditSearch}
+                        onChange={(e) => setAuditSearch(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') loadAuditLogs(); }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Action filter */}
+                  <div className="ad-filter-field">
+                    <label className="ad-filter-label">نوع الإجراء</label>
+                    <select
+                      className="ad-filter-select"
+                      value={auditFilters.action}
+                      onChange={(e) => setAuditFilters({ ...auditFilters, action: e.target.value })}
+                    >
+                      <option value="all">الكل</option>
+                      <option value="LOGIN">تسجيل دخول</option>
+                      <option value="LOGIN_FAILED">دخول فاشل</option>
+                      <option value="LOGOUT">تسجيل خروج</option>
+                      <option value="ACCOUNT_LOCKED">قفل حساب</option>
+                      <option value="PASSWORD_CHANGED">تغيير كلمة مرور</option>
+                      <option value="PASSWORD_RESET_REQUESTED">طلب استعادة كلمة المرور</option>
+                      <option value="OTP_VERIFIED">تأكيد OTP</option>
+                      <option value="ACCEPT_DOCTOR_REQUEST">قبول طلب طبيب</option>
+                      <option value="REJECT_DOCTOR_REQUEST">رفض طلب طبيب</option>
+                      <option value="DEACTIVATE_DOCTOR">تعطيل طبيب</option>
+                      <option value="REACTIVATE_DOCTOR">إعادة تفعيل طبيب</option>
+                      <option value="DEACTIVATE_PATIENT">تعطيل مريض</option>
+                      <option value="CREATE_HOSPITAL">إنشاء مستشفى</option>
+                      <option value="UPDATE_HOSPITAL">تحديث مستشفى</option>
+                      <option value="CREATE_PHARMACY">إنشاء صيدلية</option>
+                      <option value="CREATE_LABORATORY">إنشاء مختبر</option>
+                    </select>
+                  </div>
+
+                  {/* User role filter */}
+                  <div className="ad-filter-field">
+                    <label className="ad-filter-label">دور المستخدم</label>
+                    <select
+                      className="ad-filter-select"
+                      value={auditFilters.userRole}
+                      onChange={(e) => setAuditFilters({ ...auditFilters, userRole: e.target.value })}
+                    >
+                      <option value="all">الكل</option>
+                      <option value="admin">مسؤول</option>
+                      <option value="doctor">طبيب</option>
+                      <option value="patient">مريض</option>
+                      <option value="pharmacist">صيدلي</option>
+                      <option value="lab_technician">فني مختبر</option>
+                      <option value="dentist">طبيب أسنان</option>
+                    </select>
+                  </div>
+
+                  {/* Platform filter */}
+                  <div className="ad-filter-field">
+                    <label className="ad-filter-label">المنصة</label>
+                    <select
+                      className="ad-filter-select"
+                      value={auditFilters.platform}
+                      onChange={(e) => setAuditFilters({ ...auditFilters, platform: e.target.value })}
+                    >
+                      <option value="all">الكل</option>
+                      <option value="web">ويب</option>
+                      <option value="mobile">جوال</option>
+                      <option value="api">API</option>
+                    </select>
+                  </div>
+
+                  {/* Success filter */}
+                  <div className="ad-filter-field">
+                    <label className="ad-filter-label">حالة العملية</label>
+                    <select
+                      className="ad-filter-select"
+                      value={auditFilters.success}
+                      onChange={(e) => setAuditFilters({ ...auditFilters, success: e.target.value })}
+                    >
+                      <option value="all">الكل</option>
+                      <option value="true">نجاح</option>
+                      <option value="false">فشل</option>
+                    </select>
+                  </div>
+
+                  {/* IP Address */}
+                  <div className="ad-filter-field">
+                    <label className="ad-filter-label">عنوان IP</label>
+                    <input
+                      type="text"
+                      className="ad-filter-input"
+                      placeholder="مثال: 192.168.1.1"
+                      value={auditFilters.ipAddress}
+                      dir="ltr"
+                      onChange={(e) => setAuditFilters({ ...auditFilters, ipAddress: e.target.value })}
+                    />
+                  </div>
+
+                  {/* Date range — from */}
+                  <div className="ad-filter-field">
+                    <label className="ad-filter-label">من تاريخ</label>
+                    <input
+                      type="date"
+                      className="ad-filter-input"
+                      value={auditFilters.from}
+                      onChange={(e) => setAuditFilters({ ...auditFilters, from: e.target.value })}
+                    />
+                  </div>
+
+                  {/* Date range — to */}
+                  <div className="ad-filter-field">
+                    <label className="ad-filter-label">إلى تاريخ</label>
+                    <input
+                      type="date"
+                      className="ad-filter-input"
+                      value={auditFilters.to}
+                      onChange={(e) => setAuditFilters({ ...auditFilters, to: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="ad-filter-actions">
+                  <button
+                    type="button"
+                    className="ad-btn ad-btn-primary"
+                    onClick={loadAuditLogs}
+                  >
+                    <RotateCcw size={16} strokeWidth={2.5} />
+                    تحديث وتطبيق
+                  </button>
+                  <button
+                    type="button"
+                    className="ad-btn ad-btn-secondary"
+                    onClick={() => {
+                      setAuditSearch('');
+                      setAuditFilters({ action: 'all', userRole: 'all', platform: 'all', success: 'all', ipAddress: '', from: '', to: '' });
+                    }}
+                  >
+                    <XCircle size={16} strokeWidth={2.2} />
+                    مسح كل الفلاتر
+                  </button>
+                  <span className="ad-filter-count">
+                    النتائج: <strong style={{ fontFamily: 'Inter, sans-serif' }}>{formatNumber(filteredAuditLogs.length)}</strong>
+                    {auditLogs.length !== filteredAuditLogs.length && (
+                      <> من <strong style={{ fontFamily: 'Inter, sans-serif' }}>{formatNumber(auditLogs.length)}</strong></>
+                    )}
+                  </span>
                 </div>
               </div>
 
@@ -3939,69 +5117,458 @@ const AdminDashboard = () => {
                 <div className="ad-card">
                   <div className="ad-empty">
                     <div className="ad-empty-icon"><Scroll size={32} strokeWidth={1.8} /></div>
-                    <h3>لا توجد سجلات</h3>
-                    <p>لم يتم تسجيل أي عمليات بعد</p>
+                    <h3>لا توجد سجلات مطابقة</h3>
+                    <p>جرّب تعديل الفلاتر أو امسحها لعرض جميع السجلات</p>
                   </div>
                 </div>
               ) : (
-                <div className="ad-audit-list">
-                  {filteredAuditLogs.map((log, idx) => {
-                    const action = log.action || '';
-                    const isFailed = log.success === false;
-                    const iconType =
-                      isFailed ? 'error' :
-                      action.includes('REJECT') || action.includes('DEACTIVATE') || action.includes('DELETE') ? 'error' :
-                      action.includes('ACCEPT') || action.includes('APPROVE') || action.includes('REACTIVATE') ? 'success' :
-                      action.includes('ADD') || action.includes('CREATE') ? 'info' :
-                      action.includes('UPDATE') || action.includes('EDIT') ? 'warning' :
-                      'info';
-                    const ActIcon =
-                      iconType === 'error'   ? XCircle :
-                      iconType === 'success' ? CheckCircle2 :
-                      iconType === 'warning' ? Edit3 :
-                      Info;
-                    return (
-                      <div key={log._id || idx} className={`ad-audit-item ${isFailed ? 'failed' : ''}`}>
-                        <div className={`ad-audit-icon ${iconType}`}>
-                          <ActIcon size={18} strokeWidth={2.2} />
-                        </div>
-                        <div className="ad-audit-content">
-                          <h4 className="ad-audit-action">
-                            {log.description || log.details || log.action}
-                          </h4>
-                          <div className="ad-audit-meta">
-                            {log.userEmail && (
-                              <span className="ad-audit-meta-item">
-                                <User size={11} strokeWidth={2.2} />
-                                {log.userEmail}
+                <div className="ad-table-wrap">
+                  <table className="ad-table ad-audit-table">
+                    <thead>
+                      <tr>
+                        <th>التوقيت</th>
+                        <th>الحالة</th>
+                        <th>الإجراء</th>
+                        <th>المستخدم</th>
+                        <th>الدور</th>
+                        <th>المنصة</th>
+                        <th>عنوان IP</th>
+                        <th>المورد</th>
+                        <th>تفاصيل</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredAuditLogs.map((log, idx) => {
+                        const action = log.action || '';
+                        const isFailed = log.success === false;
+                        const iconType =
+                          isFailed ? 'error' :
+                          action.includes('REJECT') || action.includes('DEACTIVATE') || action.includes('DELETE') || action.includes('FAILED') || action.includes('LOCKED') ? 'error' :
+                          action.includes('ACCEPT') || action.includes('APPROVE') || action.includes('REACTIVATE') || action === 'LOGIN' ? 'success' :
+                          action.includes('ADD') || action.includes('CREATE') ? 'info' :
+                          action.includes('UPDATE') || action.includes('EDIT') || action === 'LOGOUT' ? 'warning' :
+                          'info';
+                        const ActIcon =
+                          iconType === 'error'   ? XCircle :
+                          iconType === 'success' ? CheckCircle2 :
+                          iconType === 'warning' ? Edit3 :
+                          Info;
+                        return (
+                          <tr key={log._id || idx} className={isFailed ? 'audit-failed' : ''}>
+                            {/* 1) Timestamp */}
+                            <td className="ad-audit-col-time">
+                              <div className="ad-cell-stack">
+                                <span style={{ fontSize: '0.78rem', fontFamily: 'Inter, sans-serif', fontWeight: 600 }}>
+                                  {formatArabicDateTime(log.timestamp || log.createdAt)}
+                                </span>
+                              </div>
+                            </td>
+
+                            {/* 2) Status icon */}
+                            <td className="ad-audit-col-status">
+                              <div className={`ad-audit-status-pill ${iconType}`} title={isFailed ? 'فشل' : 'نجاح'}>
+                                <ActIcon size={14} strokeWidth={2.4} />
+                              </div>
+                            </td>
+
+                            {/* 3) Action */}
+                            <td className="ad-audit-col-action">
+                              <div className="ad-cell-stack">
+                                <code className="ad-audit-action-code">{action || '—'}</code>
+                                {log.description && (
+                                  <small style={{ color: 'var(--tm-text-muted)', fontSize: '0.72rem' }}>
+                                    {log.description.length > 60 ? log.description.slice(0, 60) + '…' : log.description}
+                                  </small>
+                                )}
+                              </div>
+                            </td>
+
+                            {/* 4) User email */}
+                            <td className="ad-audit-col-user">
+                              <span className="ltr" style={{ fontSize: '0.78rem', fontFamily: 'Inter, sans-serif' }}>
+                                {log.userEmail || '—'}
                               </span>
-                            )}
-                            {log.userRole && (
-                              <span className="ad-audit-meta-item">
-                                <Shield size={11} strokeWidth={2.2} />
-                                {log.userRole}
-                              </span>
-                            )}
-                            {log.resourceType && (
-                              <span className="ad-audit-meta-item">
-                                <Database size={11} strokeWidth={2.2} />
-                                {log.resourceType}
-                              </span>
-                            )}
-                            {log.ipAddress && (
-                              <span className="ad-audit-meta-item">
-                                <Wifi size={11} strokeWidth={2.2} />
-                                {log.ipAddress}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <span className="ad-audit-time">
-                          {formatArabicDateTime(log.timestamp || log.createdAt)}
-                        </span>
+                            </td>
+
+                            {/* 5) Role */}
+                            <td className="ad-audit-col-role">
+                              {log.userRole ? (
+                                <span className="ad-pill muted" style={{ fontSize: '0.7rem' }}>
+                                  <Shield size={10} strokeWidth={2.5} />
+                                  {log.userRole}
+                                </span>
+                              ) : (
+                                <small style={{ color: 'var(--tm-text-muted)' }}>—</small>
+                              )}
+                            </td>
+
+                            {/* 6) Platform */}
+                            <td className="ad-audit-col-platform">
+                              {log.platform ? (
+                                <span className="ad-pill info" style={{ fontSize: '0.7rem' }}>
+                                  {log.platform === 'mobile' ? <Smartphone size={10} strokeWidth={2.5} /> : <Globe size={10} strokeWidth={2.5} />}
+                                  {log.platform}
+                                </span>
+                              ) : (
+                                <small style={{ color: 'var(--tm-text-muted)' }}>—</small>
+                              )}
+                            </td>
+
+                            {/* 7) IP */}
+                            <td className="ad-audit-col-ip">
+                              {log.ipAddress ? (
+                                <span className="ltr" style={{ fontSize: '0.75rem', fontFamily: 'Inter, sans-serif', fontWeight: 600 }}>
+                                  {log.ipAddress}
+                                </span>
+                              ) : (
+                                <small style={{ color: 'var(--tm-text-muted)' }}>—</small>
+                              )}
+                            </td>
+
+                            {/* 8) Resource */}
+                            <td className="ad-audit-col-resource">
+                              {log.resourceType ? (
+                                <div className="ad-cell-stack">
+                                  <span style={{ fontSize: '0.75rem' }}>{log.resourceType}</span>
+                                  {log.resourceId && (
+                                    <code style={{ fontFamily: 'Inter, sans-serif', fontSize: '0.7rem', color: 'var(--tm-text-muted)' }}>
+                                      ID:{String(log.resourceId).slice(-6)}
+                                    </code>
+                                  )}
+                                </div>
+                              ) : (
+                                <small style={{ color: 'var(--tm-text-muted)' }}>—</small>
+                              )}
+                            </td>
+
+                            {/* 9) Extras (status code, error message indicator) */}
+                            <td className="ad-audit-col-extras">
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                {log.statusCode !== undefined && log.statusCode !== null && (
+                                  <span className={`ad-pill ${log.statusCode >= 400 ? 'error' : 'success'}`} style={{ fontSize: '0.7rem' }}>
+                                    <Hash size={10} strokeWidth={2.5} />
+                                    <span style={{ fontFamily: 'Inter, sans-serif' }}>{log.statusCode}</span>
+                                  </span>
+                                )}
+                                {log.errorMessage && (
+                                  <span className="ad-pill error" style={{ fontSize: '0.7rem' }} title={log.errorMessage}>
+                                    <AlertTriangle size={10} strokeWidth={2.5} />
+                                    خطأ
+                                  </span>
+                                )}
+                                {(log.patientPersonId || log.patientChildId) && (
+                                  <span className="ad-pill info" style={{ fontSize: '0.7rem' }} title={`معرف مريض: ${log.patientPersonId || log.patientChildId}`}>
+                                    {log.patientChildId ? <Baby size={10} strokeWidth={2.5} /> : <User size={10} strokeWidth={2.5} />}
+                                    مريض
+                                  </span>
+                                )}
+                                {!log.statusCode && !log.errorMessage && !log.patientPersonId && !log.patientChildId && (
+                                  <small style={{ color: 'var(--tm-text-muted)' }}>—</small>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* ═══════════════════════════════════════════════════════
+              SECTION: ACCOUNT ACTIVITY  (NEW — مشكلة #5)
+              ═══════════════════════════════════════════════════════ */}
+          {activeSection === 'accountActivity' && (
+            <>
+              <div className="ad-page-header">
+                <div className="ad-page-title">
+                  <button
+                    type="button"
+                    className="ad-btn ad-btn-icon ad-mobile-toggle"
+                    onClick={() => setSidebarOpen(true)}
+                    aria-label="فتح القائمة"
+                  >
+                    <Menu size={20} strokeWidth={2.2} />
+                  </button>
+                  <div className="ad-page-title-icon">
+                    <Activity size={24} strokeWidth={2} />
+                  </div>
+                  <div>
+                    <h1>نشاط الحسابات</h1>
+                    <p>التحقيق في النشاط الكامل لأي حساب من خلال سجل النظام — للرد على شكاوى الوصول غير المصرّح به</p>
+                  </div>
+                </div>
+                {activityReport && (
+                  <div className="ad-page-actions">
+                    <button
+                      type="button"
+                      className="ad-btn ad-btn-secondary"
+                      onClick={clearActivityReport}
+                    >
+                      <RotateCcw size={16} strokeWidth={2.2} />
+                      تقرير جديد
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Search bar — email + days dropdown */}
+              <div className="ad-card ad-filter-card">
+                <div className="ad-filter-header">
+                  <Search size={16} strokeWidth={2.2} />
+                  <h4>البحث عن حساب للتحقيق</h4>
+                </div>
+
+                <div className="ad-filter-grid">
+                  <div className="ad-filter-field ad-filter-field-wide">
+                    <label className="ad-filter-label">البريد الإلكتروني للحساب</label>
+                    <input
+                      type="email"
+                      className="ad-filter-input"
+                      placeholder="example@patient360.gov.sy"
+                      value={activityEmail}
+                      dir="ltr"
+                      onChange={(e) => setActivityEmail(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') loadActivityReport(); }}
+                    />
+                  </div>
+
+                  <div className="ad-filter-field">
+                    <label className="ad-filter-label">الفترة الزمنية</label>
+                    <select
+                      className="ad-filter-select"
+                      value={activityDays}
+                      onChange={(e) => setActivityDays(Number(e.target.value))}
+                    >
+                      <option value={7}>آخر 7 أيام</option>
+                      <option value={30}>آخر 30 يوم</option>
+                      <option value={90}>آخر 90 يوم</option>
+                      <option value={180}>آخر 180 يوم</option>
+                      <option value={365}>آخر سنة</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="ad-filter-actions">
+                  <button
+                    type="button"
+                    className="ad-btn ad-btn-primary"
+                    onClick={loadActivityReport}
+                    disabled={activityLoading || !activityEmail.trim()}
+                  >
+                    {activityLoading ? <Loader2 size={16} className="ad-spin" /> : <Search size={16} strokeWidth={2.5} />}
+                    {activityLoading ? 'جارٍ التحضير...' : 'عرض التقرير'}
+                  </button>
+                </div>
+
+                {activityError && (
+                  <div className="ad-audit-error" style={{ marginTop: 12 }}>
+                    <AlertTriangle size={13} strokeWidth={2.5} />
+                    {activityError}
+                  </div>
+                )}
+              </div>
+
+              {/* Empty state — shown before first search */}
+              {!activityReport && !activityLoading && !activityError && (
+                <div className="ad-card">
+                  <div className="ad-empty">
+                    <div className="ad-empty-icon">
+                      <Activity size={32} strokeWidth={1.8} />
+                    </div>
+                    <h3>أدخل بريد إلكتروني لعرض النشاط</h3>
+                    <p>أدخل البريد الإلكتروني لأي حساب في النظام (طبيب، مريض، مسؤول، صيدلي، فني مختبر) ثم اضغط "عرض التقرير" لاستخراج كل النشاطات المُسجَّلة لهذا الحساب من سجل النظام.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Activity report (rendered only after fetch) */}
+              {activityReport && (
+                <div className="ad-activity-report">
+                  {/* Profile summary card */}
+                  <div className="ad-card">
+                    <div className="ad-detail-section-header">
+                      <div className="ad-detail-section-icon">
+                        <UserCheck size={16} strokeWidth={2.2} />
                       </div>
-                    );
-                  })}
+                      <h4 className="ad-detail-section-title">ملخص الحساب</h4>
+                    </div>
+                    <div className="ad-detail-row">
+                      <span className="ad-detail-label">البريد الإلكتروني</span>
+                      <span className="ad-detail-value ltr">{activityReport.profile?.email}</span>
+                    </div>
+                    <div className="ad-detail-row">
+                      <span className="ad-detail-label">الدور</span>
+                      <span className="ad-detail-value">{activityReport.profile?.role}</span>
+                    </div>
+                    <div className="ad-detail-row">
+                      <span className="ad-detail-label">الحالة</span>
+                      <span className="ad-detail-value">
+                        {activityReport.profile?.isActive ? (
+                          <span className="ad-pill success">
+                            <CheckCircle2 size={11} strokeWidth={2.5} />
+                            نشط
+                          </span>
+                        ) : (
+                          <span className="ad-pill error">
+                            <Ban size={11} strokeWidth={2.5} />
+                            معطّل
+                          </span>
+                        )}
+                        {activityReport.profile?.isLocked && (
+                          <span className="ad-pill error" style={{ marginInlineStart: 6 }}>
+                            <Lock size={11} strokeWidth={2.5} />
+                            مقفل
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                    <div className="ad-detail-row">
+                      <span className="ad-detail-label">آخر تسجيل دخول</span>
+                      <span className="ad-detail-value">
+                        {activityReport.profile?.lastLoginAt
+                          ? formatArabicDateTime(activityReport.profile.lastLoginAt)
+                          : '—'}
+                      </span>
+                    </div>
+                    <div className="ad-detail-row">
+                      <span className="ad-detail-label">محاولات دخول فاشلة</span>
+                      <span className="ad-detail-value">
+                        <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 700 }}>
+                          {formatNumber(activityReport.profile?.failedLoginAttempts || 0)}
+                        </span>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Statistics grid */}
+                  <div className="ad-kpi-grid">
+                    <div className="ad-kpi-card info">
+                      <div className="ad-kpi-icon"><Activity size={20} strokeWidth={2} /></div>
+                      <div>
+                        <div className="ad-kpi-value">{formatNumber(activityReport.stats?.totalEvents || 0)}</div>
+                        <div className="ad-kpi-label">إجمالي العمليات</div>
+                      </div>
+                    </div>
+                    <div className="ad-kpi-card success">
+                      <div className="ad-kpi-icon"><CheckCircle2 size={20} strokeWidth={2} /></div>
+                      <div>
+                        <div className="ad-kpi-value">{formatNumber(activityReport.stats?.successfulLogins || 0)}</div>
+                        <div className="ad-kpi-label">دخول ناجح</div>
+                      </div>
+                    </div>
+                    <div className="ad-kpi-card error">
+                      <div className="ad-kpi-icon"><XCircle size={20} strokeWidth={2} /></div>
+                      <div>
+                        <div className="ad-kpi-value">{formatNumber(activityReport.stats?.failedLogins || 0)}</div>
+                        <div className="ad-kpi-label">دخول فاشل</div>
+                      </div>
+                    </div>
+                    <div className="ad-kpi-card warning">
+                      <div className="ad-kpi-icon"><Wifi size={20} strokeWidth={2} /></div>
+                      <div>
+                        <div className="ad-kpi-value">{formatNumber(activityReport.stats?.uniqueIPs || 0)}</div>
+                        <div className="ad-kpi-label">عناوين IP فريدة</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Suspicious activity flag */}
+                  {activityReport.suspicious?.flagged && (
+                    <div className="ad-card ad-suspicious-card">
+                      <div className="ad-detail-section-header">
+                        <div className="ad-detail-section-icon" style={{ background: 'var(--tm-error, #C62828)', color: '#fff' }}>
+                          <AlertTriangle size={16} strokeWidth={2.5} />
+                        </div>
+                        <h4 className="ad-detail-section-title">⚠️ نشاط مشبوه</h4>
+                      </div>
+                      <ul style={{ padding: '12px 24px', listStyle: 'disc', paddingInlineStart: 24 }}>
+                        {(activityReport.suspicious.reasons || []).map((reason, i) => (
+                          <li key={i} style={{ margin: '4px 0' }}>{reason}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Security events timeline */}
+                  {Array.isArray(activityReport.securityEvents) && activityReport.securityEvents.length > 0 && (
+                    <div className="ad-card">
+                      <div className="ad-detail-section-header">
+                        <div className="ad-detail-section-icon">
+                          <Shield size={16} strokeWidth={2.2} />
+                        </div>
+                        <h4 className="ad-detail-section-title">الأحداث الأمنية</h4>
+                      </div>
+                      <div className="ad-audit-list" style={{ marginTop: 0 }}>
+                        {activityReport.securityEvents.map((event, i) => (
+                          <div key={i} className={`ad-audit-item ${event.success === false ? 'failed' : ''}`}>
+                            <div className={`ad-audit-icon ${event.success === false ? 'error' : 'warning'}`}>
+                              <Shield size={18} strokeWidth={2.2} />
+                            </div>
+                            <div className="ad-audit-content">
+                              <h4 className="ad-audit-action">{event.action}</h4>
+                              <div className="ad-audit-meta">
+                                {event.ipAddress && (
+                                  <span className="ad-audit-meta-item">
+                                    <Wifi size={11} strokeWidth={2.2} />
+                                    <span className="ltr">{event.ipAddress}</span>
+                                  </span>
+                                )}
+                                {event.details && (
+                                  <span className="ad-audit-meta-item">
+                                    <Info size={11} strokeWidth={2.2} />
+                                    {event.details}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <span className="ad-audit-time">{formatArabicDateTime(event.timestamp)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Recent activity feed */}
+                  {Array.isArray(activityReport.recentActivity) && activityReport.recentActivity.length > 0 && (
+                    <div className="ad-card">
+                      <div className="ad-detail-section-header">
+                        <div className="ad-detail-section-icon">
+                          <Activity size={16} strokeWidth={2.2} />
+                        </div>
+                        <h4 className="ad-detail-section-title">آخر النشاطات</h4>
+                      </div>
+                      <div className="ad-audit-list" style={{ marginTop: 0 }}>
+                        {activityReport.recentActivity.slice(0, 50).map((act, i) => (
+                          <div key={i} className={`ad-audit-item ${act.success === false ? 'failed' : ''}`}>
+                            <div className={`ad-audit-icon ${act.success === false ? 'error' : 'info'}`}>
+                              <Activity size={18} strokeWidth={2.2} />
+                            </div>
+                            <div className="ad-audit-content">
+                              <h4 className="ad-audit-action">{act.description || act.action}</h4>
+                              <div className="ad-audit-meta">
+                                {act.ipAddress && (
+                                  <span className="ad-audit-meta-item">
+                                    <Wifi size={11} strokeWidth={2.2} />
+                                    <span className="ltr">{act.ipAddress}</span>
+                                  </span>
+                                )}
+                                {act.platform && (
+                                  <span className="ad-audit-meta-item">
+                                    {act.platform === 'mobile' ? <Smartphone size={11} strokeWidth={2.2} /> : <Globe size={11} strokeWidth={2.2} />}
+                                    {act.platform}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <span className="ad-audit-time">{formatArabicDateTime(act.timestamp)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </>
@@ -4053,6 +5620,12 @@ const AdminDashboard = () => {
                     {selectedRequest.firstName} {selectedRequest.fatherName ? selectedRequest.fatherName + ' ' : ''}{selectedRequest.lastName}
                   </span>
                 </div>
+                {selectedRequest.motherName && (
+                  <div className="ad-detail-row">
+                    <span className="ad-detail-label">اسم الأم</span>
+                    <span className="ad-detail-value">{selectedRequest.motherName}</span>
+                  </div>
+                )}
                 <div className="ad-detail-row">
                   <span className="ad-detail-label">الرقم الوطني</span>
                   <span className="ad-detail-value ltr">{selectedRequest.nationalId}</span>
@@ -4079,39 +5652,113 @@ const AdminDashboard = () => {
                   <span className="ad-detail-label">المحافظة</span>
                   <span className="ad-detail-value">{getGovernorateName(selectedRequest.governorate)}</span>
                 </div>
+                {selectedRequest.city && (
+                  <div className="ad-detail-row">
+                    <span className="ad-detail-label">المدينة</span>
+                    <span className="ad-detail-value">{selectedRequest.city}</span>
+                  </div>
+                )}
+                {selectedRequest.address && (
+                  <div className="ad-detail-row">
+                    <span className="ad-detail-label">العنوان</span>
+                    <span className="ad-detail-value">{selectedRequest.address}</span>
+                  </div>
+                )}
               </div>
 
-              {/* Professional Info */}
+              {/* Professional Info — type-aware (doctor / pharmacist / lab_technician) */}
               <div className="ad-detail-section">
                 <div className="ad-detail-section-header">
                   <div className="ad-detail-section-icon">
                     <Briefcase size={16} strokeWidth={2.2} />
                   </div>
-                  <h4 className="ad-detail-section-title">المعلومات المهنية</h4>
+                  <h4 className="ad-detail-section-title">
+                    {(selectedRequest.requestType || 'doctor') === 'doctor' && 'المعلومات المهنية'}
+                    {selectedRequest.requestType === 'pharmacist' && 'المعلومات المهنية (صيدلي)'}
+                    {selectedRequest.requestType === 'lab_technician' && 'المعلومات المهنية (فني مختبر)'}
+                  </h4>
                 </div>
+
                 <div className="ad-detail-row">
-                  <span className="ad-detail-label">رقم الترخيص</span>
-                  <span className="ad-detail-value ltr">{selectedRequest.medicalLicenseNumber}</span>
-                </div>
-                <div className="ad-detail-row">
-                  <span className="ad-detail-label">التخصص</span>
+                  <span className="ad-detail-label">نوع الطلب</span>
                   <span className="ad-detail-value">
-                    {getSpecializationInfo(selectedRequest.specialization).nameAr}
-                    {getSpecializationInfo(selectedRequest.specialization).hasAI && (
-                      <span className="ad-pill info" style={{ marginInlineStart: 6 }}>AI</span>
-                    )}
+                    {(selectedRequest.requestType || 'doctor') === 'doctor' && 'طبيب'}
+                    {selectedRequest.requestType === 'pharmacist' && 'صيدلي'}
+                    {selectedRequest.requestType === 'lab_technician' && 'فني مختبر'}
                   </span>
                 </div>
-                {selectedRequest.subSpecialization && (
-                  <div className="ad-detail-row">
-                    <span className="ad-detail-label">التخصص الفرعي</span>
-                    <span className="ad-detail-value">{selectedRequest.subSpecialization}</span>
-                  </div>
-                )}
+
                 <div className="ad-detail-row">
-                  <span className="ad-detail-label">المستشفى</span>
-                  <span className="ad-detail-value">{selectedRequest.hospitalAffiliation || '-'}</span>
+                  <span className="ad-detail-label">رقم الترخيص</span>
+                  <span className="ad-detail-value ltr">
+                    {selectedRequest.medicalLicenseNumber
+                      || selectedRequest.pharmacyLicenseNumber
+                      || selectedRequest.licenseNumber
+                      || '-'}
+                  </span>
                 </div>
+
+                {/* Doctor-specific */}
+                {(selectedRequest.requestType || 'doctor') === 'doctor' && (
+                  <>
+                    <div className="ad-detail-row">
+                      <span className="ad-detail-label">التخصص</span>
+                      <span className="ad-detail-value">
+                        {getSpecializationInfo(selectedRequest.specialization).nameAr}
+                        {getSpecializationInfo(selectedRequest.specialization).hasAI && (
+                          <span className="ad-pill info" style={{ marginInlineStart: 6 }}>AI</span>
+                        )}
+                      </span>
+                    </div>
+                    {selectedRequest.subSpecialization && (
+                      <div className="ad-detail-row">
+                        <span className="ad-detail-label">التخصص الفرعي</span>
+                        <span className="ad-detail-value">{selectedRequest.subSpecialization}</span>
+                      </div>
+                    )}
+                    <div className="ad-detail-row">
+                      <span className="ad-detail-label">المستشفى / المنشأة</span>
+                      <span className="ad-detail-value">{selectedRequest.hospitalAffiliation || '-'}</span>
+                    </div>
+                  </>
+                )}
+
+                {/* Pharmacist / Lab tech specific */}
+                {(selectedRequest.requestType === 'pharmacist' || selectedRequest.requestType === 'lab_technician') && (
+                  <>
+                    {selectedRequest.degree && (
+                      <div className="ad-detail-row">
+                        <span className="ad-detail-label">الدرجة العلمية</span>
+                        <span className="ad-detail-value">{selectedRequest.degree}</span>
+                      </div>
+                    )}
+                    {selectedRequest.university && (
+                      <div className="ad-detail-row">
+                        <span className="ad-detail-label">الجامعة</span>
+                        <span className="ad-detail-value">{selectedRequest.university}</span>
+                      </div>
+                    )}
+                    {selectedRequest.graduationYear && (
+                      <div className="ad-detail-row">
+                        <span className="ad-detail-label">سنة التخرج</span>
+                        <span className="ad-detail-value ltr">{selectedRequest.graduationYear}</span>
+                      </div>
+                    )}
+                    {selectedRequest.pharmacyName && (
+                      <div className="ad-detail-row">
+                        <span className="ad-detail-label">اسم الصيدلية</span>
+                        <span className="ad-detail-value">{selectedRequest.pharmacyName}</span>
+                      </div>
+                    )}
+                    {selectedRequest.laboratoryName && (
+                      <div className="ad-detail-row">
+                        <span className="ad-detail-label">اسم المختبر</span>
+                        <span className="ad-detail-value">{selectedRequest.laboratoryName}</span>
+                      </div>
+                    )}
+                  </>
+                )}
+
                 <div className="ad-detail-row">
                   <span className="ad-detail-label">سنوات الخبرة</span>
                   <span className="ad-detail-value">{selectedRequest.yearsOfExperience || 0} سنة</span>
@@ -4128,6 +5775,28 @@ const AdminDashboard = () => {
                   <span className="ad-detail-label">تاريخ التقديم</span>
                   <span className="ad-detail-value">{formatArabicDateTime(selectedRequest.createdAt)}</span>
                 </div>
+
+                {/* Review history (only shown for processed requests) */}
+                {selectedRequest.reviewedAt && (
+                  <div className="ad-detail-row">
+                    <span className="ad-detail-label">تاريخ المراجعة</span>
+                    <span className="ad-detail-value">{formatArabicDateTime(selectedRequest.reviewedAt)}</span>
+                  </div>
+                )}
+                {selectedRequest.status === 'rejected' && selectedRequest.rejectionReason && (
+                  <div className="ad-detail-row">
+                    <span className="ad-detail-label">سبب الرفض</span>
+                    <span className="ad-detail-value" style={{ color: 'var(--tm-error, #C62828)' }}>
+                      {selectedRequest.rejectionReason}
+                    </span>
+                  </div>
+                )}
+                {selectedRequest.adminNotes && (
+                  <div className="ad-detail-row">
+                    <span className="ad-detail-label">ملاحظات المسؤول</span>
+                    <span className="ad-detail-value">{selectedRequest.adminNotes}</span>
+                  </div>
+                )}
               </div>
             </div>
 

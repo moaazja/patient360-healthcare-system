@@ -402,96 +402,123 @@ exports.removePushToken = async (req, res) => {
  * @returns {Promise<{ notification: object, pushResult: object }>}
  */
 async function createNotification(options) {
-  if (!options || (!options.recipientAccountId && !options.recipientPersonId && !options.recipientChildId)) {
-    console.warn('⚠️  createNotification: missing recipient — skipped');
+  if (!options) {
+    console.warn('⚠️  createNotification: missing options');
     return { notification: null, pushResult: { sent: 0, failed: 0, skipped: true } };
   }
 
+  // ── Backward-compat: accept BOTH naming conventions ─────────────────────
+  // Old style (used in labController.js):  recipientId, type, message
+  // New style (used elsewhere):  recipientAccountId, notificationType, body
   const {
     recipientAccountId,
+    recipientId,             // ← alias of recipientAccountId
     recipientPersonId,
     recipientChildId,
     recipientType,
+    type,                    // ← alias of notificationType
     notificationType,
+    message,                 // ← alias of body
+    body,
     title,
     titleArabic,
-    body,
     channels = ['push', 'in_app'],
     relatedType,
     relatedId,
     deepLinkRoute,
-    priority = 'normal',
+    priority,
     metadata = {}
   } = options;
 
-  // ── 1) Save notification record in DB ─────────────────────────────────────
-  let notification;
-  try {
-    notification = await Notification.create({
-      recipientAccountId,
-      recipientPersonId,
-      recipientChildId,
-      recipientType,
-      notificationType,
-      title,
-      titleArabic: titleArabic || title,
-      body,
-      channels,
-      status: 'pending',
-      relatedType,
-      relatedId,
-      priority,
-      metadata
-    });
-  } catch (error) {
-    console.error('❌ createNotification: DB save failed', error);
+  // ── Normalize aliases ────────────────────────────────────────────────────
+  const effectiveAccountId = recipientAccountId || recipientId;
+  const effectiveType      = notificationType   || type;
+  const effectiveBody      = body               || message;
+
+  if (!effectiveAccountId && !recipientPersonId && !recipientChildId) {
+    console.warn('⚠️  createNotification: missing recipient — skipped');
     return { notification: null, pushResult: { sent: 0, failed: 0, skipped: true } };
   }
 
-  // ── 2) Dispatch push if 'push' is in channels ─────────────────────────────
+  // ── 1) Resolve target accountId ─────────────────────────────────────────
+  let targetAccountId = effectiveAccountId;
+  try {
+    if (!targetAccountId && recipientPersonId) {
+      const acc = await Account.findOne({ personId: recipientPersonId }).select('_id').lean();
+      targetAccountId = acc?._id;
+    }
+    if (!targetAccountId && recipientChildId) {
+      const acc = await Account.findOne({ childId: recipientChildId }).select('_id').lean();
+      targetAccountId = acc?._id;
+    }
+  } catch (err) {
+    console.warn('⚠️  createNotification: account lookup failed', err.message);
+  }
+
+  if (!targetAccountId) {
+    console.warn('⚠️  createNotification: could not resolve accountId — skipped');
+    return { notification: null, pushResult: { sent: 0, failed: 0, skipped: true } };
+  }
+
+  // ── 2) Map priority to schema enum (low | medium | high | urgent) ───────
+  const PRIORITY_MAP = {
+    low:    'low',
+    normal: 'medium',
+    medium: 'medium',
+    high:   'high',
+    urgent: 'urgent'
+  };
+  const mappedPriority = PRIORITY_MAP[priority] || 'medium';
+
+  // ── 3) Save notification record in DB ───────────────────────────────────
+  let notification;
+  try {
+    notification = await Notification.create({
+      recipientId:    targetAccountId,
+      recipientType:  recipientType || 'patient',
+      type:           effectiveType,
+      title:          titleArabic || title || 'إشعار',
+      message:        effectiveBody || '',
+      status:         'pending',
+      priority:       mappedPriority,
+      channels,
+      relatedId:      relatedId || undefined,
+      relatedType:    relatedType || undefined
+    });
+  } catch (error) {
+    console.error('❌ createNotification: DB save failed', error.message);
+    return { notification: null, pushResult: { sent: 0, failed: 0, skipped: true } };
+  }
+
+  // ── 4) Dispatch push if 'push' is in channels ───────────────────────────
   let pushResult = { sent: 0, failed: 0, skipped: true };
 
   if (Array.isArray(channels) && channels.includes('push')) {
     try {
-      // Resolve target accountId — prefer direct, else lookup by personId
-      let targetAccountId = recipientAccountId;
-      if (!targetAccountId && recipientPersonId) {
-        const acc = await Account.findOne({ personId: recipientPersonId }).select('_id').lean();
-        targetAccountId = acc?._id;
-      }
-      if (!targetAccountId && recipientChildId) {
-        const acc = await Account.findOne({ childId: recipientChildId }).select('_id').lean();
-        targetAccountId = acc?._id;
-      }
+      const pushData = {
+        notificationId:   String(notification._id),
+        notificationType: effectiveType || '',
+        relatedType:      relatedType || '',
+        relatedId:        relatedId ? String(relatedId) : '',
+      };
+      if (deepLinkRoute) pushData.route = deepLinkRoute;
 
-      if (targetAccountId) {
-        const pushData = {
-          notificationId: String(notification._id),
-          notificationType: notificationType || '',
-          relatedType:      relatedType || '',
-          relatedId:        relatedId ? String(relatedId) : '',
-        };
-        if (deepLinkRoute) pushData.route = deepLinkRoute;
+      pushResult = await fcmService.sendToAccount(targetAccountId, {
+        title: titleArabic || title || 'إشعار',
+        body:  effectiveBody || '',
+        data:  pushData,
+      });
 
-        pushResult = await fcmService.sendToAccount(targetAccountId, {
-          title: titleArabic || title || 'إشعار',
-          body:  body || '',
-          data:  pushData,
-        });
-
-        // Reflect push delivery state back on the notification.
-        if (!pushResult.skipped) {
-          notification.status = pushResult.sent > 0 ? 'sent' : 'failed';
-          notification.sentAt = new Date();
-          if (pushResult.sent === 0 && pushResult.failed > 0) {
-            notification.errorMessage = 'فشل إرسال الإشعار الفوري';
-          }
-          await notification.save();
+      if (!pushResult.skipped) {
+        notification.status = pushResult.sent > 0 ? 'sent' : 'failed';
+        notification.sentAt = new Date();
+        if (pushResult.sent === 0 && pushResult.failed > 0) {
+          notification.errorMessage = 'فشل إرسال الإشعار الفوري';
         }
+        await notification.save();
       }
     } catch (error) {
       console.error('❌ createNotification: push dispatch failed', error.message);
-      // Notification is still saved — push failure is non-fatal.
     }
   }
 

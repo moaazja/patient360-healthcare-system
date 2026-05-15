@@ -30,6 +30,7 @@
 const {
   Visit, Person, Children, Patient, Doctor, AuditLog, LabTest
 } = require('../models');
+const { createNotification } = require('./notificationController');
 
 // ============================================================================
 // HELPER: Resolve patient identifier into { patientPersonId | patientChildId }
@@ -380,6 +381,61 @@ exports.createVisit = async (req, res) => {
       } catch (apptError) {
         console.error('⚠️  Follow-up appointment creation failed:', apptError.message);
       }
+    }
+
+    
+// ── 4.7 SEND PUSH NOTIFICATIONS TO PATIENT ───────────────────────────
+    // Fire-and-forget — notification failures must NEVER break the visit.
+    try {
+      // Get doctor's name for personalized message
+      let doctorName = 'الطبيب';
+      if (resolvedDoctorId) {
+        const doctorDoc = await Doctor.findById(resolvedDoctorId)
+          .populate('personId', 'firstName lastName')
+          .lean();
+        if (doctorDoc?.personId) {
+          doctorName = `د. ${doctorDoc.personId.firstName} ${doctorDoc.personId.lastName}`.trim();
+        }
+      }
+
+      // ── Notification 1: New prescription created ───────────────────────
+      if (prescription) {
+        createNotification({
+          recipientPersonId: patientRef.patientPersonId,
+          recipientChildId:  patientRef.patientChildId,
+          recipientType: 'patient',
+          notificationType: 'prescription_ready',
+          title:       'وصفة طبية جديدة',
+          titleArabic: 'وصفة طبية جديدة',
+          body: `${doctorName} أنشأ وصفة طبية جديدة لك — رقم الوصفة ${prescription.prescriptionNumber}`,
+          channels: ['push', 'in_app'],
+          relatedType: 'prescription',
+          relatedId:   prescription._id,
+          deepLinkRoute: '/medications',
+          priority: 'normal'
+        }).catch((err) => console.warn('⚠️  Prescription notification failed:', err.message));
+      }
+
+      // ── Notification 2: Follow-up appointment scheduled ─────────────────
+      if (followUpAppointment) {
+        const followUpDateAr = followUpAppointmentDate.toLocaleDateString('ar-EG');
+        createNotification({
+          recipientPersonId: patientRef.patientPersonId,
+          recipientChildId:  patientRef.patientChildId,
+          recipientType: 'patient',
+          notificationType: 'appointment_confirmed',
+          title:       'موعد متابعة',
+          titleArabic: 'موعد متابعة',
+          body: `${doctorName} حدد لك موعد متابعة بتاريخ ${followUpDateAr} الساعة ${FOLLOWUP_DEFAULT_TIME}`,
+          channels: ['push', 'in_app'],
+          relatedType: 'appointment',
+          relatedId:   followUpAppointment._id,
+          deepLinkRoute: '/appointments',
+          priority: 'normal'
+        }).catch((err) => console.warn('⚠️  Follow-up notification failed:', err.message));
+      }
+    } catch (notifError) {
+      console.warn('⚠️  Notification dispatch error (non-fatal):', notifError.message);
     }
 
     // ── 5. AUDIT LOG ─────────────────────────────────────────────────────

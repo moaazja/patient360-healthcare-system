@@ -114,16 +114,27 @@ function formatPatientName(test) {
 }
 
 /**
- * Fire-and-forget notification creation. Never throws upward — if the
- * notification fails, the main operation still succeeds.
+ * Notification creation — delegates to the central notificationController
+ * helper, which handles both DB save AND FCM push delivery.
+ *
+ * Backward-compatible signature: accepts the local `recipientId/type/message`
+ * field names AND the broader `recipientAccountId/notificationType/body` ones
+ * that the rest of the codebase uses. See notificationController.createNotification
+ * for the alias mapping.
  */
+const { createNotification: dispatchNotification } =
+  require('./notificationController');
+
 async function createNotification(payload) {
   try {
-    await Notification.create({
+    await dispatchNotification({
       ...payload,
-      status: 'pending',
-      channels: ['in_app'],
-      createdAt: new Date()
+      // Force the default channels — the lab tech's operations are important
+      // enough to warrant a push notification on every event.
+      channels: payload.channels || ['push', 'in_app'],
+      // Provide a default deep-link route for the lab tests so tapping
+      // the push opens the lab tests tab.
+      deepLinkRoute: payload.deepLinkRoute || '/lab'
     });
   } catch (err) {
     console.warn('⚠️  Notification creation failed (non-fatal):', err.message);
