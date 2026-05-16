@@ -7,6 +7,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../core/network/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_radii.dart';
+import '../../../shared/widgets/app_drawer.dart';
 import '../../../shared/widgets/empty_state.dart';
 import '../../../shared/widgets/loading_spinner.dart';
 import '../../../shared/widgets/page_header.dart';
@@ -17,9 +18,22 @@ import 'providers/notifications_provider.dart';
 
 enum _NotifTab { unread, all }
 
-/// Top-level /notifications surface. Two tabs (unread vs everything) and
-/// an optimistic mark-read on tap that also deep-links into the related
-/// section when [relatedTypeToRoute] knows about the type.
+/// Top-level /notifications surface.
+///
+/// Two tabs (unread vs everything), optimistic mark-read on tap that also
+/// deep-links into the related section when [relatedTypeToRoute] knows
+/// about the type, and the standard [AppDrawer] so the patient can
+/// navigate without going back through Home first.
+///
+/// A bottom "mark all as read" bar appears whenever there are unread
+/// notifications. We use a bottom bar instead of an AppBar action because
+/// [PageHeader] (Ali's custom widget) does not accept an `actions` slot —
+/// the bottom bar pattern is friendlier for one-handed use on phones anyway.
+///
+/// The priority stripe (urgent / high) is rendered as a colored band on
+/// the leading edge of each card via [Stack] rather than `Border.left` —
+/// Flutter rejects rounded borders that have a non-uniform color, and the
+/// stack approach keeps `borderRadius` working in both light and dark mode.
 class NotificationsScreen extends ConsumerStatefulWidget {
   const NotificationsScreen({super.key});
 
@@ -44,6 +58,15 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
     }
   }
 
+  /// "Mark all as read" sweep. The provider walks the unread list and fires
+  /// one mark-read per notification — this loops on the wire but the
+  /// optimistic update flips all of them in one tick so the UI feels
+  /// instant. The dashboardOverview invalidation inside the provider
+  /// keeps the bell badge on other screens in sync.
+  Future<void> _markAllRead() async {
+    await ref.read(notificationsProvider.notifier).markAllRead();
+  }
+
   @override
   Widget build(BuildContext context) {
     final AsyncValue<List<AppNotification>> async = ref.watch(
@@ -57,6 +80,7 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
         subtitle: 'التنبيهات والتذكيرات',
         unreadCount: unread,
       ),
+      drawer: const AppDrawer(),
       body: Column(
         children: <Widget>[
           Padding(
@@ -97,7 +121,66 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
               },
             ),
           ),
+          // ── Bottom action bar — only shown when unread > 0 ────────────
+          // Stays out of the way when there's nothing actionable, slides
+          // into view automatically when notifications arrive.
+          if (unread > 0)
+            _MarkAllReadBar(unreadCount: unread, onTap: _markAllRead),
         ],
+      ),
+    );
+  }
+}
+
+/// Bottom-attached "mark all as read" bar. Mirrors the visual weight of a
+/// primary action without using a FAB (which would cover list items).
+class _MarkAllReadBar extends StatelessWidget {
+  const _MarkAllReadBar({required this.unreadCount, required this.onTap});
+
+  final int unreadCount;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surface,
+      elevation: 8,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: InkWell(
+            borderRadius: AppRadii.radiusLg,
+            onTap: onTap,
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+              decoration: BoxDecoration(
+                color: AppColors.action,
+                borderRadius: AppRadii.radiusLg,
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  const Icon(
+                    LucideIcons.checkCheck,
+                    size: 18,
+                    color: Colors.white,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'تعليم الكل كمقروء ($unreadCount)',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -45,18 +45,36 @@ class ReminderDeepLink {
 /// Designed to be a no-op when notification permission is denied: every
 /// public method short-circuits with a logged warning rather than throwing.
 /// Patient flow continues even on permission-denied devices.
+///
+/// ── Android 14 (API 34) exact alarm handling ────────────────────────────
+/// As of Android 14, `SCHEDULE_EXACT_ALARM` is a runtime-protected
+/// permission. Declaring it in AndroidManifest no longer grants it — the
+/// user must explicitly enable "Alarms & reminders" for the app in
+/// Settings. We therefore:
+///   1. probe `canScheduleExactAlarms` at startup,
+///   2. fall back silently to `inexactAllowWhileIdle` when exact alarms
+///      are unavailable so the notification still fires (±10 min late),
+///   3. expose [requestExactAlarmPermission] so the UI can prompt the
+///      user to flip the toggle for precise timing.
 class NotificationScheduler {
   NotificationScheduler({FlutterLocalNotificationsPlugin? plugin})
-      : _plugin = plugin ?? FlutterLocalNotificationsPlugin();
+    : _plugin = plugin ?? FlutterLocalNotificationsPlugin();
 
   final FlutterLocalNotificationsPlugin _plugin;
   final StreamController<ReminderDeepLink> _deepLinkController =
       StreamController<ReminderDeepLink>.broadcast();
 
   bool _initialized = false;
+  bool _canScheduleExact = true; // optimistic; verified in initialize()
 
   /// Listen for foreground notification taps and re-emitted background taps.
   Stream<ReminderDeepLink> get deepLinkStream => _deepLinkController.stream;
+
+  /// Whether the OS will accept exact-time scheduling. False on Android 14+
+  /// devices where the user hasn't enabled "Alarms & reminders". When
+  /// false, scheduled notifications still fire — just up to 10 minutes
+  /// late due to Android's doze-mode bucketing.
+  bool get canScheduleExact => _canScheduleExact;
 
   // ═══════════════════════════════════════════════════════════════════════
   // Lifecycle
@@ -80,8 +98,7 @@ class NotificationScheduler {
 
     const AndroidInitializationSettings androidInit =
         AndroidInitializationSettings('@mipmap/ic_launcher');
-    const DarwinInitializationSettings iosInit =
-        DarwinInitializationSettings(
+    const DarwinInitializationSettings iosInit = DarwinInitializationSettings(
       requestAlertPermission: false,
       requestBadgePermission: false,
       requestSoundPermission: false,
@@ -98,9 +115,10 @@ class NotificationScheduler {
 
     // Create the Android channel up-front so importance is stable across
     // updates (creating later promotes to a different channel id).
-    final AndroidFlutterLocalNotificationsPlugin? android =
-        _plugin.resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>();
+    final AndroidFlutterLocalNotificationsPlugin? android = _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
     if (android != null) {
       await android.createNotificationChannel(
         const AndroidNotificationChannel(
@@ -110,6 +128,20 @@ class NotificationScheduler {
           importance: Importance.high,
         ),
       );
+      // Probe Android 12+ exact-alarm permission. Returns false on
+      // Android 14 unless the user has flipped the toggle in
+      // Settings → Apps → Patient 360 → Alarms & reminders.
+      try {
+        final bool? canExact = await android.canScheduleExactNotifications();
+        _canScheduleExact = canExact ?? true;
+        appLogger.i(
+          '🔔 exact alarm permission: '
+          '${_canScheduleExact ? "granted" : "denied — using inexact fallback"}',
+        );
+      } catch (e) {
+        // Older plugin versions / older OS — assume exact works.
+        _canScheduleExact = true;
+      }
     }
   }
 
@@ -154,6 +186,36 @@ class NotificationScheduler {
     return _runOsPrompt();
   }
 
+  /// Android 14+ only. Asks the OS to open the "Alarms & reminders"
+  /// settings page so the user can enable precise scheduling. Returns
+  /// `true` once the user has granted the permission.
+  ///
+  /// Without this permission, reminders still fire but may be late by up
+  /// to 10 minutes due to Android's doze-mode bucketing.
+  Future<bool> requestExactAlarmPermission() async {
+    if (!Platform.isAndroid) return true;
+    final AndroidFlutterLocalNotificationsPlugin? android = _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
+    if (android == null) return false;
+    try {
+      final bool? requested = await android.requestExactAlarmsPermission();
+      if (requested ?? false) {
+        _canScheduleExact = true;
+        appLogger.i('🔔 exact alarm permission granted by user');
+        return true;
+      }
+    } catch (e, st) {
+      appLogger.w(
+        'requestExactAlarmsPermission failed',
+        error: e,
+        stackTrace: st,
+      );
+    }
+    return false;
+  }
+
   Future<bool> _isAlreadyGranted() async {
     if (Platform.isAndroid) {
       final PermissionStatus s = await Permission.notification.status;
@@ -162,9 +224,10 @@ class NotificationScheduler {
     if (Platform.isIOS) {
       final IOSFlutterLocalNotificationsPlugin? ios = _plugin
           .resolvePlatformSpecificImplementation<
-              IOSFlutterLocalNotificationsPlugin>();
-      final NotificationsEnabledOptions? options =
-          await ios?.checkPermissions();
+            IOSFlutterLocalNotificationsPlugin
+          >();
+      final NotificationsEnabledOptions? options = await ios
+          ?.checkPermissions();
       return options?.isAlertEnabled ?? false;
     }
     return true;
@@ -179,7 +242,8 @@ class NotificationScheduler {
       if (Platform.isIOS) {
         final IOSFlutterLocalNotificationsPlugin? ios = _plugin
             .resolvePlatformSpecificImplementation<
-                IOSFlutterLocalNotificationsPlugin>();
+              IOSFlutterLocalNotificationsPlugin
+            >();
         final bool? granted = await ios?.requestPermissions(
           alert: true,
           badge: true,
@@ -188,8 +252,7 @@ class NotificationScheduler {
         return granted ?? false;
       }
     } catch (e, st) {
-      appLogger.w('OS permission prompt failed',
-          error: e, stackTrace: st);
+      appLogger.w('OS permission prompt failed', error: e, stackTrace: st);
     }
     return false;
   }
@@ -206,15 +269,16 @@ class NotificationScheduler {
   ///
   /// Safe to call without permission — every plugin call either no-ops or
   /// is wrapped in try/catch with a logged warning. Returns the count of
-  /// notifications that *were* scheduled (zero on permission denied).
+  /// notifications that *actually got scheduled* (zero on permission
+  /// denied). The counter increments only after `zonedSchedule` succeeds,
+  /// so the log reflects real OS queue state, not optimistic attempts.
   Future<int> scheduleSlidingWindow(
     List<ReminderSchedule> schedules, {
     int windowDays = 7,
     DateTime? now,
   }) async {
     if (!_initialized) {
-      appLogger.w(
-          'scheduleSlidingWindow before initialize() — silent no-op');
+      appLogger.w('scheduleSlidingWindow before initialize() — silent no-op');
       return 0;
     }
 
@@ -224,8 +288,21 @@ class NotificationScheduler {
       appLogger.w('cancelAll failed', error: e, stackTrace: st);
     }
 
+    // Pick the scheduling mode once per sweep. Exact = wakes the device at
+    // the precise minute; inexact = OS may batch with other alarms,
+    // typically firing within 10 min of the target. Doze + idle modes
+    // make inexact way less reliable than the docs suggest, so we log
+    // the choice loudly.
+    final AndroidScheduleMode mode = _canScheduleExact
+        ? AndroidScheduleMode.exactAllowWhileIdle
+        : AndroidScheduleMode.inexactAllowWhileIdle;
+    appLogger.i(
+      '🔔 schedule mode: ${_canScheduleExact ? "EXACT" : "INEXACT (may fire late)"}',
+    );
+
     final DateTime base = now ?? DateTime.now();
-    int scheduled = 0;
+    int succeeded = 0;
+    int failed = 0;
 
     for (final ReminderSchedule s in schedules) {
       if (!s.isEnabled) continue;
@@ -247,17 +324,18 @@ class NotificationScheduler {
             time.minute,
           );
           if (when.isBefore(base)) continue;
-          if (scheduled >= NotificationConstants.iosPendingSoftCap) {
+          if (succeeded >= NotificationConstants.iosPendingSoftCap) {
             appLogger.w(
-                'reached iOS pending cap (${NotificationConstants.iosPendingSoftCap}); truncating');
-            await _writeLastScheduledAtSafe(base);
-            return scheduled;
+              '🔔 reached iOS pending cap (${NotificationConstants.iosPendingSoftCap}); truncating',
+            );
+            return succeeded;
           }
 
-          final int id =
-              deterministicNotificationId(s.id, when.toIso8601String());
-          final tz.TZDateTime zoned =
-              tz.TZDateTime.from(when, tz.local);
+          final int id = deterministicNotificationId(
+            s.id,
+            when.toIso8601String(),
+          );
+          final tz.TZDateTime zoned = tz.TZDateTime.from(when, tz.local);
           final String payload = jsonEncode(<String, Object>{
             'type': 'med_reminder',
             'scheduleId': s.id,
@@ -276,29 +354,75 @@ class NotificationScheduler {
                 android: AndroidNotificationDetails(
                   NotificationConstants.channelId,
                   NotificationConstants.channelName,
-                  channelDescription:
-                      NotificationConstants.channelDescription,
+                  channelDescription: NotificationConstants.channelDescription,
                   importance: Importance.high,
                   priority: Priority.high,
                 ),
                 iOS: DarwinNotificationDetails(),
               ),
-              androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+              androidScheduleMode: mode,
               uiLocalNotificationDateInterpretation:
                   UILocalNotificationDateInterpretation.absoluteTime,
               payload: payload,
             );
-            scheduled++;
-          } catch (e, st) {
-            appLogger.w('zonedSchedule failed for id=$id',
-                error: e, stackTrace: st);
+            succeeded++;
+          } on Exception catch (e, st) {
+            // Most common cause on Android 14: SecurityException because
+            // SCHEDULE_EXACT_ALARM was revoked between probe and schedule
+            // (e.g. user toggled Alarms-and-reminders off mid-session).
+            // Retry once in inexact mode so the reminder isn't lost.
+            failed++;
+            appLogger.w(
+              '🔔 zonedSchedule failed for id=$id (mode=$mode)',
+              error: e,
+              stackTrace: st,
+            );
+            if (mode == AndroidScheduleMode.exactAllowWhileIdle) {
+              try {
+                await _plugin.zonedSchedule(
+                  id,
+                  'حان وقت دواء ${s.medicationName}',
+                  '${s.dosage} — اضغط لتسجيل الجرعة',
+                  zoned,
+                  const NotificationDetails(
+                    android: AndroidNotificationDetails(
+                      NotificationConstants.channelId,
+                      NotificationConstants.channelName,
+                      channelDescription:
+                          NotificationConstants.channelDescription,
+                      importance: Importance.high,
+                      priority: Priority.high,
+                    ),
+                    iOS: DarwinNotificationDetails(),
+                  ),
+                  androidScheduleMode:
+                      AndroidScheduleMode.inexactAllowWhileIdle,
+                  uiLocalNotificationDateInterpretation:
+                      UILocalNotificationDateInterpretation.absoluteTime,
+                  payload: payload,
+                );
+                succeeded++;
+                _canScheduleExact = false; // remember for next sweep
+                appLogger.i(
+                  '🔔 fell back to inexact for id=$id — exact alarm denied',
+                );
+              } catch (e2, st2) {
+                appLogger.w(
+                  '🔔 inexact fallback also failed for id=$id',
+                  error: e2,
+                  stackTrace: st2,
+                );
+              }
+            }
           }
         }
       }
     }
 
-    await _writeLastScheduledAtSafe(base);
-    return scheduled;
+    appLogger.i(
+      '🔔 schedule sweep done — $succeeded succeeded, $failed failed',
+    );
+    return succeeded;
   }
 
   /// Cancels every pending notification associated with [scheduleId].
@@ -307,8 +431,8 @@ class NotificationScheduler {
   Future<void> cancelBySchedule(String scheduleId) async {
     if (!_initialized) return;
     try {
-      final List<PendingNotificationRequest> pending =
-          await _plugin.pendingNotificationRequests();
+      final List<PendingNotificationRequest> pending = await _plugin
+          .pendingNotificationRequests();
       for (final PendingNotificationRequest p in pending) {
         if (p.payload == null) continue;
         try {
@@ -318,7 +442,9 @@ class NotificationScheduler {
           if (decoded['scheduleId'] == scheduleId) {
             await _plugin.cancel(p.id);
           }
-        } catch (_) {/* ignore non-JSON payloads */}
+        } catch (_) {
+          /* ignore non-JSON payloads */
+        }
       }
     } catch (e, st) {
       appLogger.w('cancelBySchedule failed', error: e, stackTrace: st);
@@ -328,8 +454,8 @@ class NotificationScheduler {
   Future<void> cancelByPrescription(String prescriptionId) async {
     if (!_initialized) return;
     try {
-      final List<PendingNotificationRequest> pending =
-          await _plugin.pendingNotificationRequests();
+      final List<PendingNotificationRequest> pending = await _plugin
+          .pendingNotificationRequests();
       for (final PendingNotificationRequest p in pending) {
         if (p.payload == null) continue;
         try {
@@ -339,11 +465,12 @@ class NotificationScheduler {
           if (decoded['prescriptionId'] == prescriptionId) {
             await _plugin.cancel(p.id);
           }
-        } catch (_) {/* ignore non-JSON payloads */}
+        } catch (_) {
+          /* ignore non-JSON payloads */
+        }
       }
     } catch (e, st) {
-      appLogger.w('cancelByPrescription failed',
-          error: e, stackTrace: st);
+      appLogger.w('cancelByPrescription failed', error: e, stackTrace: st);
     }
   }
 
@@ -375,14 +502,7 @@ class NotificationScheduler {
     return h;
   }
 
-  static DateTime _dateOnly(DateTime d) =>
-      DateTime(d.year, d.month, d.day);
-
-  Future<void> _writeLastScheduledAtSafe(DateTime when) async {
-    // store wiring is in [ReminderLocalStore]; we deliberately don't depend
-    // on the store here to keep the scheduler a thin OS adapter.
-    return;
-  }
+  static DateTime _dateOnly(DateTime d) => DateTime(d.year, d.month, d.day);
 
   void _onNotificationResponse(NotificationResponse response) {
     final String? payload = response.payload;
@@ -394,15 +514,12 @@ class NotificationScheduler {
       _deepLinkController.add(
         ReminderDeepLink(
           scheduleId: decoded['scheduleId'].toString(),
-          medicationIndex:
-              (decoded['medicationIndex'] as num).toInt(),
-          scheduledAt:
-              DateTime.parse(decoded['scheduledAt'] as String),
+          medicationIndex: (decoded['medicationIndex'] as num).toInt(),
+          scheduledAt: DateTime.parse(decoded['scheduledAt'] as String),
         ),
       );
     } catch (e, st) {
-      appLogger.w('bad notification payload',
-          error: e, stackTrace: st);
+      appLogger.w('bad notification payload', error: e, stackTrace: st);
     }
   }
 }
@@ -410,10 +527,8 @@ class NotificationScheduler {
 /// App-wide singleton. Disposed automatically when the root ProviderScope
 /// is torn down.
 final Provider<NotificationScheduler> notificationSchedulerProvider =
-    Provider<NotificationScheduler>(
-  (Ref ref) {
-    final NotificationScheduler s = NotificationScheduler();
-    ref.onDispose(s.dispose);
-    return s;
-  },
-);
+    Provider<NotificationScheduler>((Ref ref) {
+      final NotificationScheduler s = NotificationScheduler();
+      ref.onDispose(s.dispose);
+      return s;
+    });

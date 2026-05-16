@@ -3,7 +3,8 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../../core/theme/theme_controller.dart' show sharedPreferencesProvider;
+import '../../../core/theme/theme_controller.dart'
+    show sharedPreferencesProvider;
 import '../../../core/utils/logger.dart';
 import '../domain/reminders/adherence_record.dart';
 import '../domain/reminders/reminder_schedule.dart';
@@ -62,9 +63,7 @@ class ReminderLocalStore {
 
   Future<void> removeByPrescriptionId(String prescriptionId) async {
     final List<ReminderSchedule> all = await loadAll();
-    all.removeWhere(
-      (ReminderSchedule s) => s.prescriptionId == prescriptionId,
-    );
+    all.removeWhere((ReminderSchedule s) => s.prescriptionId == prescriptionId);
     await _writeSchedules(all);
   }
 
@@ -157,8 +156,9 @@ class ReminderLocalStore {
   }
 
   Future<void> _writeAdherence(List<AdherenceRecord> all) async {
-    final String encoded =
-        jsonEncode(all.map((AdherenceRecord r) => r.toJson()).toList());
+    final String encoded = jsonEncode(
+      all.map((AdherenceRecord r) => r.toJson()).toList(),
+    );
     await _prefs.setString(ReminderStorageKeys.adherence, encoded);
   }
 
@@ -183,5 +183,5 @@ class ReminderLocalStore {
 
 final Provider<ReminderLocalStore> reminderLocalStoreProvider =
     Provider<ReminderLocalStore>(
-  (Ref ref) => ReminderLocalStore(ref.watch(sharedPreferencesProvider)),
-);
+      (Ref ref) => ReminderLocalStore(ref.watch(sharedPreferencesProvider)),
+    );

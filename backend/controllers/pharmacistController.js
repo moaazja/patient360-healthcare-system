@@ -28,6 +28,7 @@ const {
   Medication, AuditLog, Person, Children, Patient, Prescription,
   Notification
 } = require('../models');
+const { createNotification } = require('./notificationController');
 
 // ============================================================================
 // HELPER: Resolve pharmacist record from logged-in account
