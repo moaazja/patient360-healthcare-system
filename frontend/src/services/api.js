@@ -289,6 +289,46 @@ export const authAPI = {
     }
   },
 
+  /**
+   * Submit a dentist registration request with file uploads.
+   *
+   * Persists into doctor_requests with requestType='dentist'.
+   * On admin approval, the backend creates:
+   *   (1) persons document
+   *   (2) accounts document with role='dentist'
+   *   (3) dentists document (in the separate `dentists` collection) with
+   *       dentalLicenseNumber + specialization (one of 9 dental enums)
+   *
+   * Expected FormData fields:
+   *   Personal:     firstName, fatherName, lastName, motherName, nationalId,
+   *                 dateOfBirth, gender, phoneNumber, email, password,
+   *                 address, governorate, city
+   *   Professional: dentalLicenseNumber, specialization (General Dentistry |
+   *                 Orthodontics | Endodontics | Periodontics | Prosthodontics |
+   *                 Oral Surgery | Pediatric Dentistry | Cosmetic Dentistry |
+   *                 Implantology), yearsOfExperience, consultationFee,
+   *                 hospitalAffiliation (optional), availableDays (JSON array)
+   *   Optional:     additionalNotes, currency (default 'SYP')
+   *   Files:        licenseDocument, degreeDocument, profilePhoto (optional)
+   *
+   * @param {FormData} formData
+   * @returns {Promise<{success, requestId, message}>}
+   */
+  registerDentist: async (formData) => {
+    try {
+      const response = await api.post('/auth/register-dentist', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        },
+        timeout: 30000 // 30 seconds — file uploads need more time
+      });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تقديم طلب تسجيل طبيب الأسنان';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
   // ==========================================
   // ✅ FACILITY AUTOCOMPLETE FUNCTIONS  (v2 — added in SignUp v2)
   // Powers the FacilityAutocomplete component in the pharmacist and
@@ -1489,6 +1529,120 @@ export const doctorAPI = {
       return response.data;
     } catch (error) {
       const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحليل صورة الأشعة';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  }
+  ,
+
+  // ──────────────────────────────────────────
+  // 8. AI TOOLS — KNEE OA (Orthopedist)
+  // ──────────────────────────────────────────
+  // POST /api/knee-xray/analyze (multipart, doctor only)
+  // Field name: knee_image
+  // Optional body: patientIdentifier, visitId, doctorNotes
+  // Returns: { predicted_class, description, confidence, all_probabilities,
+  //            predictedClassArabic, descriptionArabic, imageUrl, analysisId,
+  //            bodyPart: 'knee' }
+  analyzeXRayKnee: async (formData) => {
+    try {
+      const response = await api.post('/knee-xray/analyze', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        },
+        timeout: 60000
+      });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحليل صورة الركبة';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  // GET /api/knee-xray/history/me — calling doctor's last analyses
+  getMyKneeXrayHistory: async (limit = 20) => {
+    try {
+      const response = await api.get('/knee-xray/history/me', { params: { limit } });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل التاريخ';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  // DENTAL CARIES AI (dentist tab on DoctorDashboard)
+  // ────────────────────────────────────────────────────────────────
+  // EfficientNetV2-B0 model on FastAPI :8004, proxied by Node backend
+  // at /api/dental-caries/*. Available only to users with the 'dentist'
+  // role.
+  //
+  // The FastAPI service returns:
+  //   {
+  //     success: true,
+  //     predicted_class: 'Caries' | 'Not_Caries',
+  //     confidence: <0..1>,
+  //     all_probabilities: { Caries, Not_Caries },
+  //     description: '...',
+  //     descriptionArabic: '...',
+  //     recommendation: '...',
+  //     imageUrl, analysisId
+  //   }
+  // ════════════════════════════════════════════════════════════════
+
+  /**
+   * POST /api/dental-caries/analyze (multipart, dentist only)
+   *
+   * Sends a dental X-ray image to the AI model. Field name MUST be
+   * `tooth_image` to match the multer config on the backend route.
+   *
+   * @param {FormData} formData - must contain field "tooth_image"
+   * @returns {Promise<{
+   *   success: boolean,
+   *   predicted_class: 'Caries' | 'Not_Caries',
+   *   confidence: number,
+   *   all_probabilities: { Caries: number, Not_Caries: number },
+   *   description: string,
+   *   descriptionArabic: string,
+   *   recommendation: string,
+   *   imageUrl?: string,
+   *   analysisId?: string
+   * }>}
+   */
+  analyzeDentalCaries: async (formData) => {
+    try {
+      const response = await api.post('/dental-caries/analyze', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        },
+        timeout: 60000
+      });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message
+        || error.message
+        || 'حدث خطأ في تحليل صورة الأشعة السنية';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /**
+   * GET /api/dental-caries/history/me
+   *
+   * Returns the calling dentist's recent caries analyses (most recent first).
+   *
+   * @param {number} [limit=20]
+   * @returns {Promise<{ success: boolean, count: number, history: Array }>}
+   */
+  getMyDentalCariesHistory: async (limit = 20) => {
+    try {
+      const response = await api.get('/dental-caries/history/me', {
+        params: { limit }
+      });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message
+        || error.message
+        || 'حدث خطأ في تحميل سجل التحاليل';
       throw { message: errorMessage, ...error.response?.data };
     }
   }
@@ -3197,6 +3351,92 @@ export const visitAPI = {
   getById: async (visitId) => {
     try {
       const response = await api.get(`/visits/${visitId}`);
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error;
+    }
+  }
+};
+
+// ════════════════════════════════════════════════════════════════════════
+// DRUG RISK CHECK API
+// ────────────────────────────────────────────────────────────────────────
+// Talks to the backend /api/drug-risk/* endpoints (Phase 1).
+// The backend itself reads patient.allergies / .currentMedications from
+// MongoDB and calls Kinan's FastAPI rule-based pipeline on port 8001.
+//
+// Patient-facing endpoints:
+//   POST  /api/drug-risk/check               ← patient self-inquiry
+//   GET   /api/drug-risk/my-history          ← patient's history
+//
+// Doctor-facing endpoints (used in Phase 3):
+//   POST  /api/drug-risk/check-for-patient   ← doctor screens a drug
+//   POST  /api/drug-risk/:id/acknowledge     ← doctor confirms override
+//
+// Ops:
+//   GET   /api/drug-risk/health              ← FastAPI reachability
+// ════════════════════════════════════════════════════════════════════════
+export const drugRiskAPI = {
+  // ── Patient: self-inquiry about a drug ──────────────────────────────
+  // POST /api/drug-risk/check
+  // Body: { text: 'بدي ibuprofen' }
+  // Returns: { success, check: { _id, result, isOutOfScope, isHighRisk, createdAt } }
+  check: async (text) => {
+    try {
+      const response = await api.post('/drug-risk/check', { text });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error;
+    }
+  },
+
+  // ── Patient: paginated history of past inquiries ─────────────────────
+  // GET /api/drug-risk/my-history?page=1&limit=20
+  myHistory: async ({ page = 1, limit = 20 } = {}) => {
+    try {
+      const response = await api.get('/drug-risk/my-history', {
+        params: { page, limit }
+      });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error;
+    }
+  },
+
+  // ── Doctor: screen a drug against a specific patient ─────────────────
+  // POST /api/drug-risk/check-for-patient
+  // Body: { identifier: '<nationalId or CRN>', text: 'ibuprofen' }
+  checkForPatient: async ({ identifier, text }) => {
+    try {
+      const response = await api.post('/drug-risk/check-for-patient', {
+        identifier,
+        text
+      });
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error;
+    }
+  },
+
+  // ── Doctor: acknowledge a conflict (override) ────────────────────────
+  // POST /api/drug-risk/:id/acknowledge
+  // Body: { justification: '...' }   (optional)
+  acknowledgeOverride: async (checkId, justification = '') => {
+    try {
+      const response = await api.post(
+        `/drug-risk/${checkId}/acknowledge`,
+        { justification }
+      );
+      return response.data;
+    } catch (error) {
+      throw error.response?.data || error;
+    }
+  },
+
+  // ── Ops: probe FastAPI reachability ──────────────────────────────────
+  health: async () => {
+    try {
+      const response = await api.get('/drug-risk/health');
       return response.data;
     } catch (error) {
       throw error.response?.data || error;

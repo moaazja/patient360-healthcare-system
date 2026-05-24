@@ -123,7 +123,9 @@ const DASHBOARD_ROUTES = Object.freeze({
   admin: '/admin-dashboard',
   pharmacist: '/pharmacist-dashboard',
   lab_technician: '/lab-dashboard',
-  dentist: '/dentist-dashboard',
+  // Dentists share the doctor dashboard — DoctorDashboard.jsx is role-aware
+  // and renders the dental-caries AI tab instead of ECG when role is 'dentist'.
+  dentist: '/doctor-dashboard',
 });
 
 const ROLE_LABELS_AR = Object.freeze({

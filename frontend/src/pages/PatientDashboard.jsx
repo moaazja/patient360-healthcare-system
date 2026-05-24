@@ -48,8 +48,10 @@ import {
   Image as ImageIcon, Mic,
 } from 'lucide-react';
 
-import { patientAPI, authAPI } from '../services/api';
+import { patientAPI, authAPI, drugRiskAPI } from '../services/api';
 import { useTheme } from '../context/ThemeProvider';
+
+import '../styles/DrugRiskCheck.css';
 
 import InputModeToggle from '../components/ai/InputModeToggle';
 import InputText from '../components/ai/InputText';
@@ -107,6 +109,12 @@ const SECTION_META = {
     subtitle: 'استشارة الأخصائي والإسعاف الأولي',
     icon: Sparkles,
   },
+  'drug-risk': {
+    key: 'drug-risk',
+    title: 'فحص دواء',
+    subtitle: 'تحقق من أمان الدواء قبل استخدامه',
+    icon: ShieldCheck,
+  },
   reviews: {
     key: 'reviews',
     title: 'التقييمات',
@@ -143,7 +151,7 @@ const SIDEBAR_GROUPS = [
   },
   {
     label: 'المساعد الذكي',
-    items: [SECTION_META['ai-assistant']],
+    items: [SECTION_META['ai-assistant'], SECTION_META['drug-risk']],
   },
   {
     label: 'حسابي',
@@ -1141,6 +1149,13 @@ export default function PatientDashboard() {
   const [triageLoading, setTriageLoading] = useState(false);
   const [triageError, setTriageError] = useState(null);
 
+  // ── Drug Risk Check state ───────────────────────────────────────────
+  const [drugRiskInput, setDrugRiskInput] = useState('');
+  const [drugRiskResult, setDrugRiskResult] = useState(null);
+  const [drugRiskLoading, setDrugRiskLoading] = useState(false);
+  const [drugRiskHistory, setDrugRiskHistory] = useState([]);
+  const [drugRiskHistoryLoading, setDrugRiskHistoryLoading] = useState(false);
+
   // ── Modal state ─────────────────────────────────────────────────────
   const [modal, setModal] = useState({
     isOpen: false,
@@ -1360,6 +1375,23 @@ export default function PatientDashboard() {
     }
   }, [emergencyReportsLoaded, openAlert]);
 
+  const loadDrugRiskHistory = useCallback(async (force = false) => {
+    // Always reload on force; otherwise skip if we already have data.
+    if (drugRiskHistory.length > 0 && !force) return;
+    setDrugRiskHistoryLoading(true);
+    try {
+      const res = await drugRiskAPI.myHistory({ page: 1, limit: 20 });
+      if (res?.success) {
+        setDrugRiskHistory(Array.isArray(res.checks) ? res.checks : []);
+      }
+    } catch (err) {
+      // Quiet failure — history is a secondary affordance, don't alert.
+      console.error('[drugRisk] history load failed:', err);
+    } finally {
+      setDrugRiskHistoryLoading(false);
+    }
+  }, [drugRiskHistory.length]);
+
   useEffect(() => {
     switch (activeSection) {
       case 'appointments':   loadAppointments(); break;
@@ -1369,6 +1401,7 @@ export default function PatientDashboard() {
       case 'notifications':  loadNotifications(); break;
       case 'reviews':        loadReviews(); break;
       case 'ai-assistant':   loadEmergencyReports(); break;
+      case 'drug-risk':      loadDrugRiskHistory(); break;
       default: break;
     }
   }, [
@@ -1380,6 +1413,7 @@ export default function PatientDashboard() {
     loadNotifications,
     loadReviews,
     loadEmergencyReports,
+    loadDrugRiskHistory,
   ]);
 
 
@@ -3548,6 +3582,307 @@ const handleLogout = useCallback(() => {
   // Reviews section
   // ════════════════════════════════════════════════════════════════════
 
+  // ════════════════════════════════════════════════════════════════════
+  // Drug Risk Check — patient self-inquiry against Kinan's rule engine
+  // ════════════════════════════════════════════════════════════════════
+  //
+  // Sends free-text ("بدي ibuprofen") to /api/drug-risk/check. The backend
+  // pulls the patient's allergies and current medications straight from
+  // MongoDB, normalizes them, forwards everything to FastAPI, and stores
+  // the check in the drug_risk_checks collection for audit + history.
+  //
+  // Result variants the UI handles:
+  //   - 'مرتفع' / 'متوسط'  → red/amber risk card with reason + warning
+  //   - 'منخفض'             → green safe-to-use card
+  //   - 'غير مؤكد'          → gray uncertain card (couldn't extract a drug)
+  //   - 'غير معروف'         → out-of-scope (not in the supported categories)
+  //
+  // Decision (3.ج): out-of-scope drugs DO show a transparent message
+  // to patients (vs. silent skip for doctors).
+
+  const DRUG_RISK_VARIANTS = {
+    'مرتفع':      { tone: 'high',    icon: AlertOctagon,  label: 'خطر مرتفع' },
+    'متوسط':      { tone: 'medium',  icon: AlertTriangle, label: 'خطر متوسط' },
+    'منخفض':      { tone: 'low',     icon: CheckCircle2,  label: 'آمن نسبياً' },
+    'غير مؤكد':   { tone: 'unknown', icon: Info,          label: 'نتيجة غير حاسمة' },
+    'غير معروف':  { tone: 'unknown', icon: Info,          label: 'دواء خارج النطاق' },
+  };
+
+  const getDrugRiskVariant = (riskLevelAr) => {
+    return DRUG_RISK_VARIANTS[riskLevelAr] || DRUG_RISK_VARIANTS['غير مؤكد'];
+  };
+
+  const handleDrugRiskSubmit = async () => {
+    const trimmed = drugRiskInput.trim();
+    if (!trimmed) {
+      openAlert('warning', 'لا يمكن فحص نص فارغ', 'يرجى كتابة اسم الدواء أو جملة عنه');
+      return;
+    }
+
+    setDrugRiskLoading(true);
+    setDrugRiskResult(null);
+
+    try {
+      const res = await drugRiskAPI.check(trimmed);
+      if (res?.success && res?.check) {
+        setDrugRiskResult(res.check);
+        // Prepend the new check to history (no need to re-fetch)
+        setDrugRiskHistory((prev) => [res.check, ...prev].slice(0, 20));
+      } else {
+        openAlert('error', 'تعذر إجراء الفحص', res?.message || 'حدث خطأ غير متوقع');
+      }
+    } catch (err) {
+      const msg = err?.message || 'تعذر الاتصال بخدمة فحص الأدوية';
+      openAlert('error', 'فشل الفحص', msg);
+    } finally {
+      setDrugRiskLoading(false);
+    }
+  };
+
+  const resetDrugRiskForm = () => {
+    setDrugRiskInput('');
+    setDrugRiskResult(null);
+  };
+
+  const renderDrugRiskResultCard = (check) => {
+    if (!check?.result) return null;
+    const { result, isOutOfScope, createdAt } = check;
+    const variant = getDrugRiskVariant(result.riskLevelAr);
+    const VariantIcon = variant.icon;
+
+    return (
+      <article className={`pd-dr-result pd-dr-result--${variant.tone}`}>
+        <header className="pd-dr-result-header">
+          <span className="pd-dr-result-icon" aria-hidden="true">
+            <VariantIcon size={22} />
+          </span>
+          <div className="pd-dr-result-titles">
+            <h3 className="pd-dr-result-level">{variant.label}</h3>
+            {result.drugNameAr && (
+              <p className="pd-dr-result-drug">
+                الدواء: <strong>{result.drugNameAr}</strong>
+              </p>
+            )}
+          </div>
+          <time className="pd-dr-result-time" dateTime={createdAt}>
+            {createdAt ? formatDateTime(createdAt) : ''}
+          </time>
+        </header>
+
+        <div className="pd-dr-result-body">
+          {result.reasonAr && (
+            <div className="pd-dr-result-field">
+              <h4 className="pd-dr-result-field-label">السبب</h4>
+              <p className="pd-dr-result-field-value">{result.reasonAr}</p>
+            </div>
+          )}
+
+          {result.adviceAr && (
+            <div className="pd-dr-result-field">
+              <h4 className="pd-dr-result-field-label">النصيحة</h4>
+              <p className="pd-dr-result-field-value">{result.adviceAr}</p>
+            </div>
+          )}
+
+          {result.warningAr && (
+            <div className="pd-dr-result-field pd-dr-result-field--warning">
+              <h4 className="pd-dr-result-field-label">
+                <AlertTriangle size={14} aria-hidden="true" />
+                <span>تحذير</span>
+              </h4>
+              <p className="pd-dr-result-field-value">{result.warningAr}</p>
+            </div>
+          )}
+
+          {result.interactionWarningAr && (
+            <div className="pd-dr-result-field pd-dr-result-field--interaction">
+              <h4 className="pd-dr-result-field-label">
+                <Pill size={14} aria-hidden="true" />
+                <span>تفاعل دوائي</span>
+              </h4>
+              <p className="pd-dr-result-field-value">{result.interactionWarningAr}</p>
+            </div>
+          )}
+
+          {isOutOfScope && (
+            <div className="pd-dr-result-scope-note">
+              <Info size={14} aria-hidden="true" />
+              <span>
+                هذا الدواء ليس ضمن الفئات المدعومة حالياً (المسكنات، الجهاز التنفسي،
+                الجهاز الهضمي). ننصحك بمراجعة طبيبك أو الصيدلي.
+              </span>
+            </div>
+          )}
+        </div>
+
+        <footer className="pd-dr-result-footer">
+          <p className="pd-dr-result-disclaimer">
+            <ShieldCheck size={12} aria-hidden="true" />
+            <span>
+              هذه النتيجة استرشادية وتعتمد على ملفك الطبي. لا تحل محل استشارة
+              الطبيب أو الصيدلي.
+            </span>
+          </p>
+        </footer>
+      </article>
+    );
+  };
+
+  const renderDrugRiskCheck = () => (
+    <div className="pd-dr">
+      <section className="pd-dr-intro">
+        <div className="pd-dr-intro-icon" aria-hidden="true">
+          <ShieldCheck size={26} />
+        </div>
+        <div className="pd-dr-intro-text">
+          <h3 className="pd-dr-intro-title">فحص أمان الدواء قبل الاستخدام</h3>
+          <p className="pd-dr-intro-desc">
+            اكتب اسم الدواء أو جملة عنه، وسنقارنه تلقائياً مع حساسياتك وأدويتك
+            الحالية المسجلة في ملفك الطبي، لنخبرك إذا كان آمناً لك.
+          </p>
+        </div>
+      </section>
+
+      <section className="pd-dr-panel">
+        <div className="pd-dr-form">
+          <label className="pd-dr-form-label" htmlFor="drug-risk-input">
+            اسم الدواء أو جملة عنه
+          </label>
+          <textarea
+            id="drug-risk-input"
+            className="pd-dr-form-textarea"
+            value={drugRiskInput}
+            onChange={(e) => setDrugRiskInput(e.target.value)}
+            placeholder="مثال: بدي استخدم ibuprofen أو فولتارين أو Brufen 400"
+            maxLength={500}
+            rows={3}
+            disabled={drugRiskLoading}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                handleDrugRiskSubmit();
+              }
+            }}
+          />
+          <div className="pd-dr-form-actions">
+            <span className="pd-dr-form-counter" aria-live="polite">
+              {drugRiskInput.length} / 500
+            </span>
+            <div className="pd-dr-form-buttons">
+              {(drugRiskInput || drugRiskResult) && !drugRiskLoading && (
+                <button
+                  type="button"
+                  className="pd-btn pd-btn--ghost"
+                  onClick={resetDrugRiskForm}
+                >
+                  <RotateCcw size={14} aria-hidden="true" />
+                  مسح
+                </button>
+              )}
+              <button
+                type="button"
+                className="pd-btn pd-btn--primary"
+                onClick={handleDrugRiskSubmit}
+                disabled={drugRiskLoading || !drugRiskInput.trim()}
+              >
+                {drugRiskLoading ? (
+                  <>
+                    <span className="pd-dr-spinner" aria-hidden="true" />
+                    <span>جاري الفحص...</span>
+                  </>
+                ) : (
+                  <>
+                    <Search size={14} aria-hidden="true" />
+                    <span>فحص الدواء</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="pd-dr-result-zone" aria-live="polite">
+          {drugRiskLoading && (
+            <div className="pd-dr-loading">
+              <span className="pd-dr-spinner pd-dr-spinner--lg" aria-hidden="true" />
+              <p>نقارن الدواء مع ملفك الطبي...</p>
+            </div>
+          )}
+
+          {!drugRiskLoading && !drugRiskResult && (
+            <div className="pd-dr-empty">
+              <ShieldCheck size={42} aria-hidden="true" />
+              <p>اكتب اسم دواء أعلاه واضغط "فحص الدواء" لمعرفة مدى أمانه لك.</p>
+            </div>
+          )}
+
+          {!drugRiskLoading && drugRiskResult && renderDrugRiskResultCard(drugRiskResult)}
+        </div>
+      </section>
+
+      <section className="pd-dr-history">
+        <header className="pd-dr-history-header">
+          <h3 className="pd-dr-history-title">
+            <Clock size={16} aria-hidden="true" />
+            <span>سجل الفحوصات السابقة</span>
+          </h3>
+          <button
+            type="button"
+            className="pd-btn pd-btn--ghost pd-btn--sm"
+            onClick={() => loadDrugRiskHistory(true)}
+            disabled={drugRiskHistoryLoading}
+          >
+            <RotateCcw size={12} aria-hidden="true" />
+            تحديث
+          </button>
+        </header>
+
+        {drugRiskHistoryLoading && drugRiskHistory.length === 0 ? (
+          <div className="pd-dr-history-loading">
+            <span className="pd-dr-spinner" aria-hidden="true" />
+            <span>جاري التحميل...</span>
+          </div>
+        ) : drugRiskHistory.length === 0 ? (
+          <div className="pd-dr-history-empty">
+            <FileText size={28} aria-hidden="true" />
+            <p>لم تقم بأي فحص بعد. سيظهر سجل فحوصاتك هنا.</p>
+          </div>
+        ) : (
+          <ul className="pd-dr-history-list">
+            {drugRiskHistory.map((check) => {
+              const variant = getDrugRiskVariant(check.result?.riskLevelAr);
+              const VariantIcon = variant.icon;
+              return (
+                <li
+                  key={check._id}
+                  className={`pd-dr-history-item pd-dr-history-item--${variant.tone}`}
+                >
+                  <span className="pd-dr-history-icon" aria-hidden="true">
+                    <VariantIcon size={16} />
+                  </span>
+                  <div className="pd-dr-history-content">
+                    <div className="pd-dr-history-line">
+                      <span className="pd-dr-history-drug">
+                        {check.result?.drugNameAr || check.inputText || 'دواء'}
+                      </span>
+                      <span className="pd-dr-history-level">{variant.label}</span>
+                    </div>
+                    {check.result?.reasonAr && (
+                      <p className="pd-dr-history-reason">{check.result.reasonAr}</p>
+                    )}
+                    <time className="pd-dr-history-time" dateTime={check.createdAt}>
+                      {check.createdAt ? formatDateTime(check.createdAt) : ''}
+                    </time>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+
   const REVIEW_STATUS_LABELS = {
     pending:  'قيد المراجعة',
     approved: 'منشور',
@@ -4119,6 +4454,7 @@ const handleLogout = useCallback(() => {
       case 'prescriptions': return renderPrescriptions();
       case 'lab-results':   return renderLabTests();
       case 'ai-assistant':  return renderAIAssistant();
+      case 'drug-risk':     return renderDrugRiskCheck();
       case 'reviews':       return renderReviews();
       case 'notifications': return renderNotifications();
       case 'profile':       return renderProfile();

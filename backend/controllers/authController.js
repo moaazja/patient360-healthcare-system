@@ -37,6 +37,7 @@ const {
   Children,
   Patient,
   Doctor,
+  Dentist,
   Pharmacist,
   LabTechnician,
   Pharmacy,
@@ -590,6 +591,40 @@ exports.login = async (req, res) => {
 
     console.log(`✅ Login successful: ${account.email}`);
 
+    // ── Fetch role-specific professional data ───────────────────────────
+    // For doctors/pharmacists/lab technicians we lookup their professional
+    // records (specialization, license, pharmacy/lab affiliation, etc.)
+    // and embed them as `roleData` so the frontend dashboards can render
+    // role-specific UI without an additional API round-trip.
+    //
+    // This is critical for DoctorDashboard.jsx which uses
+    // `user.roleData.doctor.specialization` to conditionally render the
+    // ECG AI tool (cardiologists) and X-Ray fracture AI tool (orthopedists).
+    const roleData = {};
+    if (account.personId && account.personId._id) {
+      const personId = account.personId._id;
+
+      if (account.roles.includes('doctor')) {
+        const doctorRecord = await Doctor.findOne({ personId }).lean();
+        if (doctorRecord) roleData.doctor = doctorRecord;
+      }
+
+      if (account.roles.includes('dentist')) {
+        const dentistRecord = await Dentist.findOne({ personId }).lean();
+        if (dentistRecord) roleData.dentist = dentistRecord;
+      }
+
+      if (account.roles.includes('pharmacist')) {
+        const pharmacistRecord = await Pharmacist.findOne({ personId }).lean();
+        if (pharmacistRecord) roleData.pharmacist = pharmacistRecord;
+      }
+
+      if (account.roles.includes('lab_technician')) {
+        const labTechRecord = await LabTechnician.findOne({ personId }).lean();
+        if (labTechRecord) roleData.labTechnician = labTechRecord;
+      }
+    }
+
     const profile = account.personId || account.childId || {};
     const safeUser = {
       _id:        account._id,
@@ -636,6 +671,10 @@ exports.login = async (req, res) => {
         dateOfBirth: account.childId.dateOfBirth,
         gender:     account.childId.gender,
       } : null,
+
+      // Role-specific professional data — populated for doctors,
+      // pharmacists, and lab technicians. Empty object for patients/admins.
+      roleData,
     };
 
     return res.status(200).json({
@@ -1304,6 +1343,167 @@ exports.registerLabTechnician = async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Register lab technician error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في إرسال الطلب',
+      error: error.message,
+    });
+  }
+};
+
+// ──────────────────────────────────────────────────────────────────────────
+// REGISTER DENTIST — POST /api/auth/register-dentist
+// ──────────────────────────────────────────────────────────────────────────
+// Persists a dental-professional registration request into `doctor_requests`
+// with requestType='dentist'. On admin approval, adminController creates:
+//   (1) persons document
+//   (2) accounts document with role='dentist'
+//   (3) dentists document (in the separate `dentists` collection) with
+//       dentalLicenseNumber + specialization (from one of 9 dental enums)
+//
+// Required fields:
+//   firstName, fatherName, lastName, motherName, nationalId, email,
+//   phoneNumber, dateOfBirth, gender, governorate, city, address, password,
+//   dentalLicenseNumber, specialization (one of DENTIST_SPECIALIZATIONS),
+//   yearsOfExperience, consultationFee
+exports.registerDentist = async (req, res) => {
+  const ipAddress = getClientIp(req);
+
+  try {
+    const requiredFields = [
+      'firstName', 'fatherName', 'lastName', 'motherName',
+      'nationalId', 'email', 'phoneNumber', 'dateOfBirth', 'gender',
+      'governorate', 'city', 'address',
+      'dentalLicenseNumber', 'specialization', 'yearsOfExperience',
+      'hospitalAffiliation', 'consultationFee',
+    ];
+
+    for (const field of requiredFields) {
+      if (!req.body[field] && req.body[field] !== 0) {
+        return res.status(400).json({
+          success: false,
+          message: `الحقل ${field} مطلوب`,
+        });
+      }
+    }
+
+    // Uniqueness checks — exclude rejected requests so applicants can re-apply
+    const existingByNationalId = await DoctorRequest.findOne({
+      nationalId: req.body.nationalId,
+      status: { $ne: 'rejected' },
+    });
+    if (existingByNationalId) {
+      return res.status(400).json({
+        success: false,
+        message: 'يوجد طلب سابق بنفس الرقم الوطني',
+      });
+    }
+
+    const existingByEmail = await DoctorRequest.findOne({
+      email: req.body.email.toLowerCase(),
+      status: { $ne: 'rejected' },
+    });
+    if (existingByEmail) {
+      return res.status(400).json({
+        success: false,
+        message: 'يوجد طلب سابق بنفس البريد الإلكتروني',
+      });
+    }
+
+    const existingByLicense = await DoctorRequest.findOne({
+      dentalLicenseNumber: req.body.dentalLicenseNumber,
+      status: { $ne: 'rejected' },
+    });
+    if (existingByLicense) {
+      return res.status(400).json({
+        success: false,
+        message: 'يوجد طلب سابق بنفس رقم ترخيص طب الأسنان',
+      });
+    }
+
+    // ── Parse JSON-encoded fields from multipart/form-data ──────────────
+    // The frontend serialises arrays/objects as JSON strings because
+    // multipart can't carry nested structures natively.
+    let availableDays = [];
+    if (req.body.availableDays) {
+      try {
+        const parsed = JSON.parse(req.body.availableDays);
+        if (Array.isArray(parsed)) availableDays = parsed;
+      } catch (_) { /* swallow — fall back to empty */ }
+    }
+
+    let scheduleTemplate = null;
+    if (req.body.scheduleTemplate) {
+      try {
+        scheduleTemplate = JSON.parse(req.body.scheduleTemplate);
+      } catch (_) { /* swallow — schedule remains null */ }
+    }
+
+    // ── Build the request payload (whitelisted to avoid storing junk) ────
+    const payload = {
+      // Personal
+      firstName:   req.body.firstName,
+      fatherName:  req.body.fatherName,
+      lastName:    req.body.lastName,
+      motherName:  req.body.motherName,
+      nationalId:  req.body.nationalId,
+      email:       req.body.email.toLowerCase(),
+      phoneNumber: req.body.phoneNumber,
+      dateOfBirth: req.body.dateOfBirth,
+      gender:      req.body.gender,
+      governorate: req.body.governorate,
+      city:        req.body.city,
+      address:     req.body.address,
+      password:    req.body.password,
+
+      // Professional (dental-specific)
+      dentalLicenseNumber: req.body.dentalLicenseNumber,
+      specialization:      req.body.specialization,
+      subSpecialization:   req.body.subSpecialization || '',
+      yearsOfExperience:   parseInt(req.body.yearsOfExperience, 10) || 0,
+      hospitalAffiliation: req.body.hospitalAffiliation,
+      consultationFee:     parseFloat(req.body.consultationFee) || 0,
+      currency:            req.body.currency || 'SYP',
+      availableDays,
+      ...(scheduleTemplate && { scheduleTemplate }),
+      ...(req.body.additionalNotes && { additionalNotes: req.body.additionalNotes }),
+
+      // Type discriminator + status
+      requestType: 'dentist',
+      status:      'pending',
+
+      // Files (multer stores them under req.files keyed by fieldname)
+      ...(req.files?.licenseDocument    && { licenseDocumentUrl:    req.files.licenseDocument[0].path }),
+      ...(req.files?.medicalCertificate && { degreeDocumentUrl:     req.files.medicalCertificate[0].path }),
+      ...(req.files?.profilePhoto       && { profilePhotoUrl:       req.files.profilePhoto[0].path }),
+    };
+
+    const request = await DoctorRequest.create(payload);
+
+    await AuditLog.record({
+      userEmail: request.email,
+      action: 'DENTIST_REQUEST_SUBMITTED',
+      description: `New dentist application: ${request.firstName} ${request.lastName} (${request.specialization})`,
+      resourceType: 'doctor_requests',
+      resourceId: request._id,
+      ipAddress,
+      userAgent: req.headers['user-agent'],
+      platform: req.headers['x-platform'] || 'web',
+      success: true,
+      metadata: {
+        specialization: request.specialization,
+        yearsOfExperience: request.yearsOfExperience,
+        consultationFee: request.consultationFee,
+      },
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'تم استلام الطلب بنجاح. ستتم مراجعته من قبل الإدارة',
+      requestId: request._id,
+    });
+  } catch (error) {
+    console.error('❌ Register dentist error:', error);
     return res.status(500).json({
       success: false,
       message: 'حدث خطأ في إرسال الطلب',

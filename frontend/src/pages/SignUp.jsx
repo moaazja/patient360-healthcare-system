@@ -80,6 +80,12 @@ import {
   FlaskConical,
   Dna,
 
+  // Dental-specific
+  Wrench,
+  Crosshair,
+  Package,
+  Anchor,
+
   // Files & uploads
   FileText,
   GraduationCap,
@@ -222,6 +228,25 @@ const LAB_TECH_POSITIONS = [
 ];
 
 /**
+ * Dentist specializations — matches dentists.specialization enum
+ * in patient360_db_final.js (9 dental specialties).
+ *
+ * The DentalCariesAnalysis AI tool (Pak Team — port 8004) appears in
+ * DoctorDashboard.jsx for ANY dentist regardless of sub-specialization.
+ */
+const DENTIST_SPECIALIZATIONS = [
+  { id: 'General Dentistry',   nameAr: 'طب الأسنان العام',       Icon: Stethoscope, hasAI: true, description: 'العناية العامة بالأسنان والوقاية' },
+  { id: 'Orthodontics',        nameAr: 'تقويم الأسنان',           Icon: Wrench,      hasAI: true, description: 'تصحيح اصطفاف الأسنان والفكين' },
+  { id: 'Endodontics',         nameAr: 'علاج الجذور',             Icon: Crosshair,   hasAI: true, description: 'علاج لُبّ السن والقنوات الجذرية' },
+  { id: 'Periodontics',        nameAr: 'أمراض اللثة',             Icon: Sparkles,    hasAI: true, description: 'علاج أمراض اللثة وأنسجة الفم' },
+  { id: 'Prosthodontics',      nameAr: 'تركيبات الأسنان',         Icon: Package,     hasAI: true, description: 'التيجان والجسور والتركيبات الكاملة' },
+  { id: 'Oral Surgery',        nameAr: 'جراحة الفم والأسنان',     Icon: Scissors,    hasAI: true, description: 'جراحة قلع وزراعة وعمليات الفم' },
+  { id: 'Pediatric Dentistry', nameAr: 'طب أسنان الأطفال',        Icon: Baby,        hasAI: true, description: 'العناية بأسنان الأطفال والمراهقين' },
+  { id: 'Cosmetic Dentistry',  nameAr: 'تجميل الأسنان',           Icon: Smile,       hasAI: true, description: 'التبييض والقشور التجميلية' },
+  { id: 'Implantology',        nameAr: 'زراعة الأسنان',           Icon: Anchor,      hasAI: true, description: 'زراعة الأسنان والاستعاضة الكاملة' },
+];
+
+/**
  * Employment types — shared between pharmacists.employmentType (includes
  * 'shift-based' per DB) and doctors.employmentType. We expose all four here
  * and let the UI context decide which to show.
@@ -276,6 +301,7 @@ const PATIENT_TOTAL_STEPS       = 4;
 const DOCTOR_TOTAL_STEPS        = 4;
 const PHARMACIST_TOTAL_STEPS    = 4;
 const LAB_TECH_TOTAL_STEPS      = 4;
+const DENTIST_TOTAL_STEPS       = 4;
 
 /** Accepted mime/extensions for uploaded documents. */
 const DOC_ACCEPT   = '.pdf,.jpg,.jpeg,.png';
@@ -1014,6 +1040,11 @@ const SignUp = () => {
   const [showLabPassword, setShowLabPassword] = useState(false);
   const [showLabConfirm, setShowLabConfirm] = useState(false);
 
+  // Dentist password toggles + spec search (mirror doctor flow)
+  const [showDentistPassword, setShowDentistPassword] = useState(false);
+  const [showDentistConfirm,  setShowDentistConfirm]  = useState(false);
+  const [dentistSpecSearch,   setDentistSpecSearch]   = useState('');
+
   // Specialization picker search (doctor form)
   const [specSearch, setSpecSearch] = useState('');
 
@@ -1147,6 +1178,60 @@ const SignUp = () => {
     additionalNotes: '',
   });
 
+  /* ─────────────────────────────────────────────────────────────────
+     STATE — DENTIST FORM DATA
+     Fields map 1:1 to dentists collection schema (see DB file):
+       personId            → created by backend on approval
+       dentalLicenseNumber (required)
+       specialization      → General Dentistry | Orthodontics | Endodontics |
+                             Periodontics | Prosthodontics | Oral Surgery |
+                             Pediatric Dentistry | Cosmetic Dentistry | Implantology
+       yearsOfExperience   → int >= 0
+       consultationFee     → number >= 0
+       hospitalAffiliation → optional
+       availableDays       → array of day names
+     Persisted to doctor_requests with requestType='dentist'.
+     On admin approval → Person + Account(role='dentist') + Dentist records.
+     ───────────────────────────────────────────────────────────────── */
+
+  /* ─────────────────────────────────────────────────────────────────
+     STATE — DENTIST FORM DATA  (v2 — cloned 1:1 from doctor form)
+     Fields map 1:1 to the dentist-flavoured doctor_requests document.
+     Same shape as doctorFormData so the rendering logic can be reused
+     verbatim — only the label/copy/icon and a couple of field renames
+     differ between the two.
+
+       dentalLicenseNumber  ← maps to dental license (instead of medical)
+       specialization       ← one of 9 dental specs (vs 24 medical)
+       scheduleTemplate     ← same Calendly-style weekly template
+
+     The admin-approval branch in adminController will create:
+       (1) persons document
+       (2) accounts document with role='dentist'
+       (3) dentists document (separate collection) with dentalLicenseNumber
+     ───────────────────────────────────────────────────────────────── */
+
+  const [dentistFormData, setDentistFormData] = useState({
+    firstName: '', fatherName: '', lastName: '', motherName: '',
+    nationalId: '', dateOfBirth: '', gender: 'male',
+    phoneNumber: '', email: '',
+    password: '', confirmPassword: '',
+    address: '', governorate: '', city: '',
+    dentalLicenseNumber: '',
+    specialization: '',
+    subSpecialization: '',
+    yearsOfExperience: '',
+    hospitalAffiliation: '',
+    availableDays: [],
+    // ── Calendly-style weekly schedule (cloned from doctor flow) ─────
+    scheduleTemplate: createDefaultScheduleTemplate(),
+    consultationFee: '',
+    licenseDocument: null,
+    medicalCertificate: null,
+    profilePhoto: null,
+    additionalNotes: '',
+  });
+
   const [errors, setErrors] = useState({});
 
   /* ─────────────────────────────────────────────────────────────────
@@ -1175,6 +1260,20 @@ const SignUp = () => {
     () => LAB_TECH_SPECIALIZATIONS.find((s) => s.id === labTechFormData.specialization),
     [labTechFormData.specialization]
   );
+
+  const selectedDentSpecialization = useMemo(
+    () => DENTIST_SPECIALIZATIONS.find((s) => s.id === dentistFormData.specialization),
+    [dentistFormData.specialization]
+  );
+
+  // Dental specialization picker search (mirrors filteredSpecializations for doctor)
+  const filteredDentistSpecializations = useMemo(() => {
+    if (!dentistSpecSearch.trim()) return DENTIST_SPECIALIZATIONS;
+    const q = dentistSpecSearch.trim().toLowerCase();
+    return DENTIST_SPECIALIZATIONS.filter((s) =>
+      s.nameAr.toLowerCase().includes(q) || s.id.toLowerCase().includes(q)
+    );
+  }, [dentistSpecSearch]);
 
   /* ─────────────────────────────────────────────────────────────────
      MODAL HELPERS
@@ -1210,6 +1309,7 @@ const SignUp = () => {
   const handleDoctorChange     = useMemo(() => makeChangeHandler(setDoctorFormData), [makeChangeHandler]);
   const handlePharmacistChange = useMemo(() => makeChangeHandler(setPharmacistFormData), [makeChangeHandler]);
   const handleLabTechChange    = useMemo(() => makeChangeHandler(setLabTechFormData), [makeChangeHandler]);
+  const handleDentistChange    = useMemo(() => makeChangeHandler(setDentistFormData), [makeChangeHandler]);
 
   const handleFileUpload = useCallback((fieldName, file) => {
     setDoctorFormData((prev) => ({ ...prev, [fieldName]: file }));
@@ -1363,6 +1463,102 @@ const SignUp = () => {
       delete next.specialization;
       return next;
     });
+  }, []);
+
+  /* ─────────────────────────────────────────────────────────────────
+     DENTIST — specialization + available days toggle
+     ───────────────────────────────────────────────────────────────── */
+
+  const handleDentistSpecSelect = useCallback((specId) => {
+    setDentistFormData((prev) => ({ ...prev, specialization: specId }));
+    setErrors((prev) => {
+      if (!prev.specialization) return prev;
+      const next = { ...prev };
+      delete next.specialization;
+      return next;
+    });
+  }, []);
+
+  // Alias to match the doctor flow's name (handleSpecializationSelect →
+  // handleDentistSpecializationSelect after token replacement)
+  const handleDentistSpecializationSelect = handleDentistSpecSelect;
+
+  const handleDentistDayToggle = useCallback((day) => {
+    setDentistFormData((prev) => {
+      const days = prev.availableDays || [];
+      const next = days.includes(day)
+        ? days.filter((d) => d !== day)
+        : [...days, day];
+      return { ...prev, availableDays: next };
+    });
+    setErrors((prev) => {
+      if (!prev.availableDays) return prev;
+      const next = { ...prev };
+      delete next.availableDays;
+      return next;
+    });
+  }, []);
+
+  /**
+   * Schedule template change handler — mirrors the doctor flow's
+   * handleScheduleTemplateChange. Updates structured scheduleTemplate AND
+   * derives the legacy availableDays array from it.
+   */
+  const handleDentistScheduleTemplateChange = useCallback((nextTemplate) => {
+    const WEEKDAY_IDS = [
+      'Sunday', 'Monday', 'Tuesday', 'Wednesday',
+      'Thursday', 'Friday', 'Saturday',
+    ];
+    const derivedDays = WEEKDAY_IDS.filter((day) => {
+      const periods = nextTemplate?.weeklyPattern?.[day];
+      return Array.isArray(periods) && periods.length > 0;
+    });
+
+    setDentistFormData((prev) => ({
+      ...prev,
+      scheduleTemplate: nextTemplate,
+      availableDays: derivedDays,
+    }));
+
+    setErrors((prev) => {
+      if (!prev.availableDays && !prev.scheduleTemplate) return prev;
+      const next = { ...prev };
+      delete next.availableDays;
+      delete next.scheduleTemplate;
+      return next;
+    });
+  }, []);
+
+  const handleDentistFileChange = useCallback((field, file) => {
+    setDentistFormData((prev) => ({ ...prev, [field]: file }));
+    setErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  }, []);
+
+  /**
+   * File upload/remove handlers — mirror the doctor flow.
+   * The render block uses (fieldName, file) and (fieldName) signatures.
+   */
+  const handleDentistFileUpload = useCallback((fieldName, file) => {
+    if (file && file.size > MAX_FILE_BYTES) {
+      openModal('error', 'حجم الملف كبير', 'حجم الملف يجب أن لا يتجاوز 5 ميجابايت');
+      return;
+    }
+    setDentistFormData((prev) => ({ ...prev, [fieldName]: file }));
+    setErrors((prev) => {
+      if (!prev[fieldName]) return prev;
+      const next = { ...prev };
+      delete next[fieldName];
+      return next;
+    });
+  }, [openModal]);
+
+  const handleDentistFileRemove = useCallback((fieldName) => {
+    setDentistFormData((prev) => ({ ...prev, [fieldName]: null }));
   }, []);
 
   const handleLaboratorySelect = useCallback((doc) => {
@@ -1686,6 +1882,68 @@ const SignUp = () => {
   }, [currentStep, labTechFormData, validateProfessionalStep1]);
 
   /* ─────────────────────────────────────────────────────────────────
+     DENTIST VALIDATION
+     ─────────────────────────────────────────────────────────────────
+     3-step wizard (similar pattern to pharmacist/lab tech):
+       Step 1 — Personal info (shared validation)
+       Step 2 — Professional info (dental license, specialization, fees, etc)
+       Step 3 — Documents
+     ───────────────────────────────────────────────────────────────── */
+  /**
+   * Dentist step validator — cloned 1:1 from validateDoctorStep with the
+   * minimal renames: medicalLicenseNumber → dentalLicenseNumber and the
+   * Arabic copy adapted to the dental context.
+   */
+  const validateDentistStep = useCallback(() => {
+    let e = {};
+
+    if (currentStep === 1) {
+      e = validateProfessionalStep1(dentistFormData);
+    }
+
+    if (currentStep === 2) {
+      if (!dentistFormData.dentalLicenseNumber.trim()) {
+        e.dentalLicenseNumber = 'رقم ترخيص طب الأسنان مطلوب';
+      } else if (!/^[A-Z0-9]{8,20}$/i.test(dentistFormData.dentalLicenseNumber.trim())) {
+        e.dentalLicenseNumber = 'رقم الترخيص يجب أن يكون 8-20 حرف/رقم';
+      }
+
+      if (!dentistFormData.specialization) e.specialization = 'التخصص مطلوب';
+      if (!dentistFormData.hospitalAffiliation.trim()) e.hospitalAffiliation = 'مكان العمل مطلوب';
+
+      // ── Schedule template validation (cloned from doctor flow) ────────
+      const WEEKDAY_IDS = [
+        'Sunday', 'Monday', 'Tuesday', 'Wednesday',
+        'Thursday', 'Friday', 'Saturday',
+      ];
+      const totalPeriods = dentistFormData.scheduleTemplate
+        ? WEEKDAY_IDS.reduce((sum, day) => {
+            const periods = dentistFormData.scheduleTemplate.weeklyPattern?.[day];
+            return sum + (Array.isArray(periods) ? periods.length : 0);
+          }, 0)
+        : 0;
+      if (totalPeriods === 0) {
+        e.scheduleTemplate = 'يجب تحديد فترة عمل واحدة على الأقل في جدول العمل';
+      }
+
+      const years = parseInt(dentistFormData.yearsOfExperience, 10);
+      if (Number.isNaN(years) || years < 0 || years > 60) e.yearsOfExperience = 'سنوات الخبرة يجب أن تكون بين 0-60';
+
+      if (!dentistFormData.consultationFee || parseFloat(dentistFormData.consultationFee) < 0) {
+        e.consultationFee = 'رسوم الاستشارة مطلوبة';
+      }
+    }
+
+    if (currentStep === 3) {
+      if (!dentistFormData.licenseDocument)    e.licenseDocument    = 'صورة ترخيص طب الأسنان مطلوبة';
+      if (!dentistFormData.medicalCertificate) e.medicalCertificate = 'صورة شهادة طب الأسنان مطلوبة';
+    }
+
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  }, [currentStep, dentistFormData, validateProfessionalStep1]);
+
+  /* ─────────────────────────────────────────────────────────────────
      NAVIGATION
      ───────────────────────────────────────────────────────────────── */
 
@@ -1694,11 +1952,12 @@ const SignUp = () => {
     if (professionalType === 'doctor') return validateDoctorStep();
     if (professionalType === 'pharmacist') return validatePharmacistStep();
     if (professionalType === 'lab_technician') return validateLabTechStep();
+    if (professionalType === 'dentist') return validateDentistStep();
     return true;
   }, [
     userType, professionalType,
     validatePatientStep, validateDoctorStep,
-    validatePharmacistStep, validateLabTechStep,
+    validatePharmacistStep, validateLabTechStep, validateDentistStep,
   ]);
 
   const handleNext = useCallback(() => {
@@ -2008,6 +2267,93 @@ const SignUp = () => {
   }, [labTechFormData, openModal]);
 
   /* ─────────────────────────────────────────────────────────────────
+     DENTIST SUBMISSION
+     Expected backend endpoint:
+       POST /api/auth/register-dentist (multipart/form-data)
+     Persists into doctor_requests with requestType='dentist'.
+     On admin approval, backend creates:
+       (1) persons document
+       (2) accounts document with role='dentist'
+       (3) dentists document (separate collection) with dentalLicenseNumber +
+           specialization (one of 9 dental specs)
+     ───────────────────────────────────────────────────────────────── */
+
+  /* ─────────────────────────────────────────────────────────────────
+     DENTIST SUBMISSION  (v2 — cloned 1:1 from handleDoctorSubmit)
+     Expected backend endpoint:
+       POST /api/auth/register-dentist (multipart/form-data)
+     Persists into doctor_requests with requestType='dentist'.
+     On admin approval, the backend creates:
+       (1) persons document
+       (2) accounts document with role='dentist'
+       (3) dentists document (separate collection) with dentalLicenseNumber +
+           specialization (one of 9 dental specs)
+     ───────────────────────────────────────────────────────────────── */
+
+  const handleDentistSubmit = useCallback(async (e) => {
+    e.preventDefault();
+
+    if (dentistFormData.password !== dentistFormData.confirmPassword) {
+      openModal('error', 'خطأ', 'كلمات المرور غير متطابقة');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const formData = new FormData();
+
+      formData.append('firstName', dentistFormData.firstName.trim());
+      formData.append('fatherName', dentistFormData.fatherName.trim());
+      formData.append('lastName', dentistFormData.lastName.trim());
+      formData.append('motherName', dentistFormData.motherName.trim());
+      formData.append('nationalId', dentistFormData.nationalId.trim());
+      formData.append('dateOfBirth', dentistFormData.dateOfBirth);
+      formData.append('gender', dentistFormData.gender);
+      formData.append('phoneNumber', dentistFormData.phoneNumber.trim());
+      formData.append('email', dentistFormData.email.trim().toLowerCase());
+      formData.append('password', dentistFormData.password);
+      formData.append('address', dentistFormData.address.trim());
+      formData.append('governorate', dentistFormData.governorate);
+      formData.append('city', dentistFormData.city.trim());
+
+      formData.append('dentalLicenseNumber', dentistFormData.dentalLicenseNumber.toUpperCase().trim());
+      formData.append('specialization', dentistFormData.specialization);
+      formData.append('subSpecialization', dentistFormData.subSpecialization.trim());
+      formData.append('yearsOfExperience', dentistFormData.yearsOfExperience);
+      formData.append('hospitalAffiliation', dentistFormData.hospitalAffiliation.trim());
+      formData.append('availableDays', JSON.stringify(dentistFormData.availableDays));
+      // ── Schedule template (Calendly-style, cloned from doctor flow) ──
+      if (dentistFormData.scheduleTemplate) {
+        formData.append(
+          'scheduleTemplate',
+          JSON.stringify(dentistFormData.scheduleTemplate),
+        );
+      }
+      formData.append('consultationFee', dentistFormData.consultationFee || '0');
+
+      if (dentistFormData.additionalNotes.trim()) {
+        formData.append('additionalNotes', dentistFormData.additionalNotes.trim());
+      }
+
+      if (dentistFormData.medicalCertificate) formData.append('medicalCertificate', dentistFormData.medicalCertificate);
+      if (dentistFormData.licenseDocument)    formData.append('licenseDocument', dentistFormData.licenseDocument);
+      if (dentistFormData.profilePhoto)       formData.append('profilePhoto', dentistFormData.profilePhoto);
+
+      const data = await authAPI.registerDentist(formData);
+      setLoading(false);
+
+      setRequestStatus('pending');
+      setRequestId(data.requestId);
+      setSubmittedRequestType('dentist');
+    } catch (error) {
+      console.error('[SignUp] Dentist request error:', error);
+      setLoading(false);
+      openModal('error', 'خطأ في تقديم الطلب',
+        error.message || 'حدث خطأ في الاتصال بالخادم. الرجاء المحاولة مرة أخرى.');
+    }
+  }, [dentistFormData, openModal]);
+
+  /* ─────────────────────────────────────────────────────────────────
      FACILITY SEARCH — wrapper functions passed to FacilityAutocomplete
      These defer to authAPI methods. Backend contract:
        authAPI.searchPharmacies(query)   →  GET /api/pharmacies/search?q=...
@@ -2109,6 +2455,7 @@ const SignUp = () => {
       professionalType === 'doctor'          ? 'جاري تقديم طلب الطبيب...' :
       professionalType === 'pharmacist'      ? 'جاري تقديم طلب الصيدلي...' :
       professionalType === 'lab_technician'  ? 'جاري تقديم طلب فني المختبر...' :
+      professionalType === 'dentist'         ? 'جاري تقديم طلب طبيب الأسنان...' :
                                                'جاري المعالجة...';
     return <LoadingSpinner message={loadingMessage} />;
   }
@@ -2133,6 +2480,11 @@ const SignUp = () => {
       roleAr:  'فني مختبر',
       Icon:    Microscope,
     },
+    dentist: {
+      titleAr: 'طلب تسجيل طبيب أسنان',
+      roleAr:  'طبيب أسنان',
+      Icon:    Smile,
+    },
   };
 
   /* ═════════════════════════════════════════════════════════════════
@@ -2144,6 +2496,7 @@ const SignUp = () => {
     const submittedEmail =
       submittedRequestType === 'pharmacist'     ? pharmacistFormData.email :
       submittedRequestType === 'lab_technician' ? labTechFormData.email :
+      submittedRequestType === 'dentist'        ? dentistFormData.email :
                                                   doctorFormData.email;
 
     return (
@@ -2826,6 +3179,42 @@ const SignUp = () => {
                 </ul>
                 <div className="sub-role-cta">
                   <span>تقديم طلب كفني مختبر</span>
+                  <ArrowLeft size={16} strokeWidth={2.5} />
+                </div>
+              </button>
+
+              {/* Dentist */}
+              <button
+                type="button"
+                className="sub-role-card"
+                onClick={() => { setProfessionalType('dentist'); setCurrentStep(1); }}
+                style={{ animationDelay: '0.4s' }}
+              >
+                <div className="sub-role-icon dentist-icon">
+                  <Smile size={28} strokeWidth={1.8} />
+                </div>
+                <h3>طبيب أسنان</h3>
+                <p>تقديم طلب كطبيب أسنان معتمد في جميع تخصصات طب الأسنان</p>
+                <ul className="sub-role-features">
+                  <li>
+                    <Check size={14} strokeWidth={2.5} />
+                    9 تخصصات أسنان معتمدة
+                  </li>
+                  <li>
+                    <Check size={14} strokeWidth={2.5} />
+                    إدارة المرضى والمواعيد
+                  </li>
+                  <li>
+                    <Check size={14} strokeWidth={2.5} />
+                    <span>نظام <strong>تشخيص تسوس الأسنان AI</strong></span>
+                  </li>
+                  <li>
+                    <Check size={14} strokeWidth={2.5} />
+                    إصدار الوصفات وتوصيات العلاج
+                  </li>
+                </ul>
+                <div className="sub-role-cta">
+                  <span>تقديم طلب كطبيب أسنان</span>
                   <ArrowLeft size={16} strokeWidth={2.5} />
                 </div>
               </button>
@@ -6651,6 +7040,1036 @@ const SignUp = () => {
   }
 
   /* ═════════════════════════════════════════════════════════════════
+     RENDER — DENTIST REGISTRATION FORM (4 steps)
+     Cloned 1:1 from the doctor flow above with token-level substitutions
+     (dentistFormData→dentistFormData, MEDICAL→DENTIST_SPECIALIZATIONS, etc.).
+     Same JSX layout, same CSS classes, same UX. The only domain difference
+     is the AI badge: doctors show Caries AI for cardiology, dentists show
+     "Caries AI" on every dental specialization (dental AI applies to all).
+     ═════════════════════════════════════════════════════════════════ */
+
+  if (userType === 'professional' && professionalType === 'dentist') {
+    const progressPercent = ((currentStep - 1) / (DENTIST_TOTAL_STEPS - 1)) * 100;
+
+    return (
+    <div className="signup-page">
+      <Navbar />
+      <Modal
+        isOpen={modal.isOpen}
+        type={modal.type}
+        title={modal.title}
+        message={modal.message}
+        onClose={closeModal}
+      />
+
+      <div className="signup-container">
+        <div className="signup-wrapper">
+          {/* Back button — returns to sub-role selection */}
+          <button
+            type="button"
+            className="back-to-selection"
+            onClick={handleBackToProfessionalSelection}
+          >
+            <ArrowRight size={16} strokeWidth={2.2} />
+            <span>العودة لاختيار المهنة</span>
+          </button>
+
+          {/* Progress bar */}
+          <div className="progress-bar">
+            <div className="progress-track" />
+            <div
+              className="progress-fill"
+              style={{ width: `${progressPercent}%` }}
+            />
+            <div className="progress-steps">
+              {[1, 2, 3, 4].map((step) => (
+                <div
+                  key={step}
+                  className={`progress-step ${
+                    currentStep === step ? 'active' : ''
+                  } ${currentStep > step ? 'completed' : ''}`}
+                >
+                  {currentStep > step ? <Check size={18} strokeWidth={3} /> : step}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Form header with ministry badge */}
+          <div className="form-header dentist">
+            <div className="dentist-header-badge">
+              <ShieldCheck size={14} strokeWidth={2.5} />
+              <span>وزارة الصحة السورية</span>
+            </div>
+            <h1 className="form-title">طلب تسجيل طبيب أسنان</h1>
+            <p className="form-subtitle">
+              {currentStep === 1 && 'الخطوة 1 من 4 — المعلومات الشخصية'}
+              {currentStep === 2 && 'الخطوة 2 من 4 — المعلومات المهنية'}
+              {currentStep === 3 && 'الخطوة 3 من 4 — الوثائق المطلوبة'}
+              {currentStep === 4 && 'الخطوة 4 من 4 — مراجعة وتقديم الطلب'}
+            </p>
+          </div>
+
+          {/* Notice banner */}
+          <div className="doctor-notice">
+            <Info size={20} strokeWidth={2} />
+            <div>
+              <strong>ملاحظة هامة</strong>
+              <p>
+                سيتم مراجعة طلبك من قبل وزارة الصحة. عند القبول، ستتلقى بيانات
+                الدخول عبر البريد الإلكتروني.
+              </p>
+            </div>
+          </div>
+
+          {/* Form */}
+          <form className="signup-form" onSubmit={handleDentistSubmit} noValidate>
+            {/* ═══ STEP 1: Personal Information ═══ */}
+            {currentStep === 1 && (
+              <div className="form-step">
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="dentist-firstName">
+                      الاسم الأول <span className="required-mark">*</span>
+                    </label>
+                    <div className="form-input-wrapper">
+                      <span className="form-input-icon" aria-hidden="true">
+                        <User size={18} strokeWidth={2} />
+                      </span>
+                      <input
+                        id="dentist-firstName"
+                        type="text"
+                        name="firstName"
+                        className={`form-input ${errors.firstName ? 'error' : ''}`}
+                        value={dentistFormData.firstName}
+                        onChange={handleDentistChange}
+                        placeholder="أدخل الاسم الأول"
+                        autoComplete="given-name"
+                      />
+                    </div>
+                    {errors.firstName && (
+                      <span className="error-message">
+                        <AlertCircle size={14} strokeWidth={2.2} />
+                        {errors.firstName}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="dentist-fatherName">
+                      اسم الأب <span className="required-mark">*</span>
+                    </label>
+                    <div className="form-input-wrapper">
+                      <span className="form-input-icon" aria-hidden="true">
+                        <User size={18} strokeWidth={2} />
+                      </span>
+                      <input
+                        id="dentist-fatherName"
+                        type="text"
+                        name="fatherName"
+                        className={`form-input ${errors.fatherName ? 'error' : ''}`}
+                        value={dentistFormData.fatherName}
+                        onChange={handleDentistChange}
+                        placeholder="أدخل اسم الأب"
+                        autoComplete="additional-name"
+                      />
+                    </div>
+                    {errors.fatherName && (
+                      <span className="error-message">
+                        <AlertCircle size={14} strokeWidth={2.2} />
+                        {errors.fatherName}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="dentist-lastName">
+                      الكنية <span className="required-mark">*</span>
+                    </label>
+                    <div className="form-input-wrapper">
+                      <span className="form-input-icon" aria-hidden="true">
+                        <User size={18} strokeWidth={2} />
+                      </span>
+                      <input
+                        id="dentist-lastName"
+                        type="text"
+                        name="lastName"
+                        className={`form-input ${errors.lastName ? 'error' : ''}`}
+                        value={dentistFormData.lastName}
+                        onChange={handleDentistChange}
+                        placeholder="أدخل الكنية"
+                        autoComplete="family-name"
+                      />
+                    </div>
+                    {errors.lastName && (
+                      <span className="error-message">
+                        <AlertCircle size={14} strokeWidth={2.2} />
+                        {errors.lastName}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="dentist-motherName">
+                      اسم الأم الكامل <span className="required-mark">*</span>
+                    </label>
+                    <div className="form-input-wrapper">
+                      <span className="form-input-icon" aria-hidden="true">
+                        <User size={18} strokeWidth={2} />
+                      </span>
+                      <input
+                        id="dentist-motherName"
+                        type="text"
+                        name="motherName"
+                        className={`form-input ${errors.motherName ? 'error' : ''}`}
+                        value={dentistFormData.motherName}
+                        onChange={handleDentistChange}
+                        placeholder="أدخل اسم الأم الكامل"
+                      />
+                    </div>
+                    {errors.motherName && (
+                      <span className="error-message">
+                        <AlertCircle size={14} strokeWidth={2.2} />
+                        {errors.motherName}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* National ID */}
+                <div className="form-group">
+                  <label className="form-label" htmlFor="dentist-nationalId">
+                    الرقم الوطني <span className="required-mark">*</span>
+                  </label>
+                  <div className="form-input-wrapper">
+                    <span className="form-input-icon" aria-hidden="true">
+                      <IdCard size={18} strokeWidth={2} />
+                    </span>
+                    <input
+                      id="dentist-nationalId"
+                      type="text"
+                      name="nationalId"
+                      className={`form-input ${errors.nationalId ? 'error' : ''}`}
+                      value={dentistFormData.nationalId}
+                      onChange={(e) => setDentistFormData({
+                        ...dentistFormData,
+                        nationalId: e.target.value.replace(/\D/g, '').slice(0, 11),
+                      })}
+                      placeholder="11 رقم"
+                      maxLength={11}
+                      dir="ltr"
+                      inputMode="numeric"
+                    />
+                  </div>
+                  {errors.nationalId && (
+                    <span className="error-message">
+                      <AlertCircle size={14} strokeWidth={2.2} />
+                      {errors.nationalId}
+                    </span>
+                  )}
+                </div>
+
+                {/* DOB + Gender */}
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="dentist-dateOfBirth">
+                      تاريخ الميلاد <span className="required-mark">*</span>
+                    </label>
+                    <div className="form-input-wrapper">
+                      <span className="form-input-icon" aria-hidden="true">
+                        <Calendar size={18} strokeWidth={2} />
+                      </span>
+                      <input
+                        id="dentist-dateOfBirth"
+                        type="date"
+                        name="dateOfBirth"
+                        className={`form-input ${errors.dateOfBirth ? 'error' : ''}`}
+                        value={dentistFormData.dateOfBirth}
+                        onChange={handleDentistChange}
+                        max={getTodayDate()}
+                        autoComplete="bday"
+                      />
+                    </div>
+                    {errors.dateOfBirth && (
+                      <span className="error-message">
+                        <AlertCircle size={14} strokeWidth={2.2} />
+                        {errors.dateOfBirth}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="dentist-gender">
+                      الجنس <span className="required-mark">*</span>
+                    </label>
+                    <select
+                      id="dentist-gender"
+                      name="gender"
+                      className="form-input"
+                      value={dentistFormData.gender}
+                      onChange={handleDentistChange}
+                    >
+                      <option value="male">ذكر</option>
+                      <option value="female">أنثى</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Email */}
+                <div className="form-group">
+                  <label className="form-label" htmlFor="dentist-email">
+                    البريد الإلكتروني <span className="required-mark">*</span>
+                  </label>
+                  <div className="form-input-wrapper">
+                    <span className="form-input-icon" aria-hidden="true">
+                      <Mail size={18} strokeWidth={2} />
+                    </span>
+                    <input
+                      id="dentist-email"
+                      type="email"
+                      name="email"
+                      className={`form-input ${errors.email ? 'error' : ''}`}
+                      value={dentistFormData.email}
+                      onChange={handleDentistChange}
+                      placeholder="example@email.com"
+                      dir="ltr"
+                      autoComplete="email"
+                    />
+                  </div>
+                  {errors.email && (
+                    <span className="error-message">
+                      <AlertCircle size={14} strokeWidth={2.2} />
+                      {errors.email}
+                    </span>
+                  )}
+                  <span className="form-hint">
+                    <Info size={12} strokeWidth={2.2} />
+                    سيتم إرسال بيانات الدخول إلى هذا البريد عند القبول
+                  </span>
+                </div>
+
+                {/* Passwords */}
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="dentist-password">
+                      كلمة المرور <span className="required-mark">*</span>
+                    </label>
+                    <div className="form-input-wrapper has-toggle">
+                      <span className="form-input-icon" aria-hidden="true">
+                        <Lock size={18} strokeWidth={2} />
+                      </span>
+                      <input
+                        id="dentist-password"
+                        type={showDentistPassword ? 'text' : 'password'}
+                        name="password"
+                        className={`form-input ${errors.password ? 'error' : ''}`}
+                        value={dentistFormData.password}
+                        onChange={handleDentistChange}
+                        placeholder="8 أحرف على الأقل"
+                        dir="ltr"
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        className="password-toggle-btn"
+                        onClick={() => setShowDentistPassword((p) => !p)}
+                        aria-label={showDentistPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                      >
+                        {showDentistPassword
+                          ? <EyeOff size={18} strokeWidth={2} />
+                          : <Eye size={18} strokeWidth={2} />}
+                      </button>
+                    </div>
+                    {errors.password && (
+                      <span className="error-message">
+                        <AlertCircle size={14} strokeWidth={2.2} />
+                        {errors.password}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="dentist-confirmPassword">
+                      تأكيد كلمة المرور <span className="required-mark">*</span>
+                    </label>
+                    <div className="form-input-wrapper has-toggle">
+                      <span className="form-input-icon" aria-hidden="true">
+                        <Lock size={18} strokeWidth={2} />
+                      </span>
+                      <input
+                        id="dentist-confirmPassword"
+                        type={showDentistConfirm ? 'text' : 'password'}
+                        name="confirmPassword"
+                        className={`form-input ${errors.confirmPassword ? 'error' : ''}`}
+                        value={dentistFormData.confirmPassword}
+                        onChange={handleDentistChange}
+                        placeholder="أعد إدخال كلمة المرور"
+                        dir="ltr"
+                        autoComplete="new-password"
+                      />
+                      <button
+                        type="button"
+                        className="password-toggle-btn"
+                        onClick={() => setShowDentistConfirm((p) => !p)}
+                        aria-label={showDentistConfirm ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}
+                      >
+                        {showDentistConfirm
+                          ? <EyeOff size={18} strokeWidth={2} />
+                          : <Eye size={18} strokeWidth={2} />}
+                      </button>
+                    </div>
+                    {errors.confirmPassword && (
+                      <span className="error-message">
+                        <AlertCircle size={14} strokeWidth={2.2} />
+                        {errors.confirmPassword}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <PasswordStrengthMeter password={dentistFormData.password} />
+
+                {/* Phone */}
+                <div className="form-group">
+                  <label className="form-label" htmlFor="dentist-phoneNumber">
+                    رقم الهاتف <span className="required-mark">*</span>
+                  </label>
+                  <div className="form-input-wrapper">
+                    <span className="form-input-icon" aria-hidden="true">
+                      <Phone size={18} strokeWidth={2} />
+                    </span>
+                    <input
+                      id="dentist-phoneNumber"
+                      type="tel"
+                      name="phoneNumber"
+                      className={`form-input ${errors.phoneNumber ? 'error' : ''}`}
+                      value={dentistFormData.phoneNumber}
+                      onChange={handleDentistChange}
+                      placeholder="+963 9X XXX XXXX"
+                      dir="ltr"
+                      autoComplete="tel"
+                    />
+                  </div>
+                  {errors.phoneNumber && (
+                    <span className="error-message">
+                      <AlertCircle size={14} strokeWidth={2.2} />
+                      {errors.phoneNumber}
+                    </span>
+                  )}
+                </div>
+
+                {/* Governorate + city */}
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="dentist-governorate">
+                      المحافظة <span className="required-mark">*</span>
+                    </label>
+                    <select
+                      id="dentist-governorate"
+                      name="governorate"
+                      className={`form-input ${errors.governorate ? 'error' : ''}`}
+                      value={dentistFormData.governorate}
+                      onChange={handleDentistChange}
+                    >
+                      <option value="">اختر المحافظة</option>
+                      {SYRIAN_GOVERNORATES.map((gov) => (
+                        <option key={gov.id} value={gov.id}>{gov.nameAr}</option>
+                      ))}
+                    </select>
+                    {errors.governorate && (
+                      <span className="error-message">
+                        <AlertCircle size={14} strokeWidth={2.2} />
+                        {errors.governorate}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="dentist-city">
+                      المدينة <span className="required-mark">*</span>
+                    </label>
+                    <div className="form-input-wrapper">
+                      <span className="form-input-icon" aria-hidden="true">
+                        <MapPin size={18} strokeWidth={2} />
+                      </span>
+                      <input
+                        id="dentist-city"
+                        type="text"
+                        name="city"
+                        className={`form-input ${errors.city ? 'error' : ''}`}
+                        value={dentistFormData.city}
+                        onChange={handleDentistChange}
+                        placeholder="أدخل المدينة"
+                        autoComplete="address-level2"
+                      />
+                    </div>
+                    {errors.city && (
+                      <span className="error-message">
+                        <AlertCircle size={14} strokeWidth={2.2} />
+                        {errors.city}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Address */}
+                <div className="form-group">
+                  <label className="form-label" htmlFor="dentist-address">
+                    عنوان العيادة <span className="required-mark">*</span>
+                  </label>
+                  <div className="form-input-wrapper">
+                    <span className="form-input-icon" aria-hidden="true">
+                      <Building size={18} strokeWidth={2} />
+                    </span>
+                    <input
+                      id="dentist-address"
+                      type="text"
+                      name="address"
+                      className={`form-input ${errors.address ? 'error' : ''}`}
+                      value={dentistFormData.address}
+                      onChange={handleDentistChange}
+                      placeholder="العنوان التفصيلي للعيادة"
+                      autoComplete="street-address"
+                    />
+                  </div>
+                  {errors.address && (
+                    <span className="error-message">
+                      <AlertCircle size={14} strokeWidth={2.2} />
+                      {errors.address}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ═══ STEP 2: Professional Information ═══ */}
+            {currentStep === 2 && (
+              <div className="form-step">
+                {/* Medical license number */}
+                <div className="form-group">
+                  <label className="form-label" htmlFor="dentist-licenseNumber">
+                    رقم ترخيص طب الأسنان <span className="required-mark">*</span>
+                  </label>
+                  <div className="form-input-wrapper">
+                    <span className="form-input-icon" aria-hidden="true">
+                      <Award size={18} strokeWidth={2} />
+                    </span>
+                    <input
+                      id="dentist-licenseNumber"
+                      type="text"
+                      name="dentalLicenseNumber"
+                      className={`form-input ${errors.dentalLicenseNumber ? 'error' : ''}`}
+                      value={dentistFormData.dentalLicenseNumber}
+                      onChange={handleDentistChange}
+                      placeholder="مثال: SY12345678"
+                      dir="ltr"
+                      style={{ textTransform: 'uppercase' }}
+                    />
+                  </div>
+                  {errors.dentalLicenseNumber && (
+                    <span className="error-message">
+                      <AlertCircle size={14} strokeWidth={2.2} />
+                      {errors.dentalLicenseNumber}
+                    </span>
+                  )}
+                  <span className="form-hint">
+                    <Info size={12} strokeWidth={2.2} />
+                    8-20 حرف/رقم (أحرف إنجليزية كبيرة وأرقام)
+                  </span>
+                </div>
+
+                {/* Specialization picker — searchable card grid (replaces <select>) */}
+                <div className="form-group">
+                  <label className="form-label">
+                    التخصص الطبي <span className="required-mark">*</span>
+                  </label>
+                  <div className="spec-picker">
+                    <div className="spec-search">
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="ابحث عن التخصص..."
+                        value={dentistSpecSearch}
+                        onChange={(e) => setDentistSpecSearch(e.target.value)}
+                      />
+                      <span className="spec-search-icon" aria-hidden="true">
+                        <Search size={16} strokeWidth={2} />
+                      </span>
+                    </div>
+                    <div className="spec-grid" role="radiogroup" aria-label="التخصصات الطبية">
+                      {filteredDentistSpecializations.map((spec) => {
+                        const SpecIcon = spec.Icon;
+                        const isSelected = dentistFormData.specialization === spec.id;
+                        return (
+                          <button
+                            key={spec.id}
+                            type="button"
+                            className={`spec-card ${isSelected ? 'selected' : ''}`}
+                            onClick={() => handleDentistSpecializationSelect(spec.id)}
+                            role="radio"
+                            aria-checked={isSelected}
+                          >
+                            {spec.hasAI && (
+                              <span className="spec-card-ai-badge">Caries AI</span>
+                            )}
+                            <div className="spec-card-icon">
+                              <SpecIcon size={20} strokeWidth={2} />
+                            </div>
+                            <span className="spec-card-name">{spec.nameAr}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {errors.specialization && (
+                    <span className="error-message">
+                      <AlertCircle size={14} strokeWidth={2.2} />
+                      {errors.specialization}
+                    </span>
+                  )}
+
+                  {/* ECG notice for cardiologists */}
+                  {dentistFormData.specialization && (
+                    <div className="dental-ai-notice">
+                      <Sparkles size={18} strokeWidth={2} />
+                      <span>كطبيب أسنان، ستتمكن من استخدام نظام AI لتشخيص تسوس الأسنان من صور الأشعة</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Sub-specialization */}
+                <div className="form-group">
+                  <label className="form-label" htmlFor="dentist-subSpec">
+                    التخصص الفرعي
+                    <span className="label-hint">(اختياري)</span>
+                  </label>
+                  <div className="form-input-wrapper">
+                    <span className="form-input-icon" aria-hidden="true">
+                      <Briefcase size={18} strokeWidth={2} />
+                    </span>
+                    <input
+                      id="dentist-subSpec"
+                      type="text"
+                      name="subSpecialization"
+                      className="form-input"
+                      value={dentistFormData.subSpecialization}
+                      onChange={handleDentistChange}
+                      placeholder="مثال: جراحة القلب المفتوح"
+                    />
+                  </div>
+                </div>
+
+                {/* Hospital affiliation */}
+                <div className="form-group">
+                  <label className="form-label" htmlFor="dentist-hospital">
+                    مكان العمل / المستشفى <span className="required-mark">*</span>
+                  </label>
+                  <div className="form-input-wrapper">
+                    <span className="form-input-icon" aria-hidden="true">
+                      <Hospital size={18} strokeWidth={2} />
+                    </span>
+                    <input
+                      id="dentist-hospital"
+                      type="text"
+                      name="hospitalAffiliation"
+                      className={`form-input ${errors.hospitalAffiliation ? 'error' : ''}`}
+                      value={dentistFormData.hospitalAffiliation}
+                      onChange={handleDentistChange}
+                      placeholder="اسم المستشفى أو المركز الصحي"
+                    />
+                  </div>
+                  {errors.hospitalAffiliation && (
+                    <span className="error-message">
+                      <AlertCircle size={14} strokeWidth={2.2} />
+                      {errors.hospitalAffiliation}
+                    </span>
+                  )}
+                </div>
+
+                {/* Years + fee */}
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="dentist-years">
+                      سنوات الخبرة <span className="required-mark">*</span>
+                    </label>
+                    <div className="form-input-wrapper">
+                      <span className="form-input-icon" aria-hidden="true">
+                        <Clock size={18} strokeWidth={2} />
+                      </span>
+                      <input
+                        id="dentist-years"
+                        type="number"
+                        name="yearsOfExperience"
+                        className={`form-input ${errors.yearsOfExperience ? 'error' : ''}`}
+                        value={dentistFormData.yearsOfExperience}
+                        onChange={handleDentistChange}
+                        placeholder="0-60"
+                        min="0"
+                        max="60"
+                      />
+                    </div>
+                    {errors.yearsOfExperience && (
+                      <span className="error-message">
+                        <AlertCircle size={14} strokeWidth={2.2} />
+                        {errors.yearsOfExperience}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label" htmlFor="dentist-fee">
+                      رسوم الكشف (ل.س) <span className="required-mark">*</span>
+                    </label>
+                    <div className="form-input-wrapper">
+                      <span className="form-input-icon" aria-hidden="true">
+                        <Briefcase size={18} strokeWidth={2} />
+                      </span>
+                      <input
+                        id="dentist-fee"
+                        type="number"
+                        name="consultationFee"
+                        className={`form-input ${errors.consultationFee ? 'error' : ''}`}
+                        value={dentistFormData.consultationFee}
+                        onChange={handleDentistChange}
+                        placeholder="مثال: 50000"
+                        min="0"
+                      />
+                    </div>
+                    {errors.consultationFee && (
+                      <span className="error-message">
+                        <AlertCircle size={14} strokeWidth={2.2} />
+                        {errors.consultationFee}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* ═══ Calendly-style weekly schedule editor ═══ */}
+                {/* Replaces the legacy 7-button weekday grid.
+                    The doctor now defines exact working hours per day with
+                    multi-period support (morning + afternoon shifts), slot
+                    duration, and booking window. The backend auto-generates
+                    availability_slots from this template on admin approval. */}
+                <div className="form-group form-group-schedule">
+                  <WeeklyScheduleEditor
+                    mode="signup"
+                    value={dentistFormData.scheduleTemplate}
+                    onChange={handleDentistScheduleTemplateChange}
+                    errors={{
+                      weeklyPattern: errors.scheduleTemplate || errors.availableDays,
+                    }}
+                  />
+                  {(errors.scheduleTemplate || errors.availableDays) && (
+                    <span className="error-message">
+                      <AlertCircle size={14} strokeWidth={2.2} />
+                      {errors.scheduleTemplate || errors.availableDays}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ═══ STEP 3: Documents ═══ */}
+            {currentStep === 3 && (
+              <div className="form-step">
+                <div className="documents-intro">
+                  <div className="documents-intro-icon">
+                    <Paperclip size={22} strokeWidth={2} />
+                  </div>
+                  <div>
+                    <h3>الوثائق المطلوبة</h3>
+                    <p>يرجى رفع الوثائق التالية للتحقق من هويتك المهنية. الحد الأقصى لحجم الملف: 5 ميجابايت.</p>
+                  </div>
+                </div>
+
+                <FileUploadField
+                  id="dentLicenseDocument"
+                  label="صورة الترخيص الطبي"
+                  hint="PDF, JPG, PNG حتى 5MB"
+                  required
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  Icon={FileText}
+                  file={dentistFormData.licenseDocument}
+                  error={errors.licenseDocument}
+                  onFileChange={(file) => handleDentistFileUpload('licenseDocument', file)}
+                  onFileRemove={() => handleDentistFileRemove('licenseDocument')}
+                />
+
+                <FileUploadField
+                  id="dentMedicalCertificate"
+                  label="صورة شهادة الطب"
+                  hint="PDF, JPG, PNG حتى 5MB"
+                  required
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  Icon={GraduationCap}
+                  file={dentistFormData.medicalCertificate}
+                  error={errors.medicalCertificate}
+                  onFileChange={(file) => handleDentistFileUpload('medicalCertificate', file)}
+                  onFileRemove={() => handleDentistFileRemove('medicalCertificate')}
+                />
+
+                <FileUploadField
+                  id="dentProfilePhoto"
+                  label="صورة شخصية"
+                  hint="اختياري — JPG, PNG حتى 5MB"
+                  required={false}
+                  accept=".jpg,.jpeg,.png"
+                  Icon={Camera}
+                  file={dentistFormData.profilePhoto}
+                  error={errors.profilePhoto}
+                  onFileChange={(file) => handleDentistFileUpload('profilePhoto', file)}
+                  onFileRemove={() => handleDentistFileRemove('profilePhoto')}
+                />
+
+                <div className="form-group">
+                  <label className="form-label" htmlFor="dentist-notes">
+                    ملاحظات إضافية
+                    <span className="label-hint">(اختياري)</span>
+                  </label>
+                  <textarea
+                    id="dentist-notes"
+                    name="additionalNotes"
+                    className="form-input"
+                    value={dentistFormData.additionalNotes}
+                    onChange={handleDentistChange}
+                    placeholder="أي معلومات إضافية تريد إضافتها للطلب"
+                    rows="3"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* ═══ STEP 4: Review ═══ */}
+            {currentStep === 4 && (
+              <div className="form-step review-step">
+                <div className="review-header">
+                  <div className="review-header-icon">
+                    <ClipboardCheck size={28} strokeWidth={2} />
+                  </div>
+                  <h3>مراجعة البيانات</h3>
+                  <p>تأكد من صحة جميع البيانات قبل تقديم الطلب</p>
+                </div>
+
+                <div className="review-sections">
+                  {/* Personal Info */}
+                  <div className="review-section">
+                    <h4>
+                      <User size={16} strokeWidth={2.2} />
+                      المعلومات الشخصية
+                    </h4>
+                    <div className="review-grid">
+                      <div className="review-item full-width">
+                        <span className="review-label">الاسم الكامل</span>
+                        <span className="review-value">
+                          {dentistFormData.firstName} {dentistFormData.fatherName} {dentistFormData.lastName}
+                        </span>
+                      </div>
+                      <div className="review-item">
+                        <span className="review-label">اسم الأم</span>
+                        <span className="review-value">{dentistFormData.motherName}</span>
+                      </div>
+                      <div className="review-item">
+                        <span className="review-label">الرقم الوطني</span>
+                        <span className="review-value" dir="ltr">{dentistFormData.nationalId}</span>
+                      </div>
+                      <div className="review-item">
+                        <span className="review-label">البريد الإلكتروني</span>
+                        <span className="review-value" dir="ltr">{dentistFormData.email}</span>
+                      </div>
+                      <div className="review-item">
+                        <span className="review-label">رقم الهاتف</span>
+                        <span className="review-value" dir="ltr">{dentistFormData.phoneNumber}</span>
+                      </div>
+                      <div className="review-item">
+                        <span className="review-label">المحافظة</span>
+                        <span className="review-value">
+                          {SYRIAN_GOVERNORATES.find((g) => g.id === dentistFormData.governorate)?.nameAr}
+                        </span>
+                      </div>
+                      <div className="review-item">
+                        <span className="review-label">المدينة</span>
+                        <span className="review-value">{dentistFormData.city}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Professional Info */}
+                  <div className="review-section">
+                    <h4>
+                      <Briefcase size={16} strokeWidth={2.2} />
+                      المعلومات المهنية
+                    </h4>
+                    <div className="review-grid">
+                      <div className="review-item">
+                        <span className="review-label">رقم الترخيص</span>
+                        <span className="review-value" dir="ltr">
+                          {dentistFormData.dentalLicenseNumber.toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="review-item">
+                        <span className="review-label">التخصص</span>
+                        <span className="review-value">
+                          {selectedDentSpecialization?.nameAr}
+                          {selectedDentSpecialization?.hasECG && ' (Caries AI)'}
+                        </span>
+                      </div>
+                      <div className="review-item">
+                        <span className="review-label">مكان العمل</span>
+                        <span className="review-value">{dentistFormData.hospitalAffiliation}</span>
+                      </div>
+                      <div className="review-item">
+                        <span className="review-label">سنوات الخبرة</span>
+                        <span className="review-value">{dentistFormData.yearsOfExperience} سنة</span>
+                      </div>
+                      <div className="review-item">
+                        <span className="review-label">رسوم الكشف</span>
+                        <span className="review-value">{dentistFormData.consultationFee} ل.س</span>
+                      </div>
+                      <div className="review-item full-width">
+                        <span className="review-label">أيام العمل</span>
+                        <span className="review-value">
+                          {dentistFormData.availableDays
+                            .map((d) => WEEKDAYS.find((w) => w.id === d)?.nameAr)
+                            .join(' • ') || 'لم يتم تحديد أيام'}
+                        </span>
+                      </div>
+                      {/* ── Schedule template review (v2) ─────────────────── */}
+                      {dentistFormData.scheduleTemplate && (
+                        <>
+                          <div className="review-item">
+                            <span className="review-label">مدة الموعد</span>
+                            <span className="review-value">
+                              {dentistFormData.scheduleTemplate.slotDuration} دقيقة
+                            </span>
+                          </div>
+                          <div className="review-item">
+                            <span className="review-label">نافذة الحجز</span>
+                            <span className="review-value">
+                              {dentistFormData.scheduleTemplate.bookingWindowDays} يوم
+                            </span>
+                          </div>
+                          <div className="review-item full-width">
+                            <span className="review-label">إجمالي ساعات العمل الأسبوعية</span>
+                            <span className="review-value">
+                              {(() => {
+                                const WEEKDAY_IDS = [
+                                  'Sunday', 'Monday', 'Tuesday', 'Wednesday',
+                                  'Thursday', 'Friday', 'Saturday',
+                                ];
+                                let totalMin = 0;
+                                WEEKDAY_IDS.forEach((day) => {
+                                  const periods = dentistFormData.scheduleTemplate
+                                    .weeklyPattern?.[day] || [];
+                                  periods.forEach((p) => {
+                                    const [sh, sm] = (p.startTime || '0:0').split(':').map(Number);
+                                    const [eh, em] = (p.endTime || '0:0').split(':').map(Number);
+                                    const startMin = (sh * 60) + (sm || 0);
+                                    const endMin = (eh * 60) + (em || 0);
+                                    if (endMin > startMin) totalMin += (endMin - startMin);
+                                  });
+                                });
+                                const h = Math.floor(totalMin / 60);
+                                const m = totalMin % 60;
+                                if (h === 0 && m === 0) return '—';
+                                if (m === 0) return `${h} ساعة`;
+                                if (h === 0) return `${m} دقيقة`;
+                                return `${h} ساعة ${m} دقيقة`;
+                              })()}
+                            </span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Documents */}
+                  <div className="review-section">
+                    <h4>
+                      <Paperclip size={16} strokeWidth={2.2} />
+                      الوثائق المرفقة
+                    </h4>
+                    <div className="review-docs">
+                      <div className={`review-doc ${dentistFormData.licenseDocument ? 'attached' : 'missing'}`}>
+                        {dentistFormData.licenseDocument
+                          ? <Check size={16} strokeWidth={2.5} />
+                          : <X size={16} strokeWidth={2.5} />}
+                        <span>
+                          الترخيص الطبي: {dentistFormData.licenseDocument?.name || 'غير مرفق'}
+                        </span>
+                      </div>
+                      <div className={`review-doc ${dentistFormData.medicalCertificate ? 'attached' : 'missing'}`}>
+                        {dentistFormData.medicalCertificate
+                          ? <Check size={16} strokeWidth={2.5} />
+                          : <X size={16} strokeWidth={2.5} />}
+                        <span>
+                          شهادة الطب: {dentistFormData.medicalCertificate?.name || 'غير مرفق'}
+                        </span>
+                      </div>
+                      <div className={`review-doc ${dentistFormData.profilePhoto ? 'attached' : 'missing'}`}>
+                        {dentistFormData.profilePhoto
+                          ? <Check size={16} strokeWidth={2.5} />
+                          : <X size={16} strokeWidth={2.5} />}
+                        <span>
+                          الصورة الشخصية: {dentistFormData.profilePhoto?.name || 'غير مرفقة'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="review-agreement">
+                  <label className="checkbox-label">
+                    <input type="checkbox" required />
+                    <span className="checkbox-custom" />
+                    <span>
+                      أقر بأن جميع المعلومات المقدمة صحيحة وأوافق على
+                      <Link to="/terms" target="_blank" style={{ color: 'var(--tm-action)', fontWeight: 700, margin: '0 4px' }}>
+                        الشروط والأحكام
+                      </Link>
+                      وسياسة الخصوصية
+                    </span>
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* Form actions */}
+            <div className="form-actions">
+              {currentStep > 1 && (
+                <button type="button" className="btn-secondary" onClick={handlePrev}>
+                  <ArrowRight size={18} strokeWidth={2.2} />
+                  <span>السابق</span>
+                </button>
+              )}
+
+              {currentStep < DENTIST_TOTAL_STEPS ? (
+                <button type="button" className="btn-primary" onClick={handleNext}>
+                  <span>التالي</span>
+                  <ArrowLeft size={18} strokeWidth={2.2} />
+                </button>
+              ) : (
+                <button type="submit" className="btn-primary">
+                  <Send size={18} strokeWidth={2.2} />
+                  <span>تقديم الطلب</span>
+                </button>
+              )}
+            </div>
+
+            <div className="login-link">
+              لديك حساب بالفعل؟
+              <Link to="/">تسجيل الدخول</Link>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+    );
+  }
+
+
+    /* ═════════════════════════════════════════════════════════════════
      FALLBACK — should never hit if flow control is correct
      ═════════════════════════════════════════════════════════════════ */
 

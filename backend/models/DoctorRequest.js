@@ -77,14 +77,22 @@ const LAB_TECH_SPECIALIZATIONS = [
   'Immunology', 'Molecular Biology', 'Histopathology',
 ];
 
-// Combined — all valid specialization values across all three types
+// Dentist specializations (from patient360_db_final.js — dentists collection)
+const DENTIST_SPECIALIZATIONS = [
+  'General Dentistry', 'Orthodontics', 'Endodontics',
+  'Periodontics', 'Prosthodontics', 'Oral Surgery',
+  'Pediatric Dentistry', 'Cosmetic Dentistry', 'Implantology',
+];
+
+// Combined — all valid specialization values across all four types
 const ALL_SPECIALIZATIONS = [
   ...DOCTOR_SPECIALIZATIONS,
   ...PHARMACIST_SPECIALIZATIONS,
   ...LAB_TECH_SPECIALIZATIONS,
+  ...DENTIST_SPECIALIZATIONS,
 ];
 
-const REQUEST_TYPES = ['doctor', 'pharmacist', 'lab_technician'];
+const REQUEST_TYPES = ['doctor', 'pharmacist', 'lab_technician', 'dentist'];
 
 const STATUSES = ['pending', 'approved', 'rejected'];
 
@@ -397,6 +405,19 @@ const DoctorRequestSchema = new Schema(
     },
     newLaboratoryData: {
       type: Schema.Types.Mixed,
+    },
+
+    // ══════════════════════════════════════════════════════════════════════
+    // DENTIST-SPECIFIC FIELDS (used when requestType = 'dentist')
+    // Dentists are stored in a SEPARATE collection (`dentists`) with their
+    // own license number and specialization enum. To avoid shadowing the
+    // doctor's medicalLicenseNumber, we use a dedicated field.
+    // ══════════════════════════════════════════════════════════════════════
+    dentalLicenseNumber: {
+      type: String,
+      trim: true,
+      uppercase: true,
+      index: true,
     },
 
     // ── Additional notes (all types) ──────────────────────────────────────

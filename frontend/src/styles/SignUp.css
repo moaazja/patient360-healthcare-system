@@ -879,6 +879,35 @@
   flex-shrink: 0;
 }
 
+/* ── Dentist variant (clone of .form-header.doctor + .doctor-header-badge) ── */
+/* The dentist signup is a 1:1 clone of the doctor signup, so it reuses the   */
+/* same visual treatment with a different selector for namespacing.            */
+
+.form-header.dentist {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.dentist-header-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(var(--tm-action-rgb), 0.10);
+  color: var(--tm-action);
+  border: 1px solid rgba(var(--tm-action-rgb), 0.18);
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-family: 'Cairo', sans-serif;
+}
+
+.dentist-header-badge svg {
+  flex-shrink: 0;
+}
+
 .form-title {
   font-size: clamp(1.5rem, 1.1rem + 1.4vw, 2rem);
   font-weight: 800;
@@ -1540,6 +1569,23 @@ textarea.form-input {
   letter-spacing: 0.05em;
 }
 
+/* ── Dental AI badge — same visual as ECG AI but for dental specs ───────── */
+/* Shown on every dental specialization card (all dentists get Caries AI).    */
+
+.spec-card-ai-badge {
+  position: absolute;
+  top: 6px;
+  inset-inline-end: 6px;
+  font-size: 0.6rem;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--tm-gradient);
+  color: #FFFFFF;
+  font-family: 'Inter', sans-serif;
+  letter-spacing: 0.05em;
+}
+
 /* ECG notice when cardiology is picked */
 
 .ecg-notice {
@@ -1559,6 +1605,29 @@ textarea.form-input {
 }
 
 .ecg-notice svg {
+  flex-shrink: 0;
+}
+
+/* ── Dental AI notice — appears whenever a dental specialization is picked ─ */
+/* Same visual treatment as the cardiology ECG notice.                        */
+
+.dental-ai-notice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: var(--tm-success-light);
+  border: 1px solid rgba(0, 137, 123, 0.20);
+  border-right: 3px solid var(--tm-success);
+  color: var(--tm-success);
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-family: 'Cairo', sans-serif;
+  animation: su-stepIn 0.4s ease;
+}
+
+.dental-ai-notice svg {
   flex-shrink: 0;
 }
 

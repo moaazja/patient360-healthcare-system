@@ -123,9 +123,8 @@ function parseConfidence(value) {
 
   if (!Number.isFinite(n) || n < 0) n = 0;
   if (n >= 1)                       n = 0.9999;
+  if (n === 0) n = 0.0001;
 
-  // Force BSON Double — JS `0` would otherwise serialize as Int32
-  // and the $jsonSchema validator (bsonType: "double") would reject it.
   return new Double(n);
 }
 
@@ -286,7 +285,7 @@ function mapFastApiResponse(r) {
       aiRiskLevel:        'low',
       aiAssessment:       'لم يتم تقديم وصف كافٍ للتحليل.',
       aiFirstAid:         ['يرجى إعادة المحاولة بوصف أوضح للأعراض.'],
-      confidenceScore:    new Double(0),
+      confidenceScore:    parseConfidence(0),
       recommendAmbulance: false,
     };
   }
@@ -299,7 +298,7 @@ function mapFastApiResponse(r) {
       aiRiskLevel:        'low',
       aiAssessment:       message,
       aiFirstAid:         ['يرجى طرح سؤال طبي محدد أو التوجه إلى المختص المناسب.'],
-      confidenceScore:    new Double(0),
+      confidenceScore:    parseConfidence(0),
       recommendAmbulance: false,
       outOfScopeMessage:  message,
     };
@@ -331,7 +330,7 @@ function mapFastApiResponse(r) {
         aiRiskLevel:        'low',
         aiAssessment:       'لم نتمكن من تحديد الحالة بدقة.',
         aiFirstAid:         ['يرجى استشارة الطبيب لتقييم الحالة.'],
-        confidenceScore:    new Double(0),
+        confidenceScore:    parseConfidence(0),
         recommendAmbulance: false,
       };
     }

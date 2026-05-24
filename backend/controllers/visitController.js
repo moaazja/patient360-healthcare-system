@@ -28,7 +28,7 @@
  */
 
 const {
-  Visit, Person, Children, Patient, Doctor, AuditLog, LabTest
+  Visit, Person, Children, Patient, Doctor, Dentist, AuditLog, LabTest
 } = require('../models');
 const { createNotification } = require('./notificationController');
 
@@ -577,20 +577,51 @@ return res.json({
 };
 
 // ============================================================================
-// 3. GET DOCTOR VISITS
+// 3. GET DOCTOR/DENTIST VISITS (role-aware)
 // ============================================================================
 
 /**
- * @route   GET /api/visits/doctor/:doctorId
- * @desc    List visits handled by a specific doctor
- * @access  Private (doctor self, admin)
+ * @route   GET /api/doctor/visits
+ * @desc    List visits handled by the logged-in provider (doctor OR dentist).
+ *          Auto-detects the provider type from req.user.roles and filters
+ *          the visits collection by the appropriate foreign key
+ *          (doctorId or dentistId).
+ * @access  Private (doctor, dentist — self only)
+ *
+ * Query: ?page=1&limit=20&status=in_progress
  */
 exports.getDoctorVisits = async (req, res) => {
   try {
-    const { doctorId } = req.params;
     const { page = 1, limit = 20, status } = req.query;
 
-    const query = { doctorId };
+    // ── Resolve provider from JWT (no more URL param) ────────────────────
+    let providerQuery = null;
+    let providerType = null;
+
+    if (req.user?.roles?.includes('doctor')) {
+      const doctor = await Doctor.findOne({ personId: req.user.personId })
+        .select('_id').lean();
+      if (doctor) {
+        providerQuery = { doctorId: doctor._id };
+        providerType = 'doctor';
+      }
+    } else if (req.user?.roles?.includes('dentist')) {
+      const dentist = await Dentist.findOne({ personId: req.user.personId })
+        .select('_id').lean();
+      if (dentist) {
+        providerQuery = { dentistId: dentist._id };
+        providerType = 'dentist';
+      }
+    }
+
+    if (!providerQuery) {
+      return res.status(403).json({
+        success: false,
+        message: 'الحساب غير مرتبط بطبيب أو طبيب أسنان'
+      });
+    }
+
+    const query = { ...providerQuery };
     if (status) query.status = status;
 
     const safeLimit = Math.min(parseInt(limit, 10) || 20, 100);
@@ -609,16 +640,17 @@ exports.getDoctorVisits = async (req, res) => {
 
     return res.json({
       success: true,
+      providerType,
       count: total,
       page: safePage,
       pages: Math.ceil(total / safeLimit),
       visits
     });
   } catch (error) {
-    console.error('Get doctor visits error:', error);
+    console.error('Get provider visits error:', error);
     return res.status(500).json({
       success: false,
-      message: 'حدث خطأ في جلب زيارات الطبيب'
+      message: 'حدث خطأ في جلب الزيارات'
     });
   }
 };
@@ -684,24 +716,28 @@ exports.updateVisit = async (req, res) => {
       });
     }
 
-    // ── Ownership check: only the treating doctor or admin can update ─────
+    // ── Ownership check: only the treating provider or admin can update ──
     const isAdmin = req.user.roles?.includes('admin');
-    const isOwnerDoctor = visit.doctorId
-      && String(visit.doctorId) === String(req.user.personId);
-    // Note: comparing to req.user.personId is approximate; in practice you
-    // would look up the Doctor by personId. For now this gates obvious abuse.
+    let isOwnerProvider = false;
 
-    if (!isAdmin && !isOwnerDoctor) {
-      // Looser fallback — verify by the doctor record
-      const doctor = await Doctor.findOne({ personId: req.user.personId }).lean();
-      const isDoctorOwner = doctor && String(visit.doctorId) === String(doctor._id);
-      if (!isDoctorOwner) {
-        console.log('❌ Update blocked — not owner');
-        return res.status(403).json({
-          success: false,
-          message: 'ليس لديك صلاحية لتعديل هذه الزيارة'
-        });
+    if (!isAdmin) {
+      if (req.user.roles?.includes('doctor') && visit.doctorId) {
+        const doctor = await Doctor.findOne({ personId: req.user.personId })
+          .select('_id').lean();
+        isOwnerProvider = doctor && String(visit.doctorId) === String(doctor._id);
+      } else if (req.user.roles?.includes('dentist') && visit.dentistId) {
+        const dentist = await Dentist.findOne({ personId: req.user.personId })
+          .select('_id').lean();
+        isOwnerProvider = dentist && String(visit.dentistId) === String(dentist._id);
       }
+    }
+
+    if (!isAdmin && !isOwnerProvider) {
+      console.log('❌ Update blocked — not owner');
+      return res.status(403).json({
+        success: false,
+        message: 'ليس لديك صلاحية لتعديل هذه الزيارة'
+      });
     }
 
     // ── Update allowed fields

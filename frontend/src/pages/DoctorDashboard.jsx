@@ -91,6 +91,7 @@ import {
   CheckCircle2,
   AlertCircle,
   AlertTriangle,
+  AlertOctagon,
   Info,
   XCircle,
   Clock,
@@ -124,6 +125,7 @@ import {
   Footprints,
   ScanLine,
   Zap,
+  Smile,
 
   // ── أيقونات قسم طلب التحاليل ─────────────────────────────────
   FlaskConical,
@@ -138,9 +140,10 @@ import {
 import Navbar from '../components/common/Navbar';
 import { logout as logoutService } from '../services/authService';
 import { useTheme } from '../context/ThemeProvider';
-import { doctorAPI } from '../services/api';
+import { doctorAPI, drugRiskAPI } from '../services/api';
 import WeeklyScheduleEditor, { createDefaultScheduleTemplate } from '../components/WeeklyScheduleEditor';
 import '../styles/DoctorDashboard.css';
+import '../styles/DrugRiskOverlay.css';
 
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -210,6 +213,50 @@ const XRAY_MODELS = [
     labelAr: 'كسور القدم',
     descAr: 'تشخيص كسور عظام القدم والساق',
     Icon: Footprints,
+  },
+  {
+    id: 'knee',
+    labelAr: 'مفصل الركبة',
+    descAr: 'تشخيص خشونة الركبة والتهاب المفصل (3 درجات)',
+    Icon: Bone,
+  },
+];
+
+/**
+ * Knee OA — Arabic labels for the 3 prediction classes.
+ * Matches the FastAPI service output:
+ *    "Normal"     → سليم
+ *    "Mild_OA"    → التهاب خفيف
+ *    "Severe_OA"  → التهاب شديد
+ */
+const KNEE_OA_CLASS_LABELS_AR = {
+  Normal:    { ar: 'سليم',           severity: 'normal'   },
+  Mild_OA:   { ar: 'التهاب خفيف',    severity: 'warning'  },
+  Severe_OA: { ar: 'التهاب شديد',    severity: 'critical' },
+};
+
+/**
+ * Dental Caries — Arabic labels for the 2 prediction classes from the
+ * EfficientNetV2-B0 model running on port 8004. Routed via the Node.js
+ * backend at /api/dental-caries/analyze.
+ *
+ * FastAPI returns class strings: "Caries" or "Not_Caries"
+ */
+const DENTAL_CARIES_CLASS_LABELS_AR = {
+  Caries:     { ar: 'تسوس مكتشف',     severity: 'critical' },
+  Not_Caries: { ar: 'لا يوجد تسوس',   severity: 'normal'   },
+};
+
+/**
+ * Dental AI tools — dentist-only tab.
+ * Single model for now (caries detection from intra-oral X-ray photo).
+ */
+const DENTAL_AI_MODELS = [
+  {
+    id: 'caries',
+    labelAr: 'تشخيص تسوس الأسنان',
+    descAr: 'تشخيص تسوس الأسنان من صور الأشعة باستخدام EfficientNetV2-B0',
+    Icon: Smile,
   },
 ];
 
@@ -864,6 +911,25 @@ const DoctorDashboard = () => {
   });
 
   /* ─────────────────────────────────────────────────────────────────
+     STATE — Drug Risk Check
+     Doctor-facing flow: every time the doctor adds a medication to a
+     visit, we run an auto-check against the patient's allergies +
+     current medications stored in MongoDB. If the result is a high
+     risk (مرتفع/متوسط), we open a confirmation overlay; otherwise
+     we add the drug silently (decision 3.ج).
+     ───────────────────────────────────────────────────────────────── */
+  const [drugCheckLoading, setDrugCheckLoading] = useState(false);
+  // The medication waiting for confirmation (kept aside while the
+  // doctor reviews the warning overlay).
+  const [pendingMedication, setPendingMedication] = useState(null);
+  // The full FastAPI/backend response: { _id, result, isHighRisk, ... }
+  const [drugCheckResult, setDrugCheckResult] = useState(null);
+  // Optional doctor justification stored on the override
+  const [overrideJustification, setOverrideJustification] = useState('');
+  // True while the acknowledge POST is in flight
+  const [acknowledging, setAcknowledging] = useState(false);
+
+  /* ─────────────────────────────────────────────────────────────────
      STATE — AI tools (cardiologist ECG + orthopedist X-Ray)
      ───────────────────────────────────────────────────────────────── */
 
@@ -879,6 +945,12 @@ const DoctorDashboard = () => {
   const [xrayPreview, setXrayPreview] = useState(null);
   const [xrayAnalyzing, setXrayAnalyzing] = useState(false);
   const [xrayResult, setXrayResult] = useState(null);
+
+  // Dental Caries AI (dentist only) — same shape as xray for consistency
+  const [dentalFile, setDentalFile] = useState(null);
+  const [dentalPreview, setDentalPreview] = useState(null);
+  const [dentalAnalyzing, setDentalAnalyzing] = useState(false);
+  const [dentalResult, setDentalResult] = useState(null);
 
   /* ─────────────────────────────────────────────────────────────────
      STATE — طلب تحاليل مختبرية (Lab Test Order)
@@ -974,20 +1046,37 @@ const DoctorDashboard = () => {
     [user]
   );
 
-  const hasAITools = isCardiologist || isOrthopedist;
+  // Dentist detection — drives the Dental Caries AI tab instead of
+  // ECG/X-Ray. A dentist account has `roleData.dentist` populated and
+  // the 'dentist' role in the JWT.
+  const isDentist = useMemo(() => {
+    if (!user) return false;
+    if (Array.isArray(user.roles) && user.roles.includes('dentist')
+        && !user.roles.includes('doctor')) {
+      return true;
+    }
+    // Fallback: presence of dental-specific roleData
+    return !!user.roleData?.dentist;
+  }, [user]);
+
+  const hasAITools = isCardiologist || isOrthopedist || isDentist;
 
   // Sidebar nav with conditional AI Tools entry
   const sidebarNav = useMemo(() => {
     const items = [...SIDEBAR_NAV_BASE];
     if (hasAITools) {
+      let labelAr = 'تحليل الأشعة';
+      if (isCardiologist) labelAr = 'تحليل ECG';
+      else if (isDentist)  labelAr = 'تشخيص تسوس الأسنان';
+      // else orthopedist → keeps "تحليل الأشعة"
       items.push({
         id: 'aiTools',
-        labelAr: isCardiologist ? 'تحليل ECG' : 'تحليل الأشعة',
+        labelAr,
         Icon: Sparkles,
       });
     }
     return items;
-  }, [hasAITools, isCardiologist]);
+  }, [hasAITools, isCardiologist, isDentist]);
 
   // Today's appointments (filtered from all appointments)
   const todaysAppointments = useMemo(() => {
@@ -1110,8 +1199,14 @@ const DoctorDashboard = () => {
 
       try {
         const parsedUser = JSON.parse(userData);
-        if (!parsedUser.roles || !parsedUser.roles.includes('doctor')) {
-          openModal('error', 'غير مصرح', 'هذه الصفحة متاحة للأطباء فقط', () => {
+        // DoctorDashboard is shared between doctors AND dentists.
+        // The dashboard is role-aware: a dentist sees the Dental Caries AI
+        // tab in place of ECG, but all the visit/prescription/appointment
+        // logic is identical.
+        const userRoles = parsedUser.roles || [];
+        const isAllowed = userRoles.includes('doctor') || userRoles.includes('dentist');
+        if (!isAllowed) {
+          openModal('error', 'غير مصرح', 'هذه الصفحة متاحة للأطباء وأطباء الأسنان فقط', () => {
             closeModal();
             navigate('/', { replace: true });
           });
@@ -1368,12 +1463,17 @@ const DoctorDashboard = () => {
     setVitalSigns((prev) => ({ ...prev, [field]: value }));
   }, []);
 
-  const handleAddMedication = useCallback(() => {
-    if (!newMedication.medicationName.trim()) {
-      openModal('error', 'حقل مطلوب', 'الرجاء إدخال اسم الدواء');
-      return;
-    }
-    setMedications((prev) => [...prev, { ...newMedication, id: Date.now() }]);
+  /* ─────────────────────────────────────────────────────────────────
+     MEDICATION HANDLERS — with auto drug-risk check
+     ───────────────────────────────────────────────────────────────── */
+
+  /**
+   * Internal: actually push the medication into the visit's list.
+   * Called either directly (no risk / out-of-scope) or after the
+   * doctor explicitly confirms an override.
+   */
+  const commitMedication = useCallback((med) => {
+    setMedications((prev) => [...prev, { ...med, id: Date.now() }]);
     setNewMedication({
       medicationName: '',
       dosage: '',
@@ -1382,7 +1482,122 @@ const DoctorDashboard = () => {
       route: 'oral',
       instructions: '',
     });
-  }, [newMedication, openModal]);
+  }, []);
+
+  const handleAddMedication = useCallback(async () => {
+    // Always validate locally first — backend roundtrip would be wasteful
+    if (!newMedication.medicationName.trim()) {
+      openModal('error', 'حقل مطلوب', 'الرجاء إدخال اسم الدواء');
+      return;
+    }
+
+    // No patient selected → can't run a profile-aware check. Just add.
+    // (Shouldn't happen in normal flow since meds live inside a visit form.)
+    if (!selectedPatient) {
+      commitMedication(newMedication);
+      return;
+    }
+
+    const identifier =
+      selectedPatient.nationalId ||
+      selectedPatient.childRegistrationNumber ||
+      selectedPatient.childId;
+
+    if (!identifier) {
+      // Defensive — we can't run a check without an identifier, but the
+      // medication is still legitimate. Add it and surface a soft warning.
+      console.warn('[drugRisk] no patient identifier available — skipping check');
+      commitMedication(newMedication);
+      return;
+    }
+
+    setDrugCheckLoading(true);
+    try {
+      const res = await drugRiskAPI.checkForPatient({
+        identifier,
+        text: newMedication.medicationName.trim(),
+      });
+
+      if (!res?.success || !res?.check) {
+        // Backend returned a logically-failed response. Fail-open: add
+        // the medication and let the doctor proceed. Log for debugging.
+        console.warn('[drugRisk] check returned no result, adding anyway:', res);
+        commitMedication(newMedication);
+        return;
+      }
+
+      const { check } = res;
+
+      // Decision 3.ج — out-of-scope drugs: silent skip for doctors
+      // (no warning, no overlay — just add the medication normally).
+      if (check.isOutOfScope) {
+        commitMedication(newMedication);
+        return;
+      }
+
+      // Low risk → safe to add without bothering the doctor
+      if (!check.isHighRisk) {
+        commitMedication(newMedication);
+        return;
+      }
+
+      // High risk → freeze the medication and open the confirmation overlay
+      setPendingMedication(newMedication);
+      setDrugCheckResult(check);
+      setOverrideJustification('');
+    } catch (err) {
+      // Network failure (503 from backend) — fail-open: the safer choice
+      // here is to NOT block the doctor; they can override based on their
+      // own clinical judgment. We log so we know if it happens often.
+      console.error('[drugRisk] check failed (network):', err);
+      commitMedication(newMedication);
+    } finally {
+      setDrugCheckLoading(false);
+    }
+  }, [
+    newMedication,
+    selectedPatient,
+    openModal,
+    commitMedication,
+  ]);
+
+  /**
+   * Doctor pressed "أكدت الخطر، أكمل" in the warning overlay.
+   * 1) POST /api/drug-risk/:id/acknowledge with the optional justification
+   * 2) On success → commit the medication and close the overlay
+   * If the acknowledge call fails, we still commit (the doctor already
+   * decided) but surface a console warning so ops can investigate.
+   */
+  const handleConfirmRiskOverride = useCallback(async () => {
+    if (!pendingMedication || !drugCheckResult?._id) return;
+    setAcknowledging(true);
+    try {
+      await drugRiskAPI.acknowledgeOverride(
+        drugCheckResult._id,
+        overrideJustification.trim()
+      );
+    } catch (err) {
+      console.error('[drugRisk] acknowledge failed:', err);
+      // Still proceed — the doctor made an informed decision either way.
+    } finally {
+      commitMedication(pendingMedication);
+      setPendingMedication(null);
+      setDrugCheckResult(null);
+      setOverrideJustification('');
+      setAcknowledging(false);
+    }
+  }, [pendingMedication, drugCheckResult, overrideJustification, commitMedication]);
+
+  /**
+   * Doctor pressed "إلغاء" — abandon the medication entirely and close.
+   * The drug_risk_checks record stays in the DB (audit trail), the
+   * doctorOverride.acknowledged field stays false.
+   */
+  const handleCancelRiskOverride = useCallback(() => {
+    setPendingMedication(null);
+    setDrugCheckResult(null);
+    setOverrideJustification('');
+  }, []);
 
   const handleRemoveMedication = useCallback((id) => {
     setMedications((prev) => prev.filter((m) => m.id !== id));
@@ -1498,12 +1713,24 @@ const DoctorDashboard = () => {
     setXrayAnalyzing(true);
     try {
       const formData = new FormData();
-      // Field name MUST match the multer config in backend/routes/xray.js
-      formData.append('xray_image', xrayFile);
 
-      const data = xrayModel === 'hand'
-        ? await doctorAPI.analyzeXRayHand(formData)
-        : await doctorAPI.analyzeXRayLeg(formData);
+      // Field name MUST match the multer config on the backend.
+      // - knee:  routes/kneeXray/kneeXray.js  → field "knee_image"
+      // - hand:  routes/xray.js               → field "xray_image"
+      // - leg:   routes/xray.js               → field "xray_image"
+      const fieldName = xrayModel === 'knee' ? 'knee_image' : 'xray_image';
+      formData.append(fieldName, xrayFile);
+
+      let data;
+      if (xrayModel === 'hand') {
+        data = await doctorAPI.analyzeXRayHand(formData);
+      } else if (xrayModel === 'leg') {
+        data = await doctorAPI.analyzeXRayLeg(formData);
+      } else if (xrayModel === 'knee') {
+        data = await doctorAPI.analyzeXRayKnee(formData);
+      } else {
+        throw new Error('نوع التحليل غير معروف');
+      }
 
       // Defensive: backend always echoes bodyPart, but fall back to the
       // currently-selected model so the UI never shows a blank label.
@@ -1526,6 +1753,68 @@ const DoctorDashboard = () => {
       setXrayAnalyzing(false);
     }
   }, [xrayFile, xrayModel, openModal]);
+
+  /* ─────────────────────────────────────────────────────────────────
+     DENTAL CARIES HANDLERS (dentist only)
+     ─────────────────────────────────────────────────────────────────
+     Mirrors the X-ray flow but talks to a different FastAPI service:
+       POST /api/dental-caries/analyze  (proxied by the Node backend)
+     The model returns 2 classes (Caries / Not_Caries) with a confidence
+     percentage and per-class probabilities — render shape identical to
+     the knee OA tool so we can reuse the same result card.
+     ───────────────────────────────────────────────────────────────── */
+
+  const handleDentalUpload = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      openModal('error', 'الملف كبير', 'حجم الصورة يجب أن لا يتجاوز 10 ميجابايت');
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      openModal('error', 'ملف غير صالح', 'يجب أن يكون الملف صورة (PNG أو JPG)');
+      return;
+    }
+    setDentalFile(file);
+    setDentalResult(null);
+    const reader = new FileReader();
+    reader.onloadend = () => setDentalPreview(reader.result);
+    reader.readAsDataURL(file);
+  }, [openModal]);
+
+  const handleRemoveDental = useCallback(() => {
+    setDentalFile(null);
+    setDentalPreview(null);
+    setDentalResult(null);
+  }, []);
+
+  const handleAnalyzeDental = useCallback(async () => {
+    if (!dentalFile) return;
+    setDentalAnalyzing(true);
+    try {
+      const formData = new FormData();
+      // Field name matches the multer config: /api/dental-caries/analyze
+      // expects field "tooth_image"
+      formData.append('tooth_image', dentalFile);
+
+      const data = await doctorAPI.analyzeDentalCaries(formData);
+      console.log('[DoctorDashboard] Dental Caries output:', data);
+      setDentalResult(data);
+
+      setTimeout(() => {
+        aiResultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
+    } catch (error) {
+      console.error('[DoctorDashboard] Dental caries analysis error:', error);
+      openModal(
+        'error',
+        'فشل التحليل',
+        error.message || 'حدث خطأ في تحليل صورة الأشعة السنية'
+      );
+    } finally {
+      setDentalAnalyzing(false);
+    }
+  }, [dentalFile, openModal]);
 
   /* ─────────────────────────────────────────────────────────────────
      SAVE VISIT
@@ -2060,8 +2349,12 @@ const DoctorDashboard = () => {
      RENDER — main shell, sidebar, and primary sections
      ═════════════════════════════════════════════════════════════════ */
 
+  // Provider info — uses the `isDentist` memo declared with the other
+  // memoized values; pull the role-specific subdocument for display.
+  const roleData = user.roleData?.doctor || user.roleData?.dentist || {};
+
   const doctorName = `د. ${user.firstName || ''} ${user.fatherName ? user.fatherName + ' ' : ''}${user.lastName || ''}`.trim();
-  const doctorSpec = user.roleData?.doctor?.specialization || 'طبيب';
+  const doctorSpec = roleData.specialization || (isDentist ? 'طبيب أسنان' : 'طبيب');
 
   return (
     <div className="dd-page">
@@ -2077,6 +2370,173 @@ const DoctorDashboard = () => {
         onConfirm={modal.onConfirm}
       />
 
+      {/* ═══════════════════════════════════════════════════════════════
+          Drug Risk Confirmation Overlay
+          ─────────────────────────────────────────────────────────────
+          Triggered when handleAddMedication detects a high-risk drug.
+          The doctor sees:
+            - the drug name + risk level (مرتفع / متوسط)
+            - the reason from the rule engine
+            - any allergy/interaction warnings
+            - an optional textarea to record justification
+            - two actions: confirm-and-add  OR  cancel
+          On confirm we POST to /api/drug-risk/:id/acknowledge so the
+          override is recorded permanently in the audit collection.
+          ═══════════════════════════════════════════════════════════════ */}
+      {pendingMedication && drugCheckResult && (
+        <div
+          className="dr-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="dr-overlay-title"
+          onClick={(e) => {
+            // Click on backdrop closes; clicks inside the panel don't
+            if (e.target === e.currentTarget && !acknowledging) {
+              handleCancelRiskOverride();
+            }
+          }}
+        >
+          <div className="dr-overlay-panel" role="document">
+            {/* Header — risk-toned (red for مرتفع, amber for متوسط) */}
+            <header
+              className={`dr-overlay-header dr-overlay-header--${
+                drugCheckResult.result?.riskLevelAr === 'مرتفع' ? 'high' : 'medium'
+              }`}
+            >
+              <span className="dr-overlay-header-icon" aria-hidden="true">
+                {drugCheckResult.result?.riskLevelAr === 'مرتفع' ? (
+                  <AlertOctagon size={22} strokeWidth={2.2} />
+                ) : (
+                  <AlertTriangle size={22} strokeWidth={2.2} />
+                )}
+              </span>
+              <div className="dr-overlay-header-titles">
+                <h2 id="dr-overlay-title" className="dr-overlay-title">
+                  تحذير: {drugCheckResult.result?.riskLevelAr === 'مرتفع'
+                    ? 'خطر مرتفع'
+                    : 'خطر متوسط'}
+                </h2>
+                {drugCheckResult.result?.drugNameAr && (
+                  <p className="dr-overlay-subtitle">
+                    الدواء: <strong dir="ltr">{drugCheckResult.result.drugNameAr}</strong>
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                className="dr-overlay-close"
+                onClick={handleCancelRiskOverride}
+                disabled={acknowledging}
+                aria-label="إغلاق"
+              >
+                <X size={18} aria-hidden="true" />
+              </button>
+            </header>
+
+            {/* Body — reason / advice / warning / interaction */}
+            <div className="dr-overlay-body">
+              {drugCheckResult.result?.reasonAr && (
+                <section className="dr-overlay-field">
+                  <h3 className="dr-overlay-field-label">
+                    <Info size={14} aria-hidden="true" />
+                    <span>السبب</span>
+                  </h3>
+                  <p className="dr-overlay-field-text">
+                    {drugCheckResult.result.reasonAr}
+                  </p>
+                </section>
+              )}
+
+              {drugCheckResult.result?.adviceAr && (
+                <section className="dr-overlay-field">
+                  <h3 className="dr-overlay-field-label">
+                    <Stethoscope size={14} aria-hidden="true" />
+                    <span>النصيحة</span>
+                  </h3>
+                  <p className="dr-overlay-field-text">
+                    {drugCheckResult.result.adviceAr}
+                  </p>
+                </section>
+              )}
+
+              {drugCheckResult.result?.warningAr && (
+                <section className="dr-overlay-field dr-overlay-field--warning">
+                  <h3 className="dr-overlay-field-label">
+                    <AlertTriangle size={14} aria-hidden="true" />
+                    <span>تحذير</span>
+                  </h3>
+                  <p className="dr-overlay-field-text">
+                    {drugCheckResult.result.warningAr}
+                  </p>
+                </section>
+              )}
+
+              {drugCheckResult.result?.interactionWarningAr && (
+                <section className="dr-overlay-field dr-overlay-field--interaction">
+                  <h3 className="dr-overlay-field-label">
+                    <Pill size={14} aria-hidden="true" />
+                    <span>تفاعل دوائي</span>
+                  </h3>
+                  <p className="dr-overlay-field-text">
+                    {drugCheckResult.result.interactionWarningAr}
+                  </p>
+                </section>
+              )}
+
+              {/* Optional justification textarea — recorded on override */}
+              <section className="dr-overlay-justification">
+                <label className="dr-overlay-justification-label" htmlFor="dr-justification">
+                  مبرّر سريري <span className="dr-overlay-optional">(اختياري)</span>
+                </label>
+                <textarea
+                  id="dr-justification"
+                  className="dr-overlay-justification-input"
+                  value={overrideJustification}
+                  onChange={(e) => setOverrideJustification(e.target.value)}
+                  placeholder="إذا قررت إضافة الدواء رغم التحذير، يمكنك كتابة سبب القرار هنا للأرشيف..."
+                  maxLength={500}
+                  rows={3}
+                  disabled={acknowledging}
+                />
+                <span className="dr-overlay-justification-counter">
+                  {overrideJustification.length} / 500
+                </span>
+              </section>
+            </div>
+
+            {/* Footer — actions */}
+            <footer className="dr-overlay-footer">
+              <button
+                type="button"
+                className="dr-overlay-btn dr-overlay-btn--secondary"
+                onClick={handleCancelRiskOverride}
+                disabled={acknowledging}
+              >
+                <X size={14} aria-hidden="true" />
+                <span>إلغاء، عدم إضافة الدواء</span>
+              </button>
+              <button
+                type="button"
+                className="dr-overlay-btn dr-overlay-btn--danger"
+                onClick={handleConfirmRiskOverride}
+                disabled={acknowledging}
+              >
+                {acknowledging ? (
+                  <>
+                    <Loader2 size={14} className="dd-spin" aria-hidden="true" />
+                    <span>جاري التأكيد...</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck size={14} aria-hidden="true" />
+                    <span>أكدت الخطر، أكمل الإضافة</span>
+                  </>
+                )}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
       {/* Sidebar mobile backdrop */}
       <div
         className={`dd-sidebar-backdrop ${sidebarOpen ? 'open' : ''}`}
@@ -2173,6 +2633,7 @@ const DoctorDashboard = () => {
               <span className="dd-sidebar-role">
                 {isCardiologist ? <Heart size={11} strokeWidth={2.5} />
                  : isOrthopedist ? <Bone size={11} strokeWidth={2.5} />
+                 : isDentist     ? <Smile size={11} strokeWidth={2.5} />
                  : <ShieldCheck size={11} strokeWidth={2.5} />}
                 {doctorSpec}
               </span>
@@ -2302,22 +2763,22 @@ const DoctorDashboard = () => {
                         <Award size={14} strokeWidth={2} />
                         {doctorSpec}
                       </span>
-                      {user.roleData?.doctor?.hospitalAffiliation && (
+                      {roleData.hospitalAffiliation && (
                         <span className="dd-greeting-meta-item">
                           <Hospital size={14} strokeWidth={2} />
-                          {user.roleData.doctor.hospitalAffiliation}
+                          {roleData.hospitalAffiliation}
                         </span>
                       )}
-                      {user.roleData?.doctor?.yearsOfExperience !== undefined && (
+                      {roleData.yearsOfExperience !== undefined && (
                         <span className="dd-greeting-meta-item">
                           <Briefcase size={14} strokeWidth={2} />
-                          {user.roleData.doctor.yearsOfExperience} سنة خبرة
+                          {roleData.yearsOfExperience} سنة خبرة
                         </span>
                       )}
-                      {user.roleData?.doctor?.medicalLicenseNumber && (
+                      {(roleData.medicalLicenseNumber || roleData.dentalLicenseNumber) && (
                         <span className="dd-greeting-meta-item">
                           <IdCard size={14} strokeWidth={2} />
-                          ترخيص: {user.roleData.doctor.medicalLicenseNumber}
+                          ترخيص: {roleData.medicalLicenseNumber || roleData.dentalLicenseNumber}
                         </span>
                       )}
                     </div>
@@ -3537,7 +3998,11 @@ const DoctorDashboard = () => {
                     onClick={() => setPatientTab('ai')}
                   >
                     <Sparkles size={16} strokeWidth={2.2} />
-                    <span>{isCardiologist ? 'تحليل ECG' : 'تحليل الأشعة'}</span>
+                    <span>
+                      {isCardiologist && 'تحليل ECG'}
+                      {isOrthopedist && 'تحليل الأشعة'}
+                      {isDentist && 'تشخيص تسوس'}
+                    </span>
                   </button>
                 )}
               </div>
@@ -4295,9 +4760,19 @@ const DoctorDashboard = () => {
                           type="button"
                           className="dd-meds-add-btn"
                           onClick={handleAddMedication}
+                          disabled={drugCheckLoading}
                         >
-                          <Plus size={16} strokeWidth={2.5} />
-                          <span>إضافة الدواء</span>
+                          {drugCheckLoading ? (
+                            <>
+                              <Loader2 size={16} className="dd-spin" strokeWidth={2.5} />
+                              <span>جاري فحص أمان الدواء...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Plus size={16} strokeWidth={2.5} />
+                              <span>إضافة الدواء</span>
+                            </>
+                          )}
                         </button>
                       </div>
 
@@ -4615,11 +5090,12 @@ const DoctorDashboard = () => {
                 </>
               )}
 
-              {/* ═══ TAB: AI Tools (cardiologist or orthopedist) ═══ */}
+              {/* ═══ TAB: AI Tools (cardiologist, orthopedist, OR dentist) ═══ */}
               {patientTab === 'ai' && hasAITools && (
                 <>
                   {isCardiologist && renderECGTool()}
                   {isOrthopedist && renderXRayTool()}
+                  {isDentist && renderDentalCariesTool()}
                 </>
               )}
             </>
@@ -4644,11 +5120,15 @@ const DoctorDashboard = () => {
                     <Sparkles size={24} strokeWidth={2} />
                   </div>
                   <div>
-                    <h1>{isCardiologist ? 'تحليل تخطيط القلب' : 'تحليل صور الأشعة'}</h1>
+                    <h1>
+                      {isCardiologist && 'تحليل تخطيط القلب'}
+                      {isOrthopedist && 'تحليل صور الأشعة'}
+                      {isDentist && 'تشخيص تسوس الأسنان'}
+                    </h1>
                     <p>
-                      {isCardiologist
-                        ? 'نظام ذكاء اصطناعي لتشخيص حالات القلب من تخطيط ECG'
-                        : 'نظام ذكاء اصطناعي لكشف كسور العظام من صور الأشعة'}
+                      {isCardiologist && 'نظام ذكاء اصطناعي لتشخيص حالات القلب من تخطيط ECG'}
+                      {isOrthopedist && 'نظام ذكاء اصطناعي لكشف كسور العظام من صور الأشعة'}
+                      {isDentist && 'نظام ذكاء اصطناعي لتشخيص تسوس الأسنان من صور الأشعة'}
                     </p>
                   </div>
                 </div>
@@ -4656,6 +5136,7 @@ const DoctorDashboard = () => {
 
               {isCardiologist && renderECGTool()}
               {isOrthopedist && renderXRayTool()}
+              {isDentist && renderDentalCariesTool()}
             </>
           )}
         </main>
@@ -5293,8 +5774,34 @@ const DoctorDashboard = () => {
     const fracturedScore    = parseFloat(xrayResult?.scores?.Fractured ?? 0)        || 0;
     const notFracturedScore = parseFloat(xrayResult?.scores?.['Not Fractured'] ?? 0) || 0;
 
-    const severity = fractureDetected ? 'critical' : 'normal';
     const bodyPart = xrayResult?.bodyPart || xrayModel;
+    const isKnee   = bodyPart === 'knee';
+
+    // ── Knee OA specific derived values (3-class output) ─────────────────
+    //   FastAPI returns: { predicted_class, description, confidence, all_probabilities }
+    //   Class IDs: "Normal" | "Mild_OA" | "Severe_OA"
+    const kneePredictedClass = xrayResult?.predicted_class || '';
+    const kneeClassMeta      = KNEE_OA_CLASS_LABELS_AR[kneePredictedClass] || { ar: '—', severity: 'normal' };
+    const kneeProbabilities  = xrayResult?.all_probabilities || { Normal: 0, Mild_OA: 0, Severe_OA: 0 };
+    const kneeDescriptionAr  = xrayResult?.descriptionArabic || xrayResult?.description || '';
+
+    // ── Unified severity / status icon logic ─────────────────────────────
+    let severity;        // CSS modifier class for result header
+    let resultTitle;     // Arabic h2 in the result card
+    let resultSubtitle;  // Arabic p under the title
+    let ResultIcon;      // Lucide icon for the result
+
+    if (isKnee) {
+      severity       = kneeClassMeta.severity;
+      resultTitle    = kneeClassMeta.ar;
+      resultSubtitle = 'تحليل مفصل الركبة';
+      ResultIcon     = kneePredictedClass === 'Normal' ? CheckCircle2 : AlertTriangle;
+    } else {
+      severity       = fractureDetected ? 'critical' : 'normal';
+      resultTitle    = fractureDetected ? 'تم اكتشاف كسر' : 'لم يتم اكتشاف كسر';
+      resultSubtitle = bodyPart === 'hand' ? 'تحليل عظام اليد' : 'تحليل عظام القدم';
+      ResultIcon     = fractureDetected ? AlertTriangle : CheckCircle2;
+    }
 
     return (
       <>
@@ -5305,11 +5812,11 @@ const DoctorDashboard = () => {
           </div>
           <div className="dd-ai-hero-text">
             <h2>تحليل صور الأشعة السينية</h2>
-            <p>كشف كسور العظام في اليد والقدم باستخدام الذكاء الاصطناعي</p>
+            <p>كشف كسور العظام والتهاب مفصل الركبة باستخدام الذكاء الاصطناعي</p>
           </div>
           <span className="dd-ai-hero-badge">
             <Sparkles size={14} strokeWidth={2.5} />
-            نموذجين متخصصين
+            ٣ نماذج متخصصة
           </span>
         </section>
 
@@ -5418,23 +5925,194 @@ const DoctorDashboard = () => {
           <section className="dd-ai-result" ref={aiResultRef}>
             <div className={`dd-ai-result-header ${severity}`}>
               <div className="dd-ai-result-icon">
-                {fractureDetected
-                  ? <AlertTriangle size={36} strokeWidth={2} />
-                  : <CheckCircle2 size={36} strokeWidth={2} />}
+                <ResultIcon size={36} strokeWidth={2} />
               </div>
               <div>
                 <div className="dd-ai-result-eyebrow">نتيجة التحليل</div>
-                <h2 className="dd-ai-result-title">
-                  {fractureDetected ? 'تم اكتشاف كسر' : 'لم يتم اكتشاف كسر'}
-                </h2>
-                <p className="dd-ai-result-subtitle">
-                  {bodyPart === 'hand' ? 'تحليل عظام اليد' : 'تحليل عظام القدم'}
-                </p>
+                <h2 className="dd-ai-result-title">{resultTitle}</h2>
+                <p className="dd-ai-result-subtitle">{resultSubtitle}</p>
               </div>
               <ConfidenceRing percent={confidence} />
             </div>
 
             <div className="dd-ai-result-body">
+              {/* ═════════════════════════════════════════════════════════
+                  KNEE OA — 3-class display
+                  Renders only when bodyPart === 'knee'
+                  ═════════════════════════════════════════════════════════ */}
+              {isKnee && (
+                <>
+                  <div className="dd-xray-result-summary">
+                    <div className="dd-xray-stat">
+                      <div className={`dd-xray-stat-icon dd-knee-stat-${severity}`}>
+                        <ResultIcon size={20} strokeWidth={2.2} />
+                      </div>
+                      <div>
+                        <span className="dd-xray-stat-label">التشخيص</span>
+                        <div className="dd-xray-stat-value">{resultTitle}</div>
+                      </div>
+                    </div>
+                    <div className="dd-xray-stat">
+                      <div className="dd-xray-stat-icon">
+                        <Activity size={20} strokeWidth={2.2} />
+                      </div>
+                      <div>
+                        <span className="dd-xray-stat-label">دقة التشخيص</span>
+                        <div className="dd-xray-stat-value">{confidence.toFixed(1)}%</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Per-class probability breakdown (3 bars) */}
+                  <div>
+                    <h3 className="dd-ai-section-title">
+                      <Activity size={18} strokeWidth={2} />
+                      احتمالات الفئات الثلاث
+                    </h3>
+                    <div className="dd-xray-scores">
+                      <div className={`dd-xray-score-row dd-knee-row-normal ${kneePredictedClass === 'Normal' ? 'dd-knee-row-active' : ''}`}>
+                        <div className="dd-xray-score-head">
+                          <span className="dd-xray-score-label">سليم (Normal)</span>
+                          <span className="dd-xray-score-value">
+                            {parseFloat(kneeProbabilities.Normal || 0).toFixed(2)}%
+                          </span>
+                        </div>
+                        <div className="dd-xray-score-bar">
+                          <div
+                            className="dd-xray-score-fill dd-knee-fill-normal"
+                            style={{ width: `${Math.min(100, parseFloat(kneeProbabilities.Normal || 0))}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className={`dd-xray-score-row dd-knee-row-mild ${kneePredictedClass === 'Mild_OA' ? 'dd-knee-row-active' : ''}`}>
+                        <div className="dd-xray-score-head">
+                          <span className="dd-xray-score-label">التهاب خفيف (Mild_OA)</span>
+                          <span className="dd-xray-score-value">
+                            {parseFloat(kneeProbabilities.Mild_OA || 0).toFixed(2)}%
+                          </span>
+                        </div>
+                        <div className="dd-xray-score-bar">
+                          <div
+                            className="dd-xray-score-fill dd-knee-fill-mild"
+                            style={{ width: `${Math.min(100, parseFloat(kneeProbabilities.Mild_OA || 0))}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className={`dd-xray-score-row dd-knee-row-severe ${kneePredictedClass === 'Severe_OA' ? 'dd-knee-row-active' : ''}`}>
+                        <div className="dd-xray-score-head">
+                          <span className="dd-xray-score-label">التهاب شديد (Severe_OA)</span>
+                          <span className="dd-xray-score-value">
+                            {parseFloat(kneeProbabilities.Severe_OA || 0).toFixed(2)}%
+                          </span>
+                        </div>
+                        <div className="dd-xray-score-bar">
+                          <div
+                            className="dd-xray-score-fill dd-knee-fill-severe"
+                            style={{ width: `${Math.min(100, parseFloat(kneeProbabilities.Severe_OA || 0))}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Clinical interpretation (the model's English description + Arabic) */}
+                  {kneeDescriptionAr && (
+                    <div>
+                      <h3 className="dd-ai-section-title">
+                        <FileText size={18} strokeWidth={2} />
+                        التفسير السريري
+                      </h3>
+                      <p className="dd-ai-description">{kneeDescriptionAr}</p>
+                    </div>
+                  )}
+
+                  {/* Smart recommendations based on the predicted class */}
+                  <div>
+                    <h3 className="dd-ai-section-title">
+                      <Sparkles size={18} strokeWidth={2} />
+                      التوصيات الطبية
+                    </h3>
+                    <div className="dd-ai-recs">
+                      {kneePredictedClass === 'Normal' && (
+                        <>
+                          <div className="dd-ai-rec">
+                            <span className="dd-ai-rec-num">1</span>
+                            <span>لا توجد علامات على خشونة الركبة في الصورة الحالية</span>
+                          </div>
+                          <div className="dd-ai-rec">
+                            <span className="dd-ai-rec-num">2</span>
+                            <span>الحفاظ على وزن صحي وممارسة الرياضة بانتظام</span>
+                          </div>
+                          <div className="dd-ai-rec">
+                            <span className="dd-ai-rec-num">3</span>
+                            <span>المتابعة الدورية عند ظهور أي ألم أو تيبس</span>
+                          </div>
+                        </>
+                      )}
+                      {kneePredictedClass === 'Mild_OA' && (
+                        <>
+                          <div className="dd-ai-rec">
+                            <span className="dd-ai-rec-num">1</span>
+                            <span>التهاب مفصلي خفيف (الدرجة 1-2) — يستلزم تقييم سريري شامل</span>
+                          </div>
+                          <div className="dd-ai-rec">
+                            <span className="dd-ai-rec-num">2</span>
+                            <span>تخفيض الوزن وتجنب الأنشطة عالية التأثير على المفصل</span>
+                          </div>
+                          <div className="dd-ai-rec">
+                            <span className="dd-ai-rec-num">3</span>
+                            <span>تمارين تقوية عضلات الفخذ وعلاج فيزيائي</span>
+                          </div>
+                          <div className="dd-ai-rec">
+                            <span className="dd-ai-rec-num">4</span>
+                            <span>مسكنات للألم عند الحاجة وفق تقدير الطبيب</span>
+                          </div>
+                        </>
+                      )}
+                      {kneePredictedClass === 'Severe_OA' && (
+                        <>
+                          <div className="dd-ai-rec">
+                            <span className="dd-ai-rec-num">1</span>
+                            <span>التهاب مفصلي متوسط إلى شديد (الدرجة 3-4) — يستلزم تدخلاً طبياً عاجلاً</span>
+                          </div>
+                          <div className="dd-ai-rec">
+                            <span className="dd-ai-rec-num">2</span>
+                            <span>إحالة فورية لاستشاري جراحة العظام</span>
+                          </div>
+                          <div className="dd-ai-rec">
+                            <span className="dd-ai-rec-num">3</span>
+                            <span>تقييم الحاجة لحقن داخل المفصل (كورتيزون / هيالورونيك)</span>
+                          </div>
+                          <div className="dd-ai-rec">
+                            <span className="dd-ai-rec-num">4</span>
+                            <span>قد تكون جراحة استبدال المفصل خياراً علاجياً</span>
+                          </div>
+                          <div className="dd-ai-rec">
+                            <span className="dd-ai-rec-num">5</span>
+                            <span>برنامج علاج طبيعي مكثف لتأخير تدهور الحالة</span>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="dd-ai-disclaimer">
+                    <AlertTriangle size={18} strokeWidth={2.2} />
+                    <span>
+                      <strong>ملاحظة:</strong> هذه النتائج استرشادية من الذكاء الاصطناعي
+                      (نموذج DenseNet121 — دقة 69% / AUC 87%) ولا تغني عن الفحص السريري
+                      الشامل وأشعة إضافية إذا لزم الأمر.
+                    </span>
+                  </div>
+                </>
+              )}
+
+              {/* ═════════════════════════════════════════════════════════
+                  HAND / LEG — Binary fracture display (existing UI)
+                  Renders only when bodyPart !== 'knee'
+                  ═════════════════════════════════════════════════════════ */}
+              {!isKnee && (
+                <>
               <div className="dd-xray-result-summary">
                 <div className="dd-xray-stat">
                   <div className={`dd-xray-stat-icon ${fractureDetected ? 'fracture' : 'normal'}`}>
@@ -5580,6 +6258,234 @@ const DoctorDashboard = () => {
                       </>
                     )}
                   </div>
+                </div>
+              )}
+
+              <div className="dd-ai-disclaimer">
+                <AlertTriangle size={18} strokeWidth={2.2} />
+                <span>
+                  <strong>ملاحظة:</strong> هذه النتائج استرشادية من الذكاء الاصطناعي
+                  ولا تغني عن التقييم السريري الشامل والخبرة الطبية المباشرة.
+                  يُنصح دائماً بالتأكد من التشخيص قبل اتخاذ القرارات الطبية.
+                </span>
+              </div>
+                </>
+              )}
+            </div>
+          </section>
+        )}
+      </>
+    );
+  }
+
+  /* ─────────────────────────────────────────────────────────────────
+     renderDentalCariesTool — Dental Caries AI tool (dentist only)
+     ─────────────────────────────────────────────────────────────────
+     Mirrors the knee-OA section of renderXRayTool: 2-class classification
+     output from EfficientNetV2-B0 (Caries / Not_Caries) with confidence
+     percentage and per-class probabilities.
+     FastAPI response shape:
+       { success, predicted_class, confidence, all_probabilities,
+         description, descriptionArabic?, recommendation? }
+     ───────────────────────────────────────────────────────────────── */
+  function renderDentalCariesTool() {
+    // ── Defensive shape extraction ──────────────────────────────────────
+    // Accept BOTH the structured shape (predicted_class, all_probabilities,
+    // recommendation) AND the flat upstream shape (prediction,
+    // probability_caries, probability_not_caries, interpretation,
+    // recommendationArabic). The backend may emit either depending on
+    // whether the Phase 3 controller transformation is applied.
+    const predictedClass = dentalResult?.predicted_class
+                        || dentalResult?.prediction
+                        || '';
+
+    const classMeta      = DENTAL_CARIES_CLASS_LABELS_AR[predictedClass]
+                        || { ar: '—', severity: 'normal' };
+
+    // Confidence — model emits 0..1 (sigmoid). Multiply by 100 for display.
+    // Tolerate any consumer that already sends a 0..100 percentage by
+    // detecting values > 1 and skipping the multiplier.
+    const confidenceRaw  = parseFloat(dentalResult?.confidence ?? 0) || 0;
+    const confidencePct  = confidenceRaw > 1 ? confidenceRaw : confidenceRaw * 100;
+
+    // Probabilities — prefer the structured shape; fall back to the flat
+    // upstream keys; final fallback is zeros.
+    const probabilities  = dentalResult?.all_probabilities
+                        || {
+                          Caries:     parseFloat(dentalResult?.probability_caries ?? 0) || 0,
+                          Not_Caries: parseFloat(dentalResult?.probability_not_caries ?? 0) || 0,
+                        };
+
+    // Arabic description: prefer descriptionArabic, then recommendationArabic
+    // (legacy), then description, then interpretation.
+    const descriptionAr  = dentalResult?.descriptionArabic
+                        || dentalResult?.recommendationArabic
+                        || dentalResult?.description
+                        || dentalResult?.interpretation
+                        || '';
+
+    // Clinical recommendation: prefer the explicit field, fall back to
+    // recommendationArabic (legacy key from the existing backend).
+    const recommendation = dentalResult?.recommendation
+                        || dentalResult?.recommendationArabic
+                        || '';
+
+    const severity      = classMeta.severity;
+    const ResultIcon    = predictedClass === 'Not_Caries' ? CheckCircle2 : AlertTriangle;
+    const resultTitle   = classMeta.ar;
+    const resultSubtitle = 'تحليل صورة الأشعة السنية';
+
+    return (
+      <>
+        {/* Hero — mirrors the X-Ray hero header (same visual treatment) */}
+        <section className="dd-ai-hero">
+          <div className="dd-ai-hero-icon">
+            <Smile size={42} strokeWidth={2} />
+            <div className="dd-ai-hero-pulse" />
+          </div>
+          <div className="dd-ai-hero-text">
+            <h2>تشخيص تسوس الأسنان</h2>
+            <p>
+              ارفع صورة الأشعة السنية وسيقوم النموذج بتحليلها
+              باستخدام EfficientNetV2-B0
+            </p>
+          </div>
+          <span className="dd-ai-hero-badge">
+            <Sparkles size={14} strokeWidth={2.5} />
+            مدعوم بالذكاء الاصطناعي
+          </span>
+        </section>
+
+        {/* Upload section — mirrors the X-Ray upload flow exactly */}
+        <section className="dd-ai-upload">
+          {!dentalFile ? (
+            <div className="dd-file-upload">
+              <input
+                type="file"
+                accept=".png,.jpg,.jpeg"
+                onChange={handleDentalUpload}
+                className="dd-file-input-hidden"
+                aria-label="رفع صورة الأشعة السنية"
+              />
+              <label className="dd-ai-dropzone">
+                <div className="dd-ai-dropzone-icon">
+                  <ScanLine size={36} strokeWidth={2} />
+                </div>
+                <h4>اضغط لاختيار صورة الأشعة السنية</h4>
+                <p>صورة واضحة عالية الدقة لأفضل دقة في التشخيص</p>
+                <div className="dd-ai-dropzone-formats">
+                  <span className="dd-ai-dropzone-format">PNG</span>
+                  <span className="dd-ai-dropzone-format">JPG</span>
+                </div>
+              </label>
+            </div>
+          ) : (
+            <div className="dd-ai-preview">
+              {dentalPreview && (
+                <img src={dentalPreview} alt="معاينة صورة الأسنان" className="dd-ai-preview-img" />
+              )}
+              <div className="dd-ai-preview-info">
+                <h4 className="dd-ai-preview-name">{dentalFile.name}</h4>
+                <span className="dd-ai-preview-size">
+                  {(dentalFile.size / 1024 / 1024).toFixed(2)} MB
+                </span>
+              </div>
+              <button
+                type="button"
+                className="dd-file-remove-btn"
+                onClick={handleRemoveDental}
+                aria-label="إزالة الصورة"
+              >
+                <X size={16} strokeWidth={2.5} />
+              </button>
+            </div>
+          )}
+
+          <button
+            type="button"
+            className="dd-ai-analyze-btn"
+            onClick={handleAnalyzeDental}
+            disabled={!dentalFile || dentalAnalyzing}
+          >
+            {dentalAnalyzing ? (
+              <>
+                <Loader2 size={18} strokeWidth={2.4} className="dd-spin" />
+                جاري التحليل...
+              </>
+            ) : (
+              <>
+                <Zap size={18} strokeWidth={2.4} />
+                بدء تحليل الصورة
+              </>
+            )}
+          </button>
+        </section>
+
+        {/* Result card — clones the knee-OA / xray result design */}
+        {dentalResult && (
+          <section className="dd-ai-result" ref={aiResultRef}>
+            <div className={`dd-xray-result-head ${severity}`}>
+              <ResultIcon size={32} strokeWidth={2.2} />
+              <div>
+                <h2 className="dd-xray-result-title">{resultTitle}</h2>
+                <p className="dd-xray-result-sub">{resultSubtitle}</p>
+              </div>
+              <div className="dd-xray-confidence">
+                <span className="dd-xray-confidence-label">الثقة</span>
+                <span className="dd-xray-confidence-value">{confidencePct.toFixed(1)}%</span>
+              </div>
+            </div>
+
+            <div className="dd-ai-result-body">
+              {descriptionAr && (
+                <p className="dd-ai-description">{descriptionAr}</p>
+              )}
+
+              {/* Per-class probabilities */}
+              <div>
+                <h3 className="dd-ai-section-title">
+                  <Activity size={18} strokeWidth={2} />
+                  الاحتمالات
+                </h3>
+                <div className="dd-xray-scores">
+                  <div className="dd-xray-score-row critical">
+                    <div className="dd-xray-score-head">
+                      <span className="dd-xray-score-label">احتمال وجود تسوس</span>
+                      <span className="dd-xray-score-value">
+                        {((parseFloat(probabilities.Caries) || 0) * 100).toFixed(2)}%
+                      </span>
+                    </div>
+                    <div className="dd-xray-score-bar">
+                      <div
+                        className="dd-xray-score-fill critical"
+                        style={{ width: `${Math.min(100, (parseFloat(probabilities.Caries) || 0) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="dd-xray-score-row normal">
+                    <div className="dd-xray-score-head">
+                      <span className="dd-xray-score-label">احتمال السلامة</span>
+                      <span className="dd-xray-score-value">
+                        {((parseFloat(probabilities.Not_Caries) || 0) * 100).toFixed(2)}%
+                      </span>
+                    </div>
+                    <div className="dd-xray-score-bar">
+                      <div
+                        className="dd-xray-score-fill normal"
+                        style={{ width: `${Math.min(100, (parseFloat(probabilities.Not_Caries) || 0) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {recommendation && (
+                <div>
+                  <h3 className="dd-ai-section-title">
+                    <ClipboardList size={18} strokeWidth={2} />
+                    التوصية
+                  </h3>
+                  <p className="dd-ai-description">{recommendation}</p>
                 </div>
               )}
 

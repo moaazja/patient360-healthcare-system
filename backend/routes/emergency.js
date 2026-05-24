@@ -38,16 +38,29 @@ const storage = multer.diskStorage({
 });
 
 const fileFilter = (req, file, cb) => {
+  // Validate by file extension (more reliable than MIME type — different
+  // Android / iOS / web clients report different MIMEs for the same format).
+  // We still log the MIME for debugging.
+  const ext = path.extname(file.originalname || '').toLowerCase();
+
   if (file.fieldname === 'image') {
-    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
-    if (allowed.includes(file.mimetype)) return cb(null, true);
+    const allowedExts = ['.jpg', '.jpeg', '.png', '.webp'];
+    if (allowedExts.includes(ext)) return cb(null, true);
+    console.warn(`⚠️  Rejected image: ext=${ext}, mime=${file.mimetype}, name=${file.originalname}`);
     return cb(new Error('الصور المسموحة: JPG, PNG, WebP'), false);
   }
+
   if (file.fieldname === 'audio') {
-    const allowed = ['audio/mpeg', 'audio/wav', 'audio/mp4', 'audio/x-m4a', 'audio/webm', 'audio/ogg'];
-    if (allowed.includes(file.mimetype)) return cb(null, true);
+    // Mobile recording libs report inconsistent MIMEs — Flutter `record`
+    // on Android emits audio/wave or audio/x-wav for WAV, iOS reports
+    // audio/x-m4a, and some clients fall back to application/octet-stream.
+    // Extension-based validation avoids all of that.
+    const allowedExts = ['.wav', '.mp3', '.mp4', '.m4a', '.webm', '.ogg', '.aac'];
+    if (allowedExts.includes(ext)) return cb(null, true);
+    console.warn(`⚠️  Rejected audio: ext=${ext}, mime=${file.mimetype}, name=${file.originalname}`);
     return cb(new Error('صيغة التسجيل الصوتي غير مدعومة'), false);
   }
+
   cb(new Error('حقل ملف غير معروف'), false);
 };
 

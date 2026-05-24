@@ -232,6 +232,27 @@ if (notificationRoutes.authFcmRouter) {
 const xrayRoutes = require('./routes/xray');
 app.use('/api/xray', xrayRoutes);
 
+// ── Drug-risk check (Kinan rule-based pipeline, FastAPI on port 8001) ───────
+// Patient + doctor both call this. The backend builds patient_profile from
+// MongoDB (allergies, current meds), normalizes it to the pipeline's
+// expected enums, then calls FastAPI and persists the check for audit.
+const drugRiskRoutes = require('./routes/drugRisk/drugRisk');
+app.use('/api/drug-risk', drugRiskRoutes);
+
+// ── Knee OA classification (Kinan DenseNet121 3-class, FastAPI on port 8003) ─
+// Orthopedist doctors upload knee X-rays. The backend forwards the image to
+// FastAPI, validates the response, and persists each analysis in the
+// `knee_xray_analyses` collection for audit + patient history.
+const kneeXrayRoutes = require('./routes/kneeXray/kneeXray');
+app.use('/api/knee-xray', kneeXrayRoutes);
+
+// ── Dental Caries detection (Pak Team EfficientNetV2-B0, FastAPI on port 8004) ─
+// Dentists (and doctors, defensively) upload tooth X-ray images. The backend
+// forwards them to FastAPI, validates the response, and persists each
+// analysis in the `dental_caries_analyses` collection for audit + history.
+const dentalCariesRoutes = require('./routes/dentalCaries/dentalCaries');
+app.use('/api/dental-caries', dentalCariesRoutes);
+
 // ── Medications admin CRUD (post-B6 addition) ───────────────────────────────
 const medicationRoutes = require('./routes/medication');
 app.use('/api/medications', medicationRoutes);
@@ -404,6 +425,27 @@ app.get('/', (req, res) => {
         create: 'POST   /api/medications (admin)',
         update: 'PATCH  /api/medications/:id (admin)',
         discontinue: 'DELETE /api/medications/:id (admin)'
+      },
+      drugRisk: {
+        check:           'POST   /api/drug-risk/check (patient)',
+        checkForPatient: 'POST   /api/drug-risk/check-for-patient (doctor)',
+        myHistory:       'GET    /api/drug-risk/my-history (patient)',
+        acknowledge:     'POST   /api/drug-risk/:id/acknowledge (doctor)',
+        health:          'GET    /api/drug-risk/health'
+      },
+      kneeXray: {
+        analyze:         'POST   /api/knee-xray/analyze (multipart, doctor only)',
+        myHistory:       'GET    /api/knee-xray/history/me (doctor)',
+        patientHistory:  'GET    /api/knee-xray/patient/:identifier (doctor)',
+        getOne:          'GET    /api/knee-xray/:id (doctor)',
+        health:          'GET    /api/knee-xray/health (doctor/admin)'
+      },
+      dentalCaries: {
+        analyze:         'POST   /api/dental-caries/analyze (multipart: tooth_image, dentist/doctor)',
+        myHistory:       'GET    /api/dental-caries/history/me (dentist/doctor)',
+        patientHistory:  'GET    /api/dental-caries/patient/:identifier (dentist/doctor)',
+        getOne:          'GET    /api/dental-caries/:id (dentist/doctor)',
+        health:          'GET    /api/dental-caries/health (dentist/doctor/admin)'
       }
     }
   });

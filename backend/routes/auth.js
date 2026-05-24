@@ -68,6 +68,21 @@ router.post(
   authController.registerLabTechnician,
 );
 
+// ── Dentist registration ───────────────────────────────────────────────────
+// Reuses the SAME multer configuration as the doctor flow (uploadFields)
+// because the dentist signup is a 1:1 clone of the doctor signup UI/UX:
+// licenseDocument, medicalCertificate, profilePhoto, plus full scheduleTemplate
+// and subSpecialization. Persists into `doctor_requests` with
+// requestType='dentist'. On admin approval the backend creates a Dentist
+// record in the (separate) `dentists` collection — see
+// adminController.approveDoctorRequest.
+router.post(
+  '/register-dentist',
+  uploadFields,
+  handleUploadErrors,
+  authController.registerDentist,
+);
+
 // ── Application status checks ──────────────────────────────────────────────
 router.get('/check-doctor-status',       authController.checkDoctorStatus);
 router.get('/check-professional-status', authController.checkProfessionalStatus);

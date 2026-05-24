@@ -51,7 +51,7 @@
  */
 
 const {
-  Account, Person, Children, Patient, Doctor, Pharmacist, LabTechnician,
+  Account, Person, Children, Patient, Doctor, Dentist, Pharmacist, LabTechnician,
   Hospital, Pharmacy, Laboratory,
   Visit, AuditLog, DoctorRequest
 } = require('../models');
@@ -84,6 +84,7 @@ exports.getStatistics = async (req, res) => {
       activeAccounts,
       totalDoctors,
       activeDoctors,
+      totalDentists,
       totalPharmacists,
       totalLabTechnicians,
 
@@ -112,6 +113,7 @@ exports.getStatistics = async (req, res) => {
       pendingDoctorRequests,
       pendingPharmacistRequests,
       pendingLabTechRequests,
+      pendingDentistRequests,
       rejectedRequestsThisMonth,
 
       // Audit / Activity
@@ -125,6 +127,7 @@ exports.getStatistics = async (req, res) => {
       Account.countDocuments({ isActive: true }),
       Doctor.countDocuments(),
       Doctor.countDocuments({ isAvailable: true }),
+      Dentist.countDocuments(),
       Pharmacist.countDocuments(),
       LabTechnician.countDocuments(),
 
@@ -153,6 +156,7 @@ exports.getStatistics = async (req, res) => {
       DoctorRequest.countDocuments({ status: 'pending', requestType: 'doctor' }),
       DoctorRequest.countDocuments({ status: 'pending', requestType: 'pharmacist' }),
       DoctorRequest.countDocuments({ status: 'pending', requestType: 'lab_technician' }),
+      DoctorRequest.countDocuments({ status: 'pending', requestType: 'dentist' }),
       DoctorRequest.countDocuments({ status: 'rejected', reviewedAt: { $gte: startOfMonth } }),
 
       // Audit
@@ -195,6 +199,7 @@ exports.getStatistics = async (req, res) => {
         activeAccounts,
         totalDoctors,
         activeDoctors,
+        totalDentists,
         totalPharmacists,
         totalLabTechnicians,
 
@@ -224,8 +229,9 @@ exports.getStatistics = async (req, res) => {
         pendingDoctorRequests,
         pendingPharmacistRequests,
         pendingLabTechRequests,
+        pendingDentistRequests,
         totalPendingRequests:
-          pendingDoctorRequests + pendingPharmacistRequests + pendingLabTechRequests,
+          pendingDoctorRequests + pendingPharmacistRequests + pendingLabTechRequests + pendingDentistRequests,
         rejectedRequestsThisMonth,
 
         // ── Activity / Security ────────────────────────────────────────
@@ -2060,7 +2066,8 @@ exports.approveDoctorRequest = async (req, res) => {
     const roleMap = {
       doctor: 'doctor',
       pharmacist: 'pharmacist',
-      lab_technician: 'lab_technician'
+      lab_technician: 'lab_technician',
+      dentist: 'dentist'
     };
 
     let account;
@@ -2170,6 +2177,34 @@ exports.approveDoctorRequest = async (req, res) => {
         createdIds.professionalId = professionalRecord._id;
         console.log(`✅ LabTechnician created: ${professionalRecord._id}`);
 
+      } else if (requestType === 'dentist') {
+        // ──────────────────────────────────────────────────────────────
+        // Dentist creation
+        // ──────────────────────────────────────────────────────────────
+        // Dentists live in a SEPARATE collection (`dentists`) with their
+        // own license field and specialization enum. The request stores
+        // the data under `dentalLicenseNumber` + `specialization` (the
+        // schema's ALL_SPECIALIZATIONS already includes the 9 dental
+        // specs, so no transformation is needed).
+        console.log('3️⃣ Creating Dentist...');
+        professionalRecord = await Dentist.create({
+          personId: person._id,
+          dentalLicenseNumber: request.dentalLicenseNumber,
+          specialization: request.specialization,
+          yearsOfExperience: request.yearsOfExperience || 0,
+          consultationFee: request.consultationFee,
+          currency: request.currency || 'SYP',
+          availableDays: request.availableDays || [],
+          ...(request.hospitalAffiliation && { hospitalAffiliation: request.hospitalAffiliation }),
+          isAvailable: true,
+          isAcceptingNewPatients: true,
+          verificationStatus: 'verified',  // admin just approved them
+          averageRating: 0,
+          totalReviews: 0,
+        });
+        createdIds.professionalId = professionalRecord._id;
+        console.log(`✅ Dentist created: ${professionalRecord._id}`);
+
       } else {
         throw new Error(`Unknown requestType: ${requestType}`);
       }
@@ -2182,6 +2217,7 @@ exports.approveDoctorRequest = async (req, res) => {
         const field = Object.keys(profErr.keyPattern || {})[0];
         const arabicFields = {
           medicalLicenseNumber: 'رقم الترخيص الطبي',
+          dentalLicenseNumber: 'رقم ترخيص طب الأسنان',
           pharmacyLicenseNumber: 'رقم ترخيص الصيدلية',
           licenseNumber: 'رقم الترخيص المهني',
           personId: 'الشخص'
@@ -2250,7 +2286,8 @@ exports.approveDoctorRequest = async (req, res) => {
     const typeLabels = {
       doctor: 'الطبيب',
       pharmacist: 'الصيدلي',
-      lab_technician: 'فني المختبر'
+      lab_technician: 'فني المختبر',
+      dentist: 'طبيب الأسنان'
     };
 
     return res.json({

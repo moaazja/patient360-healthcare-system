@@ -2,7 +2,10 @@
  * ═══════════════════════════════════════════════════════════════════════════
  *  Models Barrel — Patient 360°
  *  ─────────────────────────────────────────────────────────────────────────
- *  Central export point for all 25 Mongoose models.
+ *  Central export point for all 27 Mongoose models:
+ *    - 25 original (from patient360_db_final.js)
+ *    -  1 added in the Drug-Risk integration: DrugRiskCheck
+ *    -  1 added in the Knee OA integration:   KneeXrayAnalysis  ← NEW
  *
  *  Why a barrel file?
  *    1. Pre-registration — requiring this file at server boot guarantees
@@ -23,7 +26,7 @@
  *    const { Doctor, Visit, Prescription, AuditLog } = require('../models');
  *
  *    // In index.js (server boot):
- *    require('./models');  // ← side-effect: registers all 25 models
+ *    require('./models');  // ← side-effect: registers all 27 models
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -62,8 +65,13 @@ const AuditLog = require('./AuditLog');
 const Notification = require('./Notification');
 const Review = require('./Review');
 
+// ── AI integrations ─────────────────────────────────────────────────────────
+const DrugRiskCheck         = require('./drugRisk/DrugRiskCheck');
+const KneeXrayAnalysis      = require('./kneeXray/KneeXrayAnalysis');
+const DentalCariesAnalysis  = require('./dentalCaries/DentalCariesAnalysis');  // ← NEW (Pak Team — port 8004)
+
 // ============================================================================
-// EXPORT — single object with all 25 models
+// EXPORT — single object with all 27 models
 // ============================================================================
 
 module.exports = {
@@ -100,5 +108,10 @@ module.exports = {
   EmergencyReport,
   AuditLog,
   Notification,
-  Review
+  Review,
+
+  // AI integrations
+  DrugRiskCheck,
+  KneeXrayAnalysis,
+  DentalCariesAnalysis,  // ← NEW (Pak Team — port 8004)
 };

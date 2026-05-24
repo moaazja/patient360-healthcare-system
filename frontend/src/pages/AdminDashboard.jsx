@@ -37,6 +37,7 @@ import {
   Hospital,
   Pill,
   Microscope,
+  Smile,
   Siren,
   Star,
   Scroll,
@@ -273,15 +274,56 @@ const SPEC_ICON_MAP = {
 };
 
 /**
- * Get specialization info with Lucide icon component
+ * Dentist specializations — matches dentists.specialization enum
+ * in patient360_db_final.js (9 dental specs).
+ */
+const DENTIST_SPECIALIZATIONS = [
+  { id: 'General Dentistry',   nameAr: 'طب الأسنان العام' },
+  { id: 'Orthodontics',        nameAr: 'تقويم الأسنان' },
+  { id: 'Endodontics',         nameAr: 'علاج الجذور' },
+  { id: 'Periodontics',        nameAr: 'أمراض اللثة' },
+  { id: 'Prosthodontics',      nameAr: 'تركيبات الأسنان' },
+  { id: 'Oral Surgery',        nameAr: 'جراحة الفم والأسنان' },
+  { id: 'Pediatric Dentistry', nameAr: 'طب أسنان الأطفال' },
+  { id: 'Cosmetic Dentistry',  nameAr: 'تجميل الأسنان' },
+  { id: 'Implantology',        nameAr: 'زراعة الأسنان' },
+];
+
+/**
+ * Get specialization info with Lucide icon component.
+ * Looks up in both MEDICAL_SPECIALIZATIONS (24 doctor specs) and
+ * DENTIST_SPECIALIZATIONS (9 dental specs). Doctor specs may have an
+ * AI tool (hasAI=true). Dental specs always have the Dental Caries AI.
  */
 const getSpecializationInfo = (specId) => {
-  const spec = MEDICAL_SPECIALIZATIONS.find((s) => s.id === specId);
+  // Doctor specializations first
+  const docSpec = MEDICAL_SPECIALIZATIONS.find((s) => s.id === specId);
+  if (docSpec) {
+    return {
+      id:     specId,
+      nameAr: docSpec.nameAr,
+      hasAI:  docSpec.hasAI || false,
+      Icon:   SPEC_ICON_MAP[specId] || Stethoscope,
+    };
+  }
+
+  // Dental specializations
+  const dentSpec = DENTIST_SPECIALIZATIONS.find((s) => s.id === specId);
+  if (dentSpec) {
+    return {
+      id:     specId,
+      nameAr: dentSpec.nameAr,
+      hasAI:  true,     // all dentists get the Dental Caries AI tool
+      Icon:   Smile,
+    };
+  }
+
+  // Unknown
   return {
-    id: specId,
-    nameAr: spec?.nameAr || specId,
-    hasAI: spec?.hasAI || false,
-    Icon: SPEC_ICON_MAP[specId] || Stethoscope,
+    id:     specId,
+    nameAr: specId || '-',
+    hasAI:  false,
+    Icon:   Stethoscope,
   };
 };
 
@@ -2841,6 +2883,17 @@ const AdminDashboard = () => {
                     {doctorRequests.filter((r) => r.requestType === 'lab_technician').length}
                   </span>
                 </button>
+                <button
+                  type="button"
+                  className={`ad-type-tab ${requestTypeFilter === 'dentist' ? 'active' : ''}`}
+                  onClick={() => setRequestTypeFilter('dentist')}
+                >
+                  <Smile size={16} strokeWidth={2} />
+                  أطباء أسنان
+                  <span className="ad-type-tab-count">
+                    {doctorRequests.filter((r) => r.requestType === 'dentist').length}
+                  </span>
+                </button>
               </div>
 
               <div className="ad-toolbar">
@@ -2948,26 +3001,30 @@ const AdminDashboard = () => {
                     <tbody>
                       {filteredRequests.map((req) => {
                         const reqType = req.requestType || 'doctor';
-                        const specInfo = reqType === 'doctor' ? getSpecializationInfo(req.specialization) : null;
+                        const specInfo = (reqType === 'doctor' || reqType === 'dentist')
+                          ? getSpecializationInfo(req.specialization)
+                          : null;
                         const SpecIcon = specInfo?.Icon || ClipboardList;
 
                         // Type badge config
                         const typeConfig = {
-                          doctor:         { label: 'طبيب',       color: 'info',    Icon: Stethoscope },
-                          pharmacist:     { label: 'صيدلي',      color: 'success', Icon: Pill },
-                          lab_technician: { label: 'فني مختبر',  color: 'warning', Icon: Microscope }
+                          doctor:         { label: 'طبيب',          color: 'info',    Icon: Stethoscope },
+                          pharmacist:     { label: 'صيدلي',         color: 'success', Icon: Pill },
+                          lab_technician: { label: 'فني مختبر',     color: 'warning', Icon: Microscope },
+                          dentist:        { label: 'طبيب أسنان',    color: 'info',    Icon: Smile }
                         };
                         const typeInfo = typeConfig[reqType] || typeConfig.doctor;
                         const TypeIcon = typeInfo.Icon;
 
                         // License number (differs per type)
                         const licenseNum = req.medicalLicenseNumber
+                          || req.dentalLicenseNumber
                           || req.pharmacyLicenseNumber
                           || req.licenseNumber
                           || '-';
 
                         // Specialization / degree label
-                        const specLabel = reqType === 'doctor'
+                        const specLabel = (reqType === 'doctor' || reqType === 'dentist')
                           ? (specInfo?.nameAr || req.specialization || '-')
                           : (req.degree || req.specialization || '-');
 
@@ -2993,7 +3050,7 @@ const AdminDashboard = () => {
                               </span>
                             </td>
                             <td>
-                              {reqType === 'doctor' ? (
+                              {(reqType === 'doctor' || reqType === 'dentist') ? (
                                 <div className="ad-cell-spec">
                                   <div className="ad-cell-spec-icon">
                                     <SpecIcon size={14} strokeWidth={2.2} />
@@ -5676,6 +5733,7 @@ const AdminDashboard = () => {
                     {(selectedRequest.requestType || 'doctor') === 'doctor' && 'المعلومات المهنية'}
                     {selectedRequest.requestType === 'pharmacist' && 'المعلومات المهنية (صيدلي)'}
                     {selectedRequest.requestType === 'lab_technician' && 'المعلومات المهنية (فني مختبر)'}
+                    {selectedRequest.requestType === 'dentist' && 'المعلومات المهنية (طبيب أسنان)'}
                   </h4>
                 </div>
 
@@ -5685,6 +5743,7 @@ const AdminDashboard = () => {
                     {(selectedRequest.requestType || 'doctor') === 'doctor' && 'طبيب'}
                     {selectedRequest.requestType === 'pharmacist' && 'صيدلي'}
                     {selectedRequest.requestType === 'lab_technician' && 'فني مختبر'}
+                    {selectedRequest.requestType === 'dentist' && 'طبيب أسنان'}
                   </span>
                 </div>
 
@@ -5692,6 +5751,7 @@ const AdminDashboard = () => {
                   <span className="ad-detail-label">رقم الترخيص</span>
                   <span className="ad-detail-value ltr">
                     {selectedRequest.medicalLicenseNumber
+                      || selectedRequest.dentalLicenseNumber
                       || selectedRequest.pharmacyLicenseNumber
                       || selectedRequest.licenseNumber
                       || '-'}
@@ -5720,6 +5780,44 @@ const AdminDashboard = () => {
                       <span className="ad-detail-label">المستشفى / المنشأة</span>
                       <span className="ad-detail-value">{selectedRequest.hospitalAffiliation || '-'}</span>
                     </div>
+                  </>
+                )}
+
+                {/* Dentist-specific */}
+                {selectedRequest.requestType === 'dentist' && (
+                  <>
+                    <div className="ad-detail-row">
+                      <span className="ad-detail-label">تخصص طب الأسنان</span>
+                      <span className="ad-detail-value">
+                        {getSpecializationInfo(selectedRequest.specialization).nameAr}
+                        <span className="ad-pill info" style={{ marginInlineStart: 6 }}>AI تسوس</span>
+                      </span>
+                    </div>
+                    {selectedRequest.hospitalAffiliation && (
+                      <div className="ad-detail-row">
+                        <span className="ad-detail-label">العيادة / المستشفى</span>
+                        <span className="ad-detail-value">{selectedRequest.hospitalAffiliation}</span>
+                      </div>
+                    )}
+                    {selectedRequest.consultationFee !== undefined && (
+                      <div className="ad-detail-row">
+                        <span className="ad-detail-label">سعر الاستشارة</span>
+                        <span className="ad-detail-value">
+                          {Number(selectedRequest.consultationFee).toLocaleString('ar-SY')}
+                          {' '}{selectedRequest.currency === 'USD' ? 'USD' : 'ل.س'}
+                        </span>
+                      </div>
+                    )}
+                    {Array.isArray(selectedRequest.availableDays) && selectedRequest.availableDays.length > 0 && (
+                      <div className="ad-detail-row">
+                        <span className="ad-detail-label">أيام العمل</span>
+                        <span className="ad-detail-value">
+                          {selectedRequest.availableDays
+                            .map((d) => WEEKDAYS.find((w) => w.id === d)?.nameAr || d)
+                            .join('، ')}
+                        </span>
+                      </div>
+                    )}
                   </>
                 )}
 

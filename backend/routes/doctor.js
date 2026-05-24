@@ -6,7 +6,7 @@
  *
  *  All routes require:
  *    1. Authentication  (protect)
- *    2. Doctor role     (restrictTo('doctor'))
+ *    2. Doctor role     (restrictTo('doctor', 'dentist'))
  *
  *  ─────────────────────────────────────────────────────────────────────
  *  v2 — Schedule Template endpoints (Calendly-style, May 2026)
@@ -39,6 +39,7 @@ const Patient = require('../models/Patient');
 const Person = require('../models/Person');
 const Account = require('../models/Account');
 const Doctor = require('../models/Doctor');
+const Dentist = require('../models/Dentist');
 const Appointment = require('../models/Appointment');
 const Visit = require('../models/Visit');
 const LabTest = require('../models/LabTest');
@@ -57,42 +58,70 @@ const notificationController = require('../controllers/notificationController');
 // ============================================================================
 
 /**
- * Resolves the logged-in doctor's Doctor document and injects its _id into
- * req.body.doctorId before the shared slot controller runs.
+ * Resolves the logged-in provider's professional record (Doctor OR Dentist)
+ * and injects its _id into the request so downstream handlers don't need
+ * to repeat the look-up themselves.
  *
- * The frontend should never send doctorId itself — that's a security concern
- * (a doctor could otherwise create slots for a different doctor's calendar).
- * This middleware enforces "the slot always belongs to the caller".
+ * Sets:
+ *   req.providerType  — 'doctor' | 'dentist'
+ *   req.providerId    — the provider's mongoose _id
+ *   req.doctorId      — legacy alias (set only when providerType === 'doctor')
+ *   req.dentistId     — alias (set only when providerType === 'dentist')
+ *   req.body.doctorId — legacy alias for old controllers that read from body
  *
- * Also sets req.doctorId for handlers that don't read from req.body
- * (e.g. GET requests).
+ * The frontend should NEVER send doctorId/dentistId itself — that's a
+ * security concern (a provider could otherwise create slots for somebody
+ * else's calendar). This middleware enforces "the resource always belongs
+ * to the caller".
  */
-async function injectDoctorContext(req, res, next) {
+async function injectProviderContext(req, res, next) {
   try {
-    const doctor = await Doctor.findOne({ personId: req.user.personId })
-      .select('_id')
-      .lean();
+    const roles = req.user?.roles || [];
+    let provider = null;
+    let providerType = null;
 
-    if (!doctor) {
+    if (roles.includes('doctor')) {
+      provider = await Doctor.findOne({ personId: req.user.personId })
+        .select('_id').lean();
+      providerType = 'doctor';
+    } else if (roles.includes('dentist')) {
+      provider = await Dentist.findOne({ personId: req.user.personId })
+        .select('_id').lean();
+      providerType = 'dentist';
+    }
+
+    if (!provider) {
       return res.status(403).json({
         success: false,
-        message: 'لم يتم العثور على ملف الطبيب'
+        message: 'لم يتم العثور على ملف الطبيب أو طبيب الأسنان'
       });
     }
 
+    req.providerType = providerType;
+    req.providerId = provider._id;
+
+    // Legacy aliases — keep old code paths working without per-line edits
     req.body = req.body || {};
-    req.body.doctorId = String(doctor._id);
-    req.doctorId = doctor._id;
+    if (providerType === 'doctor') {
+      req.doctorId = provider._id;
+      req.body.doctorId = String(provider._id);
+    } else {
+      req.dentistId = provider._id;
+      req.body.dentistId = String(provider._id);
+    }
 
     return next();
   } catch (error) {
-    console.error('injectDoctorContext error:', error);
+    console.error('injectProviderContext error:', error);
     return res.status(500).json({
       success: false,
-      message: 'حدث خطأ في تحديد هوية الطبيب'
+      message: 'حدث خطأ في تحديد هوية المزود'
     });
   }
 }
+
+// Legacy alias — older routes may still reference this by name
+const injectDoctorContext = injectProviderContext;
 
 
 // ============================================================================
@@ -147,7 +176,7 @@ const upload = multer({
  * @desc    Search for a patient by national ID
  * @access  Private (Doctor only)
  */
-router.get('/search/:nationalId', protect, restrictTo('doctor'), async (req, res) => {
+router.get('/search/:nationalId', protect, restrictTo('doctor', 'dentist'), async (req, res) => {
   try {
     const { nationalId } = req.params;
     console.log('🔍 Searching for:', nationalId);
@@ -260,7 +289,7 @@ router.get('/search/:nationalId', protect, restrictTo('doctor'), async (req, res
  * @desc    Get all patients
  * @access  Private (Doctor only)
  */
-router.get('/patients', protect, restrictTo('doctor'), async (req, res) => {
+router.get('/patients', protect, restrictTo('doctor', 'dentist'), async (req, res) => {
   try {
     const patients = await Patient.find().populate('personId').lean();
 
@@ -308,7 +337,7 @@ router.get('/patients', protect, restrictTo('doctor'), async (req, res) => {
  * @desc    Update patient medical data
  * @access  Private (Doctor only)
  */
-router.put('/patient/:nationalId', protect, restrictTo('doctor'), async (req, res) => {
+router.put('/patient/:nationalId', protect, restrictTo('doctor', 'dentist'), async (req, res) => {
   try {
     const { nationalId } = req.params;
     const { doctorOpinion, ecgResults, aiPrediction, prescribedMedications } = req.body;
@@ -361,7 +390,7 @@ router.put('/patient/:nationalId', protect, restrictTo('doctor'), async (req, re
 router.post(
   '/patient/:nationalId/visit',
   protect,
-  restrictTo('doctor'),
+  restrictTo('doctor', 'dentist'),
   upload.single('visitPhoto'),
   visitController.createVisit
 );
@@ -378,7 +407,7 @@ router.post(
 router.get(
   '/patient/:nationalId/visits',
   protect,
-  restrictTo('doctor'),
+  restrictTo('doctor', 'dentist'),
   (req, res, next) => {
     req.params.identifier = req.params.nationalId;
     next();
@@ -394,7 +423,7 @@ router.get(
 router.get(
   '/visits',
   protect,
-  restrictTo('doctor'),
+  restrictTo('doctor', 'dentist'),
   visitController.getDoctorVisits
 );
 
@@ -408,7 +437,7 @@ router.get(
 router.get(
   '/visit/:visitId',
   protect,
-  restrictTo('doctor'),
+  restrictTo('doctor', 'dentist'),
   (req, res, next) => {
     req.params.id = req.params.visitId;
     next();
@@ -424,7 +453,7 @@ router.get(
 router.put(
   '/visit/:visitId',
   protect,
-  restrictTo('doctor'),
+  restrictTo('doctor', 'dentist'),
   visitController.updateVisit
 );
 
@@ -442,15 +471,32 @@ router.put(
  *            - prescriptionsIssued
  * @access  Private (Doctor only)
  */
-router.get('/dashboard/kpis', protect, restrictTo('doctor'), async (req, res) => {
+router.get('/dashboard/kpis', protect, restrictTo('doctor', 'dentist'), async (req, res) => {
   try {
-    const doctor = await Doctor.findOne({ personId: req.user.personId }).lean();
-    if (!doctor) {
+    // ── Resolve provider (Doctor OR Dentist) ───────────────────────────
+    const roles = req.user.roles || [];
+    let providerType = null;
+    let provider = null;
+
+    if (roles.includes('doctor')) {
+      provider = await Doctor.findOne({ personId: req.user.personId })
+        .select('_id').lean();
+      providerType = 'doctor';
+    } else if (roles.includes('dentist')) {
+      provider = await Dentist.findOne({ personId: req.user.personId })
+        .select('_id').lean();
+      providerType = 'dentist';
+    }
+
+    if (!provider) {
       return res.status(403).json({
         success: false,
-        message: 'لم يتم العثور على ملف الطبيب'
+        message: 'لم يتم العثور على ملف الطبيب أو طبيب الأسنان'
       });
     }
+
+    // The field name on each downstream collection switches based on type
+    const providerField = providerType === 'dentist' ? 'dentistId' : 'doctorId';
 
     // Date windows
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
@@ -466,24 +512,30 @@ router.get('/dashboard/kpis', protect, restrictTo('doctor'), async (req, res) =>
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
 
+    // Lab tests are doctor-only (LabTest.orderedBy.ref = 'Doctor') so we
+    // only count them when the caller is actually a doctor. Dentists get 0.
+    const labCountPromise = providerType === 'doctor'
+      ? LabTest.countDocuments({
+          orderedBy: provider._id,
+          status: 'completed',
+          isViewedByDoctor: false
+        })
+      : Promise.resolve(0);
+
     const [appointmentsToday, pendingLabs, prescriptionsIssued, visitsThisWeek] =
       await Promise.all([
         Appointment.countDocuments({
-          doctorId: doctor._id,
+          [providerField]: provider._id,
           appointmentDate: { $gte: todayStart, $lt: todayEnd },
           status: { $in: ['scheduled', 'confirmed', 'checked_in', 'in_progress'] }
         }),
-        LabTest.countDocuments({
-          orderedBy: doctor._id,
-          status: 'completed',
-          isViewedByDoctor: false
-        }),
+        labCountPromise,
         Prescription.countDocuments({
-          doctorId: doctor._id,
+          [providerField]: provider._id,
           prescriptionDate: { $gte: monthStart }
         }),
         Visit.find(
-          { doctorId: doctor._id, visitDate: { $gte: weekStart } },
+          { [providerField]: provider._id, visitDate: { $gte: weekStart } },
           { patientPersonId: 1, patientChildId: 1 }
         ).lean()
       ]);
@@ -497,6 +549,7 @@ router.get('/dashboard/kpis', protect, restrictTo('doctor'), async (req, res) =>
 
     return res.json({
       success: true,
+      providerType,
       appointmentsToday,
       patientsThisWeek: unique.size,
       pendingLabs,
@@ -524,7 +577,7 @@ router.get('/dashboard/kpis', protect, restrictTo('doctor'), async (req, res) =>
 router.get(
   '/appointments',
   protect,
-  restrictTo('doctor'),
+  restrictTo('doctor', 'dentist'),
   appointmentController.getProviderSchedule
 );
 
@@ -541,7 +594,7 @@ router.get(
 router.get(
   '/availability-slots',
   protect,
-  restrictTo('doctor'),
+  restrictTo('doctor', 'dentist'),
   slotController.getMySlots
 );
 
@@ -556,7 +609,7 @@ router.get(
 router.post(
   '/availability-slots',
   protect,
-  restrictTo('doctor'),
+  restrictTo('doctor', 'dentist'),
   injectDoctorContext,              // ← auto-injects doctorId from the logged-in user
   slotController.createSlot
 );
@@ -571,7 +624,7 @@ router.post(
 router.delete(
   '/availability-slots/:id',
   protect,
-  restrictTo('doctor'),
+  restrictTo('doctor', 'dentist'),
   async (req, res) => {
     try {
       const { id } = req.params;
@@ -583,13 +636,25 @@ router.delete(
         });
       }
 
-      const doctor = await Doctor.findOne({ personId: req.user.personId })
-        .select('_id')
-        .lean();
-      if (!doctor) {
+      // ── Resolve provider (Doctor OR Dentist) ───────────────────────────
+      const roles = req.user.roles || [];
+      let provider = null;
+      let ownerField = null;
+
+      if (roles.includes('doctor')) {
+        provider = await Doctor.findOne({ personId: req.user.personId })
+          .select('_id').lean();
+        ownerField = 'doctorId';
+      } else if (roles.includes('dentist')) {
+        provider = await Dentist.findOne({ personId: req.user.personId })
+          .select('_id').lean();
+        ownerField = 'dentistId';
+      }
+
+      if (!provider) {
         return res.status(403).json({
           success: false,
-          message: 'لم يتم العثور على ملف الطبيب'
+          message: 'لم يتم العثور على ملف المزود'
         });
       }
 
@@ -601,8 +666,9 @@ router.delete(
         });
       }
 
-      // Ownership enforcement — a doctor cannot delete another doctor's slot
-      if (!slot.doctorId || String(slot.doctorId) !== String(doctor._id)) {
+      // Ownership enforcement — a provider can only delete their own slots
+      const slotOwnerId = slot[ownerField];
+      if (!slotOwnerId || String(slotOwnerId) !== String(provider._id)) {
         return res.status(403).json({
           success: false,
           message: 'ليس لديك صلاحية لحذف هذا الموعد'
@@ -623,7 +689,7 @@ router.delete(
         message: 'تم حذف الموعد بنجاح'
       });
     } catch (error) {
-      console.error('Doctor delete slot error:', error);
+      console.error('Provider delete slot error:', error);
       return res.status(500).json({
         success: false,
         message: 'حدث خطأ في حذف الموعد'
@@ -646,7 +712,7 @@ router.delete(
 router.get(
   '/schedule-template',
   protect,
-  restrictTo('doctor'),
+  restrictTo('doctor', 'dentist'),
   injectDoctorContext,
   slotController.getScheduleTemplate
 );
@@ -663,7 +729,7 @@ router.get(
 router.put(
   '/schedule-template',
   protect,
-  restrictTo('doctor'),
+  restrictTo('doctor', 'dentist'),
   injectDoctorContext,
   slotController.updateScheduleTemplate
 );
@@ -681,7 +747,7 @@ router.put(
 router.post(
   '/schedule-template/regenerate',
   protect,
-  restrictTo('doctor'),
+  restrictTo('doctor', 'dentist'),
   injectDoctorContext,
   slotController.regenerateFromTemplate
 );
@@ -705,7 +771,7 @@ router.post(
 router.patch(
   '/appointments/:id/cancel',
   protect,
-  restrictTo('doctor'),
+  restrictTo('doctor', 'dentist'),
   async (req, res) => {
     try {
       const { id } = req.params;
@@ -729,19 +795,31 @@ router.patch(
         });
       }
 
-      const doctor = await Doctor.findOne({ personId: req.user.personId })
-        .select('_id')
-        .lean();
-      if (!doctor) {
+      // ── Resolve provider (Doctor OR Dentist) ───────────────────────────
+      const roles = req.user.roles || [];
+      let provider = null;
+      let providerField = null;
+
+      if (roles.includes('doctor')) {
+        provider = await Doctor.findOne({ personId: req.user.personId })
+          .select('_id').lean();
+        providerField = 'doctorId';
+      } else if (roles.includes('dentist')) {
+        provider = await Dentist.findOne({ personId: req.user.personId })
+          .select('_id').lean();
+        providerField = 'dentistId';
+      }
+
+      if (!provider) {
         return res.status(403).json({
           success: false,
-          message: 'لم يتم العثور على ملف الطبيب'
+          message: 'لم يتم العثور على ملف المزود'
         });
       }
 
       const appointment = await Appointment.findOne({
         _id: id,
-        doctorId: doctor._id
+        [providerField]: provider._id
       });
 
       if (!appointment) {
@@ -820,7 +898,7 @@ router.patch(
 router.get(
   '/notifications',
   protect,
-  restrictTo('doctor'),
+  restrictTo('doctor', 'dentist'),
   notificationController.getMyNotifications
 );
 
@@ -832,7 +910,7 @@ router.get(
 router.patch(
   '/notifications/:id/read',
   protect,
-  restrictTo('doctor'),
+  restrictTo('doctor', 'dentist'),
   notificationController.markAsRead
 );
 

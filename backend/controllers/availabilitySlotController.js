@@ -102,32 +102,37 @@ function addMinutes(hhmm, minutes) {
  *   • regenerateFromTemplate (manual button on the dashboard)
  *   • adminController.approveDoctorRequest (initial generation on approval)
  *
- * Algorithm:
- *   1. Compute today's midnight (boundary between past and future slots).
- *   2. Delete future slots that are NOT booked (currentBookings === 0)
- *      AND are NOT manually blocked (status !== 'blocked').
- *        - Booked slots are preserved so patients keep their appointments.
- *        - Blocked slots are preserved (those represent manual overrides).
- *   3. Call doctor.generateSlotsFromTemplate() to compute the new slot docs.
- *   4. Bulk-insert them with ordered: false so individual conflicts don't
- *      abort the whole batch (e.g. duplicate-key on rare race conditions).
+ * Works for BOTH doctors and dentists. Detects the provider type from the
+ * shape of the passed mongoose document (presence of `dentalLicenseNumber`
+ * → dentist, else doctor). The generated slots automatically use the
+ * correct foreign-key field (doctorId vs dentistId) because each model's
+ * `generateSlotsFromTemplate()` returns the right shape.
  *
- * @param {Object} doctor         — populated Doctor mongoose document
+ * Algorithm: see original Doctor flow — identical, just role-parameterized.
+ *
+ * @param {Object} provider — populated Doctor OR Dentist mongoose document
  * @param {Object} [options]
- * @param {number} [options.daysAhead]  — override the template's window
- * @returns {Promise<{deleted: number, inserted: number, kept: number}>}
+ * @param {number} [options.daysAhead]
+ * @returns {Promise<{deleted, inserted, kept, providerType}>}
  */
-async function regenerateSlotsForDoctor(doctor, options = {}) {
-  if (!doctor || !doctor._id) {
-    throw new Error('وثيقة الطبيب غير صالحة');
+async function regenerateSlotsForProvider(provider, options = {}) {
+  if (!provider || !provider._id) {
+    throw new Error('وثيقة المزود غير صالحة');
   }
+
+  // Detect provider type by presence of dental-specific field
+  const isDentist = !!provider.dentalLicenseNumber;
+  const providerType = isDentist ? 'dentist' : 'doctor';
+  const ownerField = isDentist ? 'dentistId' : 'doctorId';
+
+  const ownerQuery = { [ownerField]: provider._id };
 
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
   // ── Step 1: count booked slots we'll preserve (for the response) ─────────
   const keptCount = await AvailabilitySlot.countDocuments({
-    doctorId: doctor._id,
+    ...ownerQuery,
     date: { $gte: todayStart },
     $or: [
       { currentBookings: { $gt: 0 } },
@@ -137,30 +142,35 @@ async function regenerateSlotsForDoctor(doctor, options = {}) {
 
   // ── Step 2: delete future unbooked, non-blocked slots ────────────────────
   const deleteResult = await AvailabilitySlot.deleteMany({
-    doctorId: doctor._id,
+    ...ownerQuery,
     date: { $gte: todayStart },
     currentBookings: { $lte: 0 },
     status: { $ne: 'blocked' }
   });
 
   console.log(
-    `🗑️  Regenerate: deleted ${deleteResult.deletedCount} unbooked slots, ` +
-    `kept ${keptCount} booked/blocked slots`
+    `🗑️  Regenerate (${providerType}): deleted ${deleteResult.deletedCount} unbooked, ` +
+    `kept ${keptCount} booked/blocked`
   );
 
   // ── Step 3: generate fresh slots from the template ───────────────────────
-  const newSlots = doctor.generateSlotsFromTemplate(options);
+  // Both Doctor.generateSlotsFromTemplate and Dentist.generateSlotsFromTemplate
+  // return slots with the correct foreign-key field already set.
+  const newSlots = provider.generateSlotsFromTemplate(options);
 
   if (newSlots.length === 0) {
-    console.log('ℹ️  Regenerate: template has no working periods, nothing to insert');
-    return { deleted: deleteResult.deletedCount, inserted: 0, kept: keptCount };
+    console.log(`ℹ️  Regenerate (${providerType}): template empty, nothing to insert`);
+    return {
+      deleted: deleteResult.deletedCount,
+      inserted: 0,
+      kept: keptCount,
+      providerType,
+    };
   }
 
-  // ── Step 4: filter out any slots that would overlap with kept (booked)
-  // slots so we don't accidentally create a duplicate appointment time.
-  // Index booked/blocked slots by date+startTime for O(1) lookup.
+  // ── Step 4: filter out slots that overlap with kept (booked) slots ───────
   const protectedSlots = await AvailabilitySlot.find({
-    doctorId: doctor._id,
+    ...ownerQuery,
     date: { $gte: todayStart },
     $or: [
       { currentBookings: { $gt: 0 } },
@@ -180,8 +190,13 @@ async function regenerateSlotsForDoctor(doctor, options = {}) {
   });
 
   if (slotsToInsert.length === 0) {
-    console.log('ℹ️  Regenerate: all generated slots conflict with booked/blocked, nothing to insert');
-    return { deleted: deleteResult.deletedCount, inserted: 0, kept: keptCount };
+    console.log(`ℹ️  Regenerate (${providerType}): all generated slots conflict, nothing to insert`);
+    return {
+      deleted: deleteResult.deletedCount,
+      inserted: 0,
+      kept: keptCount,
+      providerType,
+    };
   }
 
   // ── Step 5: bulk insert ──────────────────────────────────────────────────
@@ -192,12 +207,10 @@ async function regenerateSlotsForDoctor(doctor, options = {}) {
     });
     insertedCount = inserted.length;
   } catch (err) {
-    // insertMany with ordered:false may throw a BulkWriteError that still
-    // contains insertedDocs — count what actually made it in.
     if (err && Array.isArray(err.insertedDocs)) {
       insertedCount = err.insertedDocs.length;
       console.warn(
-        `⚠️  Regenerate: ${err.writeErrors?.length || 0} insert errors, ` +
+        `⚠️  Regenerate (${providerType}): ${err.writeErrors?.length || 0} errors, ` +
         `${insertedCount} succeeded`
       );
     } else {
@@ -205,17 +218,23 @@ async function regenerateSlotsForDoctor(doctor, options = {}) {
     }
   }
 
-  console.log(`✅ Regenerate: inserted ${insertedCount} new slots`);
+  console.log(`✅ Regenerate (${providerType}): inserted ${insertedCount} new slots`);
 
   return {
     deleted: deleteResult.deletedCount,
     inserted: insertedCount,
-    kept: keptCount
+    kept: keptCount,
+    providerType,
   };
 }
 
+// Backward-compatible alias — keeps adminController.approveDoctorRequest
+// working without modification. New code should use regenerateSlotsForProvider.
+const regenerateSlotsForDoctor = regenerateSlotsForProvider;
+
 // Export the helper so adminController can call it during approval
 exports.regenerateSlotsForDoctor = regenerateSlotsForDoctor;
+exports.regenerateSlotsForProvider = regenerateSlotsForProvider;
 
 // ============================================================================
 // 1. CREATE SLOT (single)
@@ -729,34 +748,44 @@ exports.deleteSlot = async (req, res) => {
 
 /**
  * @route   GET /api/doctor/schedule-template
- * @desc    Return the logged-in doctor's structured schedule template.
- *          If the doctor has never set one, returns a sane empty default
- *          so the editor UI can mount without crashing.
- * @access  Private (Doctor only) — uses injectDoctorContext middleware
+ * @desc    Return the logged-in provider's structured schedule template.
+ *          Works for BOTH doctors and dentists (detected via req.providerType
+ *          set by injectProviderContext middleware).
+ *          If never saved, returns a sane empty default.
+ * @access  Private (Doctor or Dentist)
  */
 exports.getScheduleTemplate = async (req, res) => {
   try {
-    const doctorId = req.doctorId || req.body.doctorId;
-    if (!doctorId) {
+    // Provider context is injected by middleware:
+    //   req.providerType ∈ {'doctor', 'dentist'}
+    //   req.providerId   = the provider's mongoose _id
+    // Legacy fallback: req.doctorId for routes that haven't been migrated yet.
+    const providerType = req.providerType || 'doctor';
+    const providerId = req.providerId || req.doctorId || req.body.doctorId;
+
+    if (!providerId) {
       return res.status(403).json({
         success: false,
-        message: 'لم يتم تحديد هوية الطبيب'
+        message: 'لم يتم تحديد هوية المزود'
       });
     }
 
-    const doctor = await Doctor.findById(doctorId)
+    const Model = providerType === 'dentist' ? Dentist : Doctor;
+    const provider = await Model.findById(providerId)
       .select('scheduleTemplate availableDays')
       .lean();
 
-    if (!doctor) {
+    if (!provider) {
       return res.status(404).json({
         success: false,
-        message: 'لم يتم العثور على ملف الطبيب'
+        message: providerType === 'dentist'
+          ? 'لم يتم العثور على ملف طبيب الأسنان'
+          : 'لم يتم العثور على ملف الطبيب'
       });
     }
 
     // Empty-state default — mirrors what the model's default factory would
-    // produce, so the editor renders the same shape whether the doctor has
+    // produce, so the editor renders the same shape whether the provider has
     // saved a template before or not.
     const fallback = {
       weeklyPattern: {
@@ -772,8 +801,9 @@ exports.getScheduleTemplate = async (req, res) => {
 
     return res.json({
       success: true,
-      scheduleTemplate: doctor.scheduleTemplate || fallback,
-      legacyAvailableDays: doctor.availableDays || []
+      providerType,
+      scheduleTemplate: provider.scheduleTemplate || fallback,
+      legacyAvailableDays: provider.availableDays || []
     });
   } catch (error) {
     console.error('❌ getScheduleTemplate error:', error);
@@ -805,11 +835,13 @@ exports.updateScheduleTemplate = async (req, res) => {
   console.log('🔵 ========== UPDATE SCHEDULE TEMPLATE ==========');
 
   try {
-    const doctorId = req.doctorId || req.body.doctorId;
-    if (!doctorId) {
+    const providerType = req.providerType || 'doctor';
+    const providerId = req.providerId || req.doctorId || req.body.doctorId;
+
+    if (!providerId) {
       return res.status(403).json({
         success: false,
-        message: 'لم يتم تحديد هوية الطبيب'
+        message: 'لم يتم تحديد هوية المزود'
       });
     }
 
@@ -869,16 +901,19 @@ exports.updateScheduleTemplate = async (req, res) => {
     const bufferTime = Math.max(0, Math.min(60, parseInt(scheduleTemplate.bufferTime, 10) || 0));
     const bookingWindowDays = Math.max(1, Math.min(90, parseInt(scheduleTemplate.bookingWindowDays, 10) || 30));
 
-    // ── Load and update the doctor ───────────────────────────────────────
-    const doctor = await Doctor.findById(doctorId);
-    if (!doctor) {
+    // ── Load and update the provider (Doctor OR Dentist) ────────────────
+    const Model = providerType === 'dentist' ? Dentist : Doctor;
+    const provider = await Model.findById(providerId);
+    if (!provider) {
       return res.status(404).json({
         success: false,
-        message: 'لم يتم العثور على ملف الطبيب'
+        message: providerType === 'dentist'
+          ? 'لم يتم العثور على ملف طبيب الأسنان'
+          : 'لم يتم العثور على ملف الطبيب'
       });
     }
 
-    doctor.scheduleTemplate = {
+    provider.scheduleTemplate = {
       weeklyPattern: scheduleTemplate.weeklyPattern,
       slotDuration,
       bufferTime,
@@ -888,23 +923,24 @@ exports.updateScheduleTemplate = async (req, res) => {
       updatedAt: new Date()
     };
 
-    await doctor.save(); // pre-save hook will sync availableDays for backward compat
+    await provider.save(); // pre-save hook syncs availableDays for backward compat
 
-    console.log(`✅ Template saved for doctor ${doctor._id}`);
+    console.log(`✅ Template saved for ${providerType} ${provider._id}`);
 
-    // ── Regenerate slots from the new template ───────────────────────────
-    const result = await regenerateSlotsForDoctor(doctor);
+    // ── Regenerate slots from the new template (works for both types) ────
+    const result = await regenerateSlotsForProvider(provider);
 
     AuditLog.record({
       userId: req.user._id,
       userEmail: req.user.email,
       action: 'UPDATE_SCHEDULE_TEMPLATE',
-      description: `Updated schedule template and regenerated slots`,
-      resourceType: 'doctor',
-      resourceId: doctor._id,
+      description: `Updated ${providerType} schedule template and regenerated slots`,
+      resourceType: providerType,
+      resourceId: provider._id,
       ipAddress: req.ip || 'unknown',
       success: true,
       metadata: {
+        providerType,
         slotDuration,
         bufferTime,
         bookingWindowDays,
@@ -917,7 +953,7 @@ exports.updateScheduleTemplate = async (req, res) => {
     return res.json({
       success: true,
       message: 'تم حفظ جدول العمل وإعادة توليد المواعيد بنجاح',
-      scheduleTemplate: doctor.scheduleTemplate,
+      scheduleTemplate: provider.scheduleTemplate,
       slots: {
         deleted: result.deleted,
         inserted: result.inserted,
@@ -964,23 +1000,28 @@ exports.regenerateFromTemplate = async (req, res) => {
   console.log('🔵 ========== REGENERATE FROM TEMPLATE ==========');
 
   try {
-    const doctorId = req.doctorId || req.body.doctorId;
-    if (!doctorId) {
+    const providerType = req.providerType || 'doctor';
+    const providerId = req.providerId || req.doctorId || req.body.doctorId;
+
+    if (!providerId) {
       return res.status(403).json({
         success: false,
-        message: 'لم يتم تحديد هوية الطبيب'
+        message: 'لم يتم تحديد هوية المزود'
       });
     }
 
-    const doctor = await Doctor.findById(doctorId);
-    if (!doctor) {
+    const Model = providerType === 'dentist' ? Dentist : Doctor;
+    const provider = await Model.findById(providerId);
+    if (!provider) {
       return res.status(404).json({
         success: false,
-        message: 'لم يتم العثور على ملف الطبيب'
+        message: providerType === 'dentist'
+          ? 'لم يتم العثور على ملف طبيب الأسنان'
+          : 'لم يتم العثور على ملف الطبيب'
       });
     }
 
-    if (!doctor.scheduleTemplate || !doctor.scheduleTemplate.isActive) {
+    if (!provider.scheduleTemplate || !provider.scheduleTemplate.isActive) {
       return res.status(400).json({
         success: false,
         message: 'لم يتم تعريف جدول عمل فعّال. الرجاء حفظ جدول أولاً.'
@@ -993,18 +1034,19 @@ exports.regenerateFromTemplate = async (req, res) => {
       opts.daysAhead = Math.max(1, Math.min(90, parseInt(req.body.daysAhead, 10)));
     }
 
-    const result = await regenerateSlotsForDoctor(doctor, opts);
+    const result = await regenerateSlotsForProvider(provider, opts);
 
     AuditLog.record({
       userId: req.user._id,
       userEmail: req.user.email,
       action: 'REGENERATE_SLOTS_FROM_TEMPLATE',
-      description: `Regenerated availability slots from existing schedule template`,
-      resourceType: 'doctor',
-      resourceId: doctor._id,
+      description: `Regenerated availability slots for ${providerType}`,
+      resourceType: providerType,
+      resourceId: provider._id,
       ipAddress: req.ip || 'unknown',
       success: true,
       metadata: {
+        providerType,
         slotsDeleted: result.deleted,
         slotsInserted: result.inserted,
         slotsKept: result.kept,
