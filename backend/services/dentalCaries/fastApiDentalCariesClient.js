@@ -9,8 +9,9 @@
  * stateless beyond axios's default keep-alive.
  *
  * Upstream endpoints used:
- *   POST   /predict      — single-image classification
- *   GET    /health       — liveness + model status
+ *   POST   /predict                  — single-image classification
+ *   POST   /predict_with_gradcam     — single-image classification + Grad-CAM viz
+ *   GET    /health                   — liveness + model status
  *
  * Configuration via environment variables (all optional except URL):
  *   FASTAPI_DENTAL_CARIES_URL                  default http://localhost:8004
@@ -96,6 +97,71 @@ class FastApiDentalCariesClient {
       });
     } catch (err) {
       // Network-level failure (no HTTP response received).
+      const isTimeout = err.code === 'ECONNABORTED' || /timeout/i.test(err.message || '');
+      const isRefused = err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET';
+
+      let message;
+      if (isTimeout)      message = `FastAPI dental caries service timed out after ${ANALYZE_TIMEOUT_MS}ms`;
+      else if (isRefused) message = 'FastAPI dental caries service refused the connection (is the service running on port 8004?)';
+      else                message = `FastAPI dental caries service unreachable: ${err.message}`;
+
+      throw new FastApiDentalCariesError(message, { status: 502, cause: err });
+    }
+
+    const processingTimeMs = Date.now() - startedAt;
+
+    if (response.status < 200 || response.status >= 300) {
+      const detail =
+        response.data?.detail
+        || response.data?.message
+        || `HTTP ${response.status}`;
+      throw new FastApiDentalCariesError(`FastAPI returned ${response.status}: ${detail}`, {
+        status:   response.status === 400 ? 400 : 502,
+        upstream: response.data,
+      });
+    }
+
+    return { ...response.data, processingTimeMs };
+  }
+
+  /**
+   * Same as `analyze`, but hits the `/predict_with_gradcam` endpoint which
+   * additionally returns three base64-encoded PNGs:
+   *   visualization.enhanced_xray_b64
+   *   visualization.gradcam_overlay_b64
+   *   visualization.boxes_overlay_b64
+   *
+   * The contract is otherwise identical to /predict — if the upstream
+   * service couldn't generate Grad-CAM (e.g. layer detection failed),
+   * `visualization` will be null or { error: "..." } but the prediction
+   * fields are still returned, so callers can degrade gracefully.
+   *
+   * @param   {Object} args                 — same as analyze()
+   * @returns {Promise<Object>}
+   * @throws  {FastApiDentalCariesError}
+   */
+  static async analyzeWithGradcam({ buffer, filename, mimetype }) {
+    if (!Buffer.isBuffer(buffer) || buffer.length === 0) {
+      throw new FastApiDentalCariesError('Image buffer is empty', { status: 400 });
+    }
+
+    const form = new FormData();
+    form.append('file', buffer, {
+      filename:    filename || 'tooth.png',
+      contentType: mimetype || 'application/octet-stream',
+    });
+
+    const startedAt = Date.now();
+    let response;
+    try {
+      response = await axios.post(`${FASTAPI_URL}/predict_with_gradcam`, form, {
+        headers:          form.getHeaders(),
+        maxContentLength: Infinity,
+        maxBodyLength:    Infinity,
+        timeout:          ANALYZE_TIMEOUT_MS,
+        validateStatus:   () => true,
+      });
+    } catch (err) {
       const isTimeout = err.code === 'ECONNABORTED' || /timeout/i.test(err.message || '');
       const isRefused = err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET';
 

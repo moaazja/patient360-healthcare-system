@@ -90,6 +90,11 @@ class AppDrawer extends ConsumerWidget {
                     route: RouteNames.ai,
                   ),
                   _NavItem(
+                    icon: LucideIcons.shieldCheck,
+                    label: 'فحص دواء',
+                    route: RouteNames.drugRisk,
+                  ),
+                  _NavItem(
                     icon: LucideIcons.star,
                     label: 'التقييمات',
                     route: RouteNames.reviews,

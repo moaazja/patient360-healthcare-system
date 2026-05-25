@@ -5843,3 +5843,152 @@
 [data-theme='dark'] .dd-dental-preview {
   border-color: rgba(77, 182, 172, 0.30);
 }
+
+/* ═══════════════════════════════════════════════════════════
+   Font Consistency Fix — Dental & Knee Stat Cards
+   Force Cairo on labels + values to match the rest of the page
+   ═══════════════════════════════════════════════════════════ */
+.dd-xray-stat-label,
+.dd-xray-stat-value {
+  font-family: 'Cairo', 'Inter', system-ui, -apple-system, sans-serif !important;
+}
+
+.dd-xray-stat-label {
+  font-weight: 500 !important;
+  letter-spacing: 0 !important;
+}
+
+.dd-xray-stat-value {
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GRAD-CAM VISUALIZATION GRID — Dental Caries Tool
+   ─────────────────────────────────────────────────────────────────────────
+   Three side-by-side figures showing the model's "attention" for an
+   uploaded tooth X-ray. Mirrors the layout from Kinan's reference
+   notebook (Enhanced X-ray | Grad-CAM Overlay | Boxes).
+
+   Responsive: 3 columns on desktop, stacks on tablets / mobile.
+
+   APPEND THIS TO THE END OF:
+     frontend/src/styles/DoctorDashboard.css
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+.dd-dental-viz-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 12px;
+}
+
+.dd-dental-viz-cell {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--tm-surface, #f0fdfa);
+  border: 1px solid var(--tm-border, #d1fae5);
+  border-radius: 14px;
+  padding: 12px;
+  transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+}
+
+.dd-dental-viz-cell:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px -10px rgba(0, 137, 123, 0.25);
+  border-color: var(--tm-accent, #4DB6AC);
+}
+
+.dd-dental-viz-imgwrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dd-dental-viz-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.dd-dental-viz-cap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: center;
+  font-family: 'Cairo', 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+.dd-dental-viz-cap strong {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--tm-primary, #0D3B3E);
+  letter-spacing: 0;
+}
+
+.dd-dental-viz-cap span {
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--tm-text-soft, #4a5568);
+  line-height: 1.5;
+  letter-spacing: 0;
+}
+
+.dd-dental-viz-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: auto;
+  padding: 4px 12px;
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-family: 'Cairo', 'Inter', system-ui, sans-serif;
+}
+
+/* ── Dark mode ─────────────────────────────────────────────────────────── */
+[data-theme='dark'] .dd-dental-viz-cell {
+  background: rgba(13, 59, 62, 0.4);
+  border-color: rgba(77, 182, 172, 0.25);
+}
+
+[data-theme='dark'] .dd-dental-viz-cell:hover {
+  border-color: rgba(77, 182, 172, 0.6);
+}
+
+[data-theme='dark'] .dd-dental-viz-cap strong {
+  color: var(--tm-accent, #4DB6AC);
+}
+
+[data-theme='dark'] .dd-dental-viz-cap span {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+[data-theme='dark'] .dd-dental-viz-badge {
+  background: rgba(220, 38, 38, 0.2);
+  color: #fca5a5;
+  border-color: rgba(220, 38, 38, 0.4);
+}
+
+/* ── Responsive — stack on tablets/phones ──────────────────────────────── */
+@media (max-width: 900px) {
+  .dd-dental-viz-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+  .dd-dental-viz-imgwrap {
+    aspect-ratio: 16 / 10;
+  }
+}

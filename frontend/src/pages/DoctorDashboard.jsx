@@ -6330,6 +6330,33 @@ const DoctorDashboard = () => {
                         || dentalResult?.recommendationArabic
                         || '';
 
+    // Probability percentages (already 0-100 for display)
+    const cariesPct    = (parseFloat(probabilities.Caries)     || 0) * 100;
+    const notCariesPct = (parseFloat(probabilities.Not_Caries) || 0) * 100;
+
+    // Grad-CAM visualization images — present only when the backend was
+    // routed through /predict_with_gradcam. The URLs are served as static
+    // assets from /uploads/dental-caries/gradcam/. We prefix with the API
+    // base origin so the image loads regardless of which dev server runs.
+    const visualization = dentalResult?.visualization;
+    const apiOrigin = (process.env.REACT_APP_API_URL || 'http://localhost:5000')
+                       .replace(/\/api\/?$/, '');
+    const resolveVizUrl = (relUrl) => (relUrl ? `${apiOrigin}${relUrl}` : null);
+    const enhancedUrl       = resolveVizUrl(visualization?.enhancedXrayUrl);
+    const overlayUrl        = resolveVizUrl(visualization?.gradcamOverlayUrl);
+    const boxesUrl          = resolveVizUrl(visualization?.boxesOverlayUrl);
+    const suspiciousRegions = Number(visualization?.suspiciousRegionsCount) || 0;
+    const hasVisualization  = !!(enhancedUrl || overlayUrl || boxesUrl);
+
+    // Certainty level — mirrors the bands from Kinan's reference notebook.
+    // Maps the model's confidence into a human-readable + severity-colored tier.
+    // Maps the model's confidence into a human-readable + severity-colored tier.
+    let certaintyLevel;
+    if      (confidencePct >= 90) certaintyLevel = { ar: 'يقين عالي جداً', severity: 'critical' };
+    else if (confidencePct >= 75) certaintyLevel = { ar: 'يقين عالي',       severity: 'warning'  };
+    else if (confidencePct >= 60) certaintyLevel = { ar: 'يقين متوسط',      severity: 'warning'  };
+    else                          certaintyLevel = { ar: 'يقين منخفض',      severity: 'normal'   };
+
     const severity      = classMeta.severity;
     const ResultIcon    = predictedClass === 'Not_Caries' ? CheckCircle2 : AlertTriangle;
     const resultTitle   = classMeta.ar;
@@ -6421,71 +6448,246 @@ const DoctorDashboard = () => {
           </button>
         </section>
 
-        {/* Result card — clones the knee-OA / xray result design */}
+        {/* Result card — clones the Knee-OA layout exactly for visual parity */}
         {dentalResult && (
           <section className="dd-ai-result" ref={aiResultRef}>
-            <div className={`dd-xray-result-head ${severity}`}>
-              <ResultIcon size={32} strokeWidth={2.2} />
+            {/* ── Header: icon + eyebrow + title + subtitle + confidence ring ── */}
+            <div className={`dd-ai-result-header ${severity}`}>
+              <div className="dd-ai-result-icon">
+                <ResultIcon size={36} strokeWidth={2} />
+              </div>
               <div>
-                <h2 className="dd-xray-result-title">{resultTitle}</h2>
-                <p className="dd-xray-result-sub">{resultSubtitle}</p>
+                <div className="dd-ai-result-eyebrow">نتيجة التحليل</div>
+                <h2 className="dd-ai-result-title">{resultTitle}</h2>
+                <p className="dd-ai-result-subtitle">{resultSubtitle}</p>
               </div>
-              <div className="dd-xray-confidence">
-                <span className="dd-xray-confidence-label">الثقة</span>
-                <span className="dd-xray-confidence-value">{confidencePct.toFixed(1)}%</span>
-              </div>
+              <ConfidenceRing percent={confidencePct} />
             </div>
 
             <div className="dd-ai-result-body">
-              {descriptionAr && (
-                <p className="dd-ai-description">{descriptionAr}</p>
-              )}
+              {/* ── Summary stats row (التشخيص + دقة + مستوى اليقين) ── */}
+              <div className="dd-xray-result-summary">
+                <div className="dd-xray-stat">
+                  <div className={`dd-xray-stat-icon dd-knee-stat-${severity}`}>
+                    <ResultIcon size={20} strokeWidth={2.2} />
+                  </div>
+                  <div>
+                    <span className="dd-xray-stat-label">التشخيص</span>
+                    <div className="dd-xray-stat-value">{resultTitle}</div>
+                  </div>
+                </div>
 
-              {/* Per-class probabilities */}
+                <div className="dd-xray-stat">
+                  <div className="dd-xray-stat-icon">
+                    <Activity size={20} strokeWidth={2.2} />
+                  </div>
+                  <div>
+                    <span className="dd-xray-stat-label">دقة التشخيص</span>
+                    <div className="dd-xray-stat-value">{confidencePct.toFixed(2)}%</div>
+                  </div>
+                </div>
+
+                <div className="dd-xray-stat">
+                  <div className={`dd-xray-stat-icon dd-knee-stat-${certaintyLevel.severity}`}>
+                    <ShieldCheck size={20} strokeWidth={2.2} />
+                  </div>
+                  <div>
+                    <span className="dd-xray-stat-label">مستوى اليقين</span>
+                    <div className="dd-xray-stat-value">{certaintyLevel.ar}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Per-class probability breakdown (2 bars) ── */}
               <div>
                 <h3 className="dd-ai-section-title">
                   <Activity size={18} strokeWidth={2} />
-                  الاحتمالات
+                  احتمالات الفئات
                 </h3>
                 <div className="dd-xray-scores">
-                  <div className="dd-xray-score-row critical">
+                  <div className={`dd-xray-score-row dd-knee-row-severe ${predictedClass === 'Caries' ? 'dd-knee-row-active' : ''}`}>
                     <div className="dd-xray-score-head">
-                      <span className="dd-xray-score-label">احتمال وجود تسوس</span>
-                      <span className="dd-xray-score-value">
-                        {((parseFloat(probabilities.Caries) || 0) * 100).toFixed(2)}%
-                      </span>
+                      <span className="dd-xray-score-label">احتمال وجود تسوس (Caries)</span>
+                      <span className="dd-xray-score-value">{cariesPct.toFixed(2)}%</span>
                     </div>
                     <div className="dd-xray-score-bar">
                       <div
-                        className="dd-xray-score-fill critical"
-                        style={{ width: `${Math.min(100, (parseFloat(probabilities.Caries) || 0) * 100)}%` }}
+                        className="dd-xray-score-fill dd-knee-fill-severe"
+                        style={{ width: `${Math.min(100, cariesPct)}%` }}
                       />
                     </div>
                   </div>
-                  <div className="dd-xray-score-row normal">
+                  <div className={`dd-xray-score-row dd-knee-row-normal ${predictedClass === 'Not_Caries' ? 'dd-knee-row-active' : ''}`}>
                     <div className="dd-xray-score-head">
-                      <span className="dd-xray-score-label">احتمال السلامة</span>
-                      <span className="dd-xray-score-value">
-                        {((parseFloat(probabilities.Not_Caries) || 0) * 100).toFixed(2)}%
-                      </span>
+                      <span className="dd-xray-score-label">احتمال السلامة (Not_Caries)</span>
+                      <span className="dd-xray-score-value">{notCariesPct.toFixed(2)}%</span>
                     </div>
                     <div className="dd-xray-score-bar">
                       <div
-                        className="dd-xray-score-fill normal"
-                        style={{ width: `${Math.min(100, (parseFloat(probabilities.Not_Caries) || 0) * 100)}%` }}
+                        className="dd-xray-score-fill dd-knee-fill-normal"
+                        style={{ width: `${Math.min(100, notCariesPct)}%` }}
                       />
                     </div>
                   </div>
                 </div>
               </div>
 
-              {recommendation && (
+              {/* ── Clinical interpretation (description) ── */}
+              {descriptionAr && (
                 <div>
                   <h3 className="dd-ai-section-title">
-                    <ClipboardList size={18} strokeWidth={2} />
-                    التوصية
+                    <FileText size={18} strokeWidth={2} />
+                    التفسير السريري
                   </h3>
-                  <p className="dd-ai-description">{recommendation}</p>
+                  <p className="dd-ai-description">{descriptionAr}</p>
+                </div>
+              )}
+
+              {/* ── Smart recommendations based on predicted class ── */}
+              <div>
+                <h3 className="dd-ai-section-title">
+                  <Sparkles size={18} strokeWidth={2} />
+                  التوصيات الطبية
+                </h3>
+                <div className="dd-ai-recs">
+                  {predictedClass === 'Not_Caries' && (
+                    <>
+                      <div className="dd-ai-rec">
+                        <span className="dd-ai-rec-num">1</span>
+                        <span>لم يتم رصد علامات واضحة لتسوس الأسنان في الصورة</span>
+                      </div>
+                      <div className="dd-ai-rec">
+                        <span className="dd-ai-rec-num">2</span>
+                        <span>الاستمرار على روتين العناية الفموية اليومي (تفريش مرتين + خيط طبي)</span>
+                      </div>
+                      <div className="dd-ai-rec">
+                        <span className="dd-ai-rec-num">3</span>
+                        <span>زيارة طبيب الأسنان للفحص الدوري كل 6 أشهر</span>
+                      </div>
+                      <div className="dd-ai-rec">
+                        <span className="dd-ai-rec-num">4</span>
+                        <span>الحفاظ على نظام غذائي صحي وتقليل السكريات</span>
+                      </div>
+                    </>
+                  )}
+
+                  {predictedClass === 'Caries' && cariesPct >= 80 && (
+                    <>
+                      <div className="dd-ai-rec">
+                        <span className="dd-ai-rec-num">1</span>
+                        <span>تسوس مكتشف بدرجة ثقة عالية — يستلزم تدخلاً علاجياً عاجلاً</span>
+                      </div>
+                      <div className="dd-ai-rec">
+                        <span className="dd-ai-rec-num">2</span>
+                        <span>إجراء فحص سريري شامل لتحديد عمق التسوس ومدى وصوله للُّب</span>
+                      </div>
+                      <div className="dd-ai-rec">
+                        <span className="dd-ai-rec-num">3</span>
+                        <span>اتخاذ القرار العلاجي المناسب (حشوة، علاج لُبّ، أو تاج) حسب الحالة</span>
+                      </div>
+                      <div className="dd-ai-rec">
+                        <span className="dd-ai-rec-num">4</span>
+                        <span>متابعة دورية كل 3 أشهر لتقييم فعالية العلاج</span>
+                      </div>
+                      <div className="dd-ai-rec">
+                        <span className="dd-ai-rec-num">5</span>
+                        <span>توعية المريض بأهمية النظافة الفموية لمنع تكرار التسوس</span>
+                      </div>
+                    </>
+                  )}
+
+                  {predictedClass === 'Caries' && cariesPct < 80 && (
+                    <>
+                      <div className="dd-ai-rec">
+                        <span className="dd-ai-rec-num">1</span>
+                        <span>تم رصد علامات تسوس محتملة — يستلزم فحصاً سريرياً للتأكيد</span>
+                      </div>
+                      <div className="dd-ai-rec">
+                        <span className="dd-ai-rec-num">2</span>
+                        <span>قد تكون أشعة إضافية ضرورية (Bitewing / Periapical) لتأكيد التشخيص</span>
+                      </div>
+                      <div className="dd-ai-rec">
+                        <span className="dd-ai-rec-num">3</span>
+                        <span>تقييم سريري لعمق الإصابة المحتملة قبل اتخاذ قرار العلاج النهائي</span>
+                      </div>
+                      <div className="dd-ai-rec">
+                        <span className="dd-ai-rec-num">4</span>
+                        <span>متابعة الحالة وإعادة التقييم خلال 2-4 أسابيع</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* ── Grad-CAM Visualization (Explainable AI) ─────────────
+                  Three side-by-side images from the FastAPI service that
+                  show WHERE the model "looked" when it made its decision.
+                  Renders only when the upstream service returned a viz block. */}
+              {hasVisualization && (
+                <div>
+                  <h3 className="dd-ai-section-title">
+                    <ScanLine size={18} strokeWidth={2} />
+                    تفسير قرار الذكاء الاصطناعي (Grad-CAM)
+                    {suspiciousRegions > 0 && (
+                      <span className="dd-dental-viz-badge">
+                        {suspiciousRegions} منطقة مشبوهة
+                      </span>
+                    )}
+                  </h3>
+
+                  <div className="dd-dental-viz-grid">
+                    {enhancedUrl && (
+                      <figure className="dd-dental-viz-cell">
+                        <div className="dd-dental-viz-imgwrap">
+                          <img
+                            src={enhancedUrl}
+                            alt="صورة الأشعة بعد تحسين التباين"
+                            className="dd-dental-viz-img"
+                          />
+                        </div>
+                        <figcaption className="dd-dental-viz-cap">
+                          <strong>الصورة المحسّنة</strong>
+                          <span>بعد تطبيق فلتر CLAHE لزيادة التباين</span>
+                        </figcaption>
+                      </figure>
+                    )}
+
+                    {overlayUrl && (
+                      <figure className="dd-dental-viz-cell">
+                        <div className="dd-dental-viz-imgwrap">
+                          <img
+                            src={overlayUrl}
+                            alt="خريطة حرارية تُظهر مناطق اهتمام الموديل"
+                            className="dd-dental-viz-img"
+                          />
+                        </div>
+                        <figcaption className="dd-dental-viz-cap">
+                          <strong>خريطة الاهتمام الحرارية</strong>
+                          <span>اللون الأحمر = المناطق التي اعتمد عليها الموديل</span>
+                        </figcaption>
+                      </figure>
+                    )}
+
+                    {boxesUrl && (
+                      <figure className="dd-dental-viz-cell">
+                        <div className="dd-dental-viz-imgwrap">
+                          <img
+                            src={boxesUrl}
+                            alt="مناطق التسوس المُكتشفة"
+                            className="dd-dental-viz-img"
+                          />
+                        </div>
+                        <figcaption className="dd-dental-viz-cap">
+                          <strong>المناطق المُكتشفة</strong>
+                          <span>
+                            {suspiciousRegions > 0
+                              ? `${suspiciousRegions} منطقة مشبوهة بحاجة لفحص دقيق`
+                              : 'لم تُرصد مناطق محددة'}
+                          </span>
+                        </figcaption>
+                      </figure>
+                    )}
+                  </div>
                 </div>
               )}
 
@@ -6493,8 +6695,9 @@ const DoctorDashboard = () => {
                 <AlertTriangle size={18} strokeWidth={2.2} />
                 <span>
                   <strong>ملاحظة:</strong> هذه النتائج استرشادية من الذكاء الاصطناعي
-                  ولا تغني عن التقييم السريري الشامل والخبرة الطبية المباشرة.
-                  يُنصح دائماً بالتأكد من التشخيص قبل اتخاذ القرارات الطبية.
+                  (نموذج EfficientNetV2-B0 — دقة 90.19% / AUC 93.45%) ولا تغني عن
+                  الفحص السريري الشامل وأشعة إضافية إذا لزم الأمر. يُنصح دائماً
+                  بالتأكد من التشخيص قبل اتخاذ القرارات العلاجية.
                 </span>
               </div>
             </div>

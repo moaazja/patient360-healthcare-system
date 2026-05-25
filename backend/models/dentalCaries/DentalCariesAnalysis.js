@@ -51,6 +51,23 @@ const ImageRefSchema = new Schema(
 );
 
 /**
+ * Grad-CAM visualization images (optional). Populated only when the analysis
+ * is performed via /predict_with_gradcam. The Node controller writes the
+ * base64 payloads from FastAPI as PNGs under
+ * `backend/uploads/dental-caries/gradcam/` and stores the URLs here.
+ */
+const VisualizationSchema = new Schema(
+  {
+    enhancedXrayUrl:        { type: String },
+    gradcamOverlayUrl:      { type: String },
+    boxesOverlayUrl:        { type: String },
+    suspiciousRegionsCount: { type: Number, min: 0, default: 0 },
+    generatedAt:            { type: Date,   default: Date.now },
+  },
+  { _id: false }
+);
+
+/**
  * The AI classifier output, normalized to a fixed shape regardless of any
  * future changes to the upstream FastAPI service response.
  *
@@ -143,9 +160,10 @@ const DentalCariesAnalysisSchema = new Schema(
     visitId:         { type: Types.ObjectId, ref: 'Visit',  index: { sparse: true } },
 
     /* ── Inputs / Outputs ───────────────────────────────────────────────── */
-    image:     { type: ImageRefSchema,  required: true },
-    result:    { type: ResultSchema,    required: true },
-    modelInfo: { type: ModelInfoSchema, default: () => ({}) },
+    image:         { type: ImageRefSchema,     required: true },
+    result:        { type: ResultSchema,       required: true },
+    visualization: { type: VisualizationSchema, default: null },
+    modelInfo:     { type: ModelInfoSchema,    default: () => ({}) },
 
     /* ── Telemetry ──────────────────────────────────────────────────────── */
     processingTimeMs: { type: Number, min: 0 },

@@ -17,6 +17,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_radii.dart';
 import '../../../core/utils/logger.dart';
+import '../../../shared/widgets/app_drawer.dart';
 import '../../../shared/widgets/page_header.dart';
 import '../../home/presentation/providers/home_providers.dart';
 import '../domain/emergency_report.dart';
@@ -62,25 +63,23 @@ class _AIAssistantScreenState extends ConsumerState<AIAssistantScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final int unread = ref
-            .watch(dashboardOverviewProvider)
-            .value
-            ?.unreadNotifications ??
-        0;
+    final int unread =
+        ref.watch(dashboardOverviewProvider).value?.unreadNotifications ?? 0;
 
-    ref.listen<AsyncValue<EmergencyReport?>>(
-      triageControllerProvider,
-      (AsyncValue<EmergencyReport?>? _, AsyncValue<EmergencyReport?> next) {
-        final EmergencyReport? r = next.value;
-        if (r == null) return;
-        if (r.aiRiskLevel != SeverityLevel.critical) return;
-        if (_criticalDialogShownIds.contains(r.id)) return;
-        _criticalDialogShownIds.add(r.id);
-        _showCriticalDialog(r);
-      },
-    );
+    ref.listen<AsyncValue<EmergencyReport?>>(triageControllerProvider, (
+      AsyncValue<EmergencyReport?>? _,
+      AsyncValue<EmergencyReport?> next,
+    ) {
+      final EmergencyReport? r = next.value;
+      if (r == null) return;
+      if (r.aiRiskLevel != SeverityLevel.critical) return;
+      if (_criticalDialogShownIds.contains(r.id)) return;
+      _criticalDialogShownIds.add(r.id);
+      _showCriticalDialog(r);
+    });
 
     return Scaffold(
+      drawer: const AppDrawer(),
       appBar: PageHeader(
         title: 'المساعد الذكي',
         subtitle: 'استشارة الأخصائي والإسعاف الأولي',
@@ -106,11 +105,9 @@ class _AIAssistantScreenState extends ConsumerState<AIAssistantScreen> {
                   onModeChange: (AiInputMode m) =>
                       setState(() => _triageMode = m),
                   pickedImage: _triageImage,
-                  onImageChange: (XFile? f) =>
-                      setState(() => _triageImage = f),
+                  onImageChange: (XFile? f) => setState(() => _triageImage = f),
                   pickedAudio: _triageAudio,
-                  onAudioChange: (File? f) =>
-                      setState(() => _triageAudio = f),
+                  onAudioChange: (File? f) => setState(() => _triageAudio = f),
                 ),
               ],
             ),
@@ -127,8 +124,11 @@ class _AIAssistantScreenState extends ConsumerState<AIAssistantScreen> {
       barrierDismissible: false,
       builder: (BuildContext ctx) {
         return AlertDialog(
-          icon: const Icon(LucideIcons.octagonAlert,
-              color: AppColors.error, size: 36),
+          icon: const Icon(
+            LucideIcons.octagonAlert,
+            color: AppColors.error,
+            size: 36,
+          ),
           title: const Text(
             'حالة حرجة',
             style: TextStyle(fontWeight: FontWeight.w800),
@@ -282,8 +282,9 @@ class _SpecialistTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final AsyncValue<SpecialistResult?> async =
-        ref.watch(specialistControllerProvider);
+    final AsyncValue<SpecialistResult?> async = ref.watch(
+      specialistControllerProvider,
+    );
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
@@ -354,10 +355,12 @@ class _TriageTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final AsyncValue<EmergencyReport?> async =
-        ref.watch(triageControllerProvider);
-    final AsyncValue<List<EmergencyReport>> historyAsync =
-        ref.watch(emergencyReportsProvider);
+    final AsyncValue<EmergencyReport?> async = ref.watch(
+      triageControllerProvider,
+    );
+    final AsyncValue<List<EmergencyReport>> historyAsync = ref.watch(
+      emergencyReportsProvider,
+    );
     final bool busy = async.isLoading;
 
     return ListView(
@@ -371,11 +374,7 @@ class _TriageTab extends ConsumerWidget {
               'الأولي. في حالة الطوارئ الحقيقية، اتصل بالإسعاف فوراً.',
         ),
         const SizedBox(height: 16),
-        InputModeToggle(
-          current: mode,
-          onChanged: onModeChange,
-          disabled: busy,
-        ),
+        InputModeToggle(current: mode, onChanged: onModeChange, disabled: busy),
         const SizedBox(height: 12),
         if (mode == AiInputMode.text)
           InputText(

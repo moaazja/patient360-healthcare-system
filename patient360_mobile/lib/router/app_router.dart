@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../features/ai_assistant/presentation/ai_assistant_screen.dart';
 import '../features/appointments/presentation/appointments_screen.dart';
+import '../features/drug_risk/presentation/pages/drug_risk_check_page.dart';
 import '../features/auth/domain/auth_session.dart';
 import '../features/auth/presentation/login_screen.dart';
 import '../features/auth/presentation/providers/auth_provider.dart';
@@ -33,8 +34,9 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
     initialLocation: RouteNames.home,
     refreshListenable: refreshListenable,
     redirect: (BuildContext context, GoRouterState state) {
-      final AsyncValue<AuthSession?> authState =
-          ref.read(authControllerProvider);
+      final AsyncValue<AuthSession?> authState = ref.read(
+        authControllerProvider,
+      );
       if (authState.isLoading) return null;
 
       final bool loggedIn = authState.value != null;
@@ -81,6 +83,10 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
           GoRoute(
             path: RouteNames.ai,
             builder: (_, __) => const AIAssistantScreen(),
+          ),
+          GoRoute(
+            path: RouteNames.drugRisk,
+            builder: (_, __) => const DrugRiskCheckPage(),
           ),
           GoRoute(
             path: RouteNames.reviews,

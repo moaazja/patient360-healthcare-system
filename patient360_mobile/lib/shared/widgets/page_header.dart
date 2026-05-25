@@ -41,9 +41,11 @@ class PageHeader extends ConsumerWidget implements PreferredSizeWidget {
     final ThemeMode themeMode = ref.watch(themeControllerProvider);
     final int badgeCount =
         unreadCount ?? ref.watch(unreadNotificationsCountProvider);
-    final Brightness platformBrightness =
-        MediaQuery.platformBrightnessOf(context);
-    final bool isDark = themeMode == ThemeMode.dark ||
+    final Brightness platformBrightness = MediaQuery.platformBrightnessOf(
+      context,
+    );
+    final bool isDark =
+        themeMode == ThemeMode.dark ||
         (themeMode == ThemeMode.system &&
             platformBrightness == Brightness.dark);
 
@@ -61,16 +63,13 @@ class PageHeader extends ConsumerWidget implements PreferredSizeWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.center,
         children: <Widget>[
-          Text(
-            title,
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
+          Text(title, style: Theme.of(context).textTheme.titleLarge),
           if (subtitle != null)
             Text(
               subtitle!,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
         ],
       ),
@@ -78,8 +77,7 @@ class PageHeader extends ConsumerWidget implements PreferredSizeWidget {
         IconButton(
           icon: Icon(isDark ? LucideIcons.sun : LucideIcons.moon),
           tooltip: isDark ? 'الوضع النهاري' : 'الوضع الليلي',
-          onPressed: () =>
-              ref.read(themeControllerProvider.notifier).toggle(),
+          onPressed: () => ref.read(themeControllerProvider.notifier).toggle(),
         ),
         _NotificationsBell(
           unreadCount: badgeCount,
@@ -121,14 +119,8 @@ class _NotificationsBell extends StatelessWidget {
             end: 4,
             child: IgnorePointer(
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 5,
-                  vertical: 1,
-                ),
-                constraints: const BoxConstraints(
-                  minWidth: 16,
-                  minHeight: 16,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
                 decoration: const BoxDecoration(
                   color: AppColors.error,
                   shape: BoxShape.circle,

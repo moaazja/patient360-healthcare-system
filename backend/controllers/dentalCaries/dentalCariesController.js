@@ -23,6 +23,7 @@
 'use strict';
 
 const fs       = require('fs');
+const path     = require('path');
 const mongoose = require('mongoose');
 
 const DentalCariesAnalysis      = require('../../models/dentalCaries/DentalCariesAnalysis');
@@ -39,6 +40,50 @@ const {
 } = require('../../models');
 
 const FastApiDentalCariesClient = require('../../services/dentalCaries/fastApiDentalCariesClient');
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   GRAD-CAM VISUALIZATION STORAGE
+   ─────────────────────────────────────────────────────────────────────────
+   FastAPI returns three base64-encoded PNGs. We decode them and write them
+   to disk so the frontend can render them via plain <img> tags (URLs are
+   small, base64 strings would bloat every history payload).
+
+   Layout on disk:
+     backend/uploads/dental-caries/gradcam/<analysisStem>__enhanced.png
+     backend/uploads/dental-caries/gradcam/<analysisStem>__overlay.png
+     backend/uploads/dental-caries/gradcam/<analysisStem>__boxes.png
+
+   URL served:  /uploads/dental-caries/gradcam/<file>
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const GRADCAM_DIR = path.join(__dirname, '..', '..', 'uploads', 'dental-caries', 'gradcam');
+if (!fs.existsSync(GRADCAM_DIR)) {
+  fs.mkdirSync(GRADCAM_DIR, { recursive: true });
+}
+
+/**
+ * Decode a base64 PNG payload (with or without the `data:image/png;base64,`
+ * prefix) and write it to GRADCAM_DIR. Returns the public URL or null on
+ * failure — we never let a viz write failure block the prediction response.
+ */
+function persistGradcamImage(b64Payload, outName) {
+  if (!b64Payload || typeof b64Payload !== 'string') return null;
+
+  try {
+    const cleaned = b64Payload.replace(/^data:image\/\w+;base64,/, '');
+    const buffer  = Buffer.from(cleaned, 'base64');
+    if (buffer.length === 0) return null;
+
+    const safe = String(outName).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 200);
+    const full = path.join(GRADCAM_DIR, safe);
+    fs.writeFileSync(full, buffer);
+    return `/uploads/dental-caries/gradcam/${safe}`;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[dentalCaries] persistGradcamImage failed:', err.message);
+    return null;
+  }
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    AUDIT LOGGING — Defensive resolution
@@ -257,6 +302,10 @@ function buildAnalyzeResponse(analysisDoc) {
     // ── X-Ray UI compatibility flag (boolean shortcut) ────────────────────
     cariesDetected: r.prediction === 'Caries',
 
+    // ── Grad-CAM visualization (optional — present only when /predict_with_gradcam
+    //    was used and at least one image was successfully written to disk) ──
+    visualization: analysisDoc.visualization || null,
+
     // ── Telemetry ─────────────────────────────────────────────────────────
     processingTimeMs: analysisDoc.processingTimeMs,
     analyzedAt:       analysisDoc.createdAt,
@@ -317,11 +366,11 @@ exports.analyze = async (req, res) => {
       return res.status(400).json({ success: false, message: 'visitId غير صالح' });
     }
 
-    /* ── 3. Send to FastAPI ──────────────────────────────────────── */
+    /* ── 3. Send to FastAPI (with Grad-CAM) ───────────────────────── */
     let fastApiResult;
     try {
       const buffer = fs.readFileSync(uploadedFile.path);
-      fastApiResult = await FastApiDentalCariesClient.analyze({
+      fastApiResult = await FastApiDentalCariesClient.analyzeWithGradcam({
         buffer,
         filename: uploadedFile.originalname,
         mimetype: uploadedFile.mimetype,
@@ -377,6 +426,40 @@ exports.analyze = async (req, res) => {
     const severity      = buildSeverity(fastApiResult.prediction, probCaries);
     const recAr         = buildRecommendationAr(fastApiResult.prediction, probCaries);
 
+    /* ── 5b. Persist Grad-CAM visualization images (if provided) ───
+       FastAPI returns three base64-encoded PNGs under `visualization`.
+       We decode them and write them to disk; the frontend renders via
+       plain <img src="..."> using the stored URLs. Soft-failing: a
+       missing/broken viz never blocks the prediction. */
+    let vizDoc = null;
+    const vizUpstream = fastApiResult.visualization;
+    if (vizUpstream && !vizUpstream.error) {
+      // Reuse the upload's filename stem so the viz files are easy to
+      // correlate with the source image during debugging.
+      const stem = path.parse(uploadedFile.filename).name;
+
+      const enhancedUrl = persistGradcamImage(
+        vizUpstream.enhanced_xray_b64,   `${stem}__enhanced.png`
+      );
+      const overlayUrl  = persistGradcamImage(
+        vizUpstream.gradcam_overlay_b64, `${stem}__overlay.png`
+      );
+      const boxesUrl    = persistGradcamImage(
+        vizUpstream.boxes_overlay_b64,   `${stem}__boxes.png`
+      );
+
+      // Only store the viz subdocument if at least one image was written.
+      if (enhancedUrl || overlayUrl || boxesUrl) {
+        vizDoc = {
+          enhancedXrayUrl:        enhancedUrl,
+          gradcamOverlayUrl:      overlayUrl,
+          boxesOverlayUrl:        boxesUrl,
+          suspiciousRegionsCount: Number(vizUpstream.suspicious_regions_count) || 0,
+          generatedAt:            new Date(),
+        };
+      }
+    }
+
     /* ── 6. Persist ──────────────────────────────────────────────── */
     const analysis = await DentalCariesAnalysis.create({
       analyzedByPersonId: prof.personId,
@@ -405,6 +488,7 @@ exports.analyze = async (req, res) => {
         recommendationAr:     recAr,
         severity,
       },
+      ...(vizDoc && { visualization: vizDoc }),
       modelInfo: {
         name:         'DentalCaries_Binary_EfficientNetV2B0',
         version:      '1.0',
