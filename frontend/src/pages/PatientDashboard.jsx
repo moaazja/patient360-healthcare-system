@@ -106,7 +106,7 @@ const SECTION_META = {
   'ai-assistant': {
     key: 'ai-assistant',
     title: 'المساعد الذكي',
-    subtitle: 'استشارة الأخصائي والإسعاف الأولي',
+    subtitle: 'الإسعاف الأولي الذكي',
     icon: Sparkles,
   },
   'drug-risk': {
@@ -1133,14 +1133,7 @@ export default function PatientDashboard() {
   const [emergencyReportsLoading, setEmergencyReportsLoading] = useState(false);
   const [emergencyReportsLoaded, setEmergencyReportsLoaded] = useState(false);
 
-  // ── AI assistant state ──────────────────────────────────────────────
-  const [aiActiveTab, setAiActiveTab] = useState('specialist');
-
-  const [specialistInput, setSpecialistInput] = useState('');
-  const [specialistResult, setSpecialistResult] = useState(null);
-  const [specialistLoading, setSpecialistLoading] = useState(false);
-  const [specialistError, setSpecialistError] = useState(null);
-
+  // ── AI assistant state (emergency triage only) ──────────────────────
   const [triageMode, setTriageMode] = useState('text');
   const [triageText, setTriageText] = useState('');
   const [triageImageFile, setTriageImageFile] = useState(null);
@@ -3323,24 +3316,6 @@ const handleLogout = useCallback(() => {
     });
   };
 
-  const handleSpecialistSubmit = async (symptoms) => {
-    if (!symptoms?.trim()) return;
-    setSpecialistLoading(true);
-    setSpecialistError(null);
-    try {
-      const res = await patientAPI.analyzeSymptoms({ symptoms });
-      if (res?.success) {
-        setSpecialistResult(res.data || null);
-      } else {
-        setSpecialistError(res?.message || 'تعذر الحصول على النتيجة');
-      }
-    } catch (err) {
-      setSpecialistError(err?.message || 'حدث خطأ في الاتصال بالخادم');
-    } finally {
-      setSpecialistLoading(false);
-    }
-  };
-
   const submitTriage = async (mode, payload) => {
     setTriageLoading(true);
     setTriageError(null);
@@ -3391,66 +3366,7 @@ const handleLogout = useCallback(() => {
 
   const renderAIAssistant = () => (
     <div className="pd-ai-assistant">
-      <div className="pd-ai-subtabs" role="tablist">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={aiActiveTab === 'specialist'}
-          className={`pd-ai-subtab${aiActiveTab === 'specialist' ? ' is-active' : ''}`}
-          onClick={() => setAiActiveTab('specialist')}
-        >
-          <Stethoscope size={16} aria-hidden="true" />
-          <span>استشارة الأخصائي</span>
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={aiActiveTab === 'triage'}
-          className={`pd-ai-subtab${aiActiveTab === 'triage' ? ' is-active' : ''}`}
-          onClick={() => setAiActiveTab('triage')}
-        >
-          <Siren size={16} aria-hidden="true" />
-          <span>الإسعاف الأولي</span>
-        </button>
-      </div>
-
-      {aiActiveTab === 'specialist' && (
-        <div className="pd-ai-panel" role="tabpanel" aria-label="استشارة الأخصائي">
-          <div className="pd-ai-panel-intro">
-            <h3 className="pd-ai-panel-title">اختر الأخصائي المناسب لأعراضك</h3>
-            <p>
-              اكتب أعراضك وسيقترح لك المساعد الذكي نوع الطبيب المناسب
-              لحالتك. هذه النتيجة للإرشاد فقط ولا تحل محل الاستشارة
-              الطبية.
-            </p>
-          </div>
-
-          <div className="pd-ai-panel-body">
-            <div className="pd-ai-panel-input">
-              <InputText
-                value={specialistInput}
-                onChange={setSpecialistInput}
-                onSubmit={handleSpecialistSubmit}
-                placeholder="صف أعراضك بلغة واضحة، مثل: ألم في الصدر وضيق في التنفس منذ يومين..."
-                disabled={specialistLoading}
-                maxLength={2000}
-              />
-            </div>
-
-            <div className="pd-ai-panel-result">
-              <ResultCard
-                variant={specialistResult ? 'specialist' : 'empty'}
-                result={specialistResult}
-                loading={specialistLoading}
-                error={specialistError}
-              />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {aiActiveTab === 'triage' && (
-        <div className="pd-ai-panel" role="tabpanel" aria-label="الإسعاف الأولي">
+      <div className="pd-ai-panel" role="tabpanel" aria-label="الإسعاف الأولي">
           <div className="pd-ai-panel-intro pd-ai-panel-intro--emergency">
             <AlertTriangle size={20} aria-hidden="true" />
             <div>
@@ -3572,8 +3488,7 @@ const handleLogout = useCallback(() => {
               </ol>
             )}
           </section>
-        </div>
-      )}
+      </div>
     </div>
   );
 

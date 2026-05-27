@@ -9,6 +9,12 @@ import '../features/auth/domain/auth_session.dart';
 import '../features/auth/presentation/login_screen.dart';
 import '../features/auth/presentation/providers/auth_provider.dart';
 import '../features/home/presentation/home_screen.dart';
+import '../features/prescriptions/domain/prescription.dart';
+import '../features/prescriptions/presentation/prescription_detail_screen.dart';
+import '../features/visits/domain/visit.dart';
+import '../features/visits/presentation/visit_detail_screen.dart';
+import '../features/lab_results/domain/lab_test.dart';
+import '../features/lab_results/presentation/lab_result_detail_screen.dart';
 import '../features/lab_results/presentation/lab_results_screen.dart';
 import '../features/medications/presentation/medications_screen.dart';
 import '../features/notifications/presentation/notifications_screen.dart';
@@ -71,6 +77,42 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
           GoRoute(
             path: RouteNames.lab,
             builder: (_, __) => const LabResultsScreen(),
+          ),
+          GoRoute(
+            path: '/visits/:id',
+            builder: (BuildContext context, GoRouterState state) {
+              final String id = state.pathParameters['id'] ?? '';
+              final Visit? initial = state.extra is Visit
+                  ? state.extra as Visit
+                  : null;
+              return VisitDetailScreen(visitId: id, initialVisit: initial);
+            },
+          ),
+          GoRoute(
+            path: '/prescriptions/:id',
+            builder: (BuildContext context, GoRouterState state) {
+              final String id = state.pathParameters['id'] ?? '';
+              final Prescription? initial = state.extra is Prescription
+                  ? state.extra as Prescription
+                  : null;
+              return PrescriptionDetailScreen(
+                prescriptionId: id,
+                initialPrescription: initial,
+              );
+            },
+          ),
+          GoRoute(
+            path: '/lab-results/:id',
+            builder: (BuildContext context, GoRouterState state) {
+              final String id = state.pathParameters['id'] ?? '';
+              final LabTest? initialTest = state.extra is LabTest
+                  ? state.extra as LabTest
+                  : null;
+              return LabResultDetailScreen(
+                testId: id,
+                initialTest: initialTest,
+              );
+            },
           ),
           GoRoute(
             path: RouteNames.profile,

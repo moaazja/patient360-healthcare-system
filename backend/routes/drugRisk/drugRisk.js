@@ -6,22 +6,23 @@
  *
  *  Routes:
  *    POST  /check                  — patient self-inquiry about a drug
- *    POST  /check-for-patient      — doctor screens a drug against a patient
+ *    POST  /check-for-patient      — doctor/dentist screens a drug against a patient
  *    GET   /my-history             — patient's check history (paginated)
- *    POST  /:id/acknowledge        — doctor confirms an override after warning
+ *    POST  /:id/acknowledge        — doctor/dentist confirms an override after warning
  *    GET   /health                 — probe FastAPI reachability
  *
  *  Auth model:
  *    All routes require a valid JWT (protect middleware).
  *    Role gates:
- *      - /check + /my-history          → patient only
- *      - /check-for-patient + acknowledge → doctor only
- *      - /health                       → patient, doctor, admin (debugging)
+ *      - /check + /my-history             → patient only
+ *      - /check-for-patient + acknowledge → doctor + dentist
+ *        (both write prescriptions and need allergy/interaction screening)
+ *      - /health                          → all clinical staff + admin (debugging)
  *
  *  Why /check is patient-only:
- *    Doctors should use /check-for-patient (which includes a patient
- *    identifier) so the check is correctly attributed to the doctor and
- *    linked to the right patient — never accidentally to the doctor's own
+ *    Clinical staff should use /check-for-patient (which includes a patient
+ *    identifier) so the check is correctly attributed to the prescriber and
+ *    linked to the right patient — never accidentally to the prescriber's own
  *    record.
  * ═══════════════════════════════════════════════════════════════════════════
  */
@@ -48,19 +49,22 @@ router.get(
   drugRiskController.myHistory
 );
 
-// ── Doctor endpoints ───────────────────────────────────────────────────
+// ── Prescriber endpoints (doctor + dentist) ────────────────────────────
+// Dentists also write prescriptions in this platform (DoctorDashboard is
+// shared between both roles), so they need the same drug-risk screening
+// capability before adding a medication to a visit.
 
 router.post(
   '/check-for-patient',
   protect,
-  authorize('doctor'),
+  authorize('doctor', 'dentist'),
   drugRiskController.checkForPatient
 );
 
 router.post(
   '/:id/acknowledge',
   protect,
-  authorize('doctor'),
+  authorize('doctor', 'dentist'),
   drugRiskController.acknowledgeOverride
 );
 
@@ -69,7 +73,7 @@ router.post(
 router.get(
   '/health',
   protect,
-  authorize('patient', 'doctor', 'admin'),
+  authorize('patient', 'doctor', 'dentist', 'admin'),
   drugRiskController.health
 );
 

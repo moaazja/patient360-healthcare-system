@@ -1,6 +1,6 @@
 // ============================================================================
 // AI Assistant Providers - Patient 360 Mobile
-// Triage controller + Specialist controller + Emergency reports history
+// Triage controller + Emergency reports history
 // ============================================================================
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,43 +11,19 @@ import '../../data/ai_repository.dart';
 import '../../data/location_helper.dart';
 import '../../domain/emergency_location.dart';
 import '../../domain/emergency_report.dart';
-import '../../domain/specialist_result.dart';
 
 // Type aliases - keeps generic types on a SINGLE line so encoding/wrapping
 // issues from text editors cannot break the parser.
-typedef _EmergencyReportsList = List<EmergencyReport>;
-typedef _ReportsState = AsyncValue<_EmergencyReportsList>;
+// `EmergencyReportsList` is public because it surfaces through the
+// `EmergencyReportsController` and `emergencyReportsProvider` public APIs.
+// The state aliases stay private — they're only used inside this file.
+typedef EmergencyReportsList = List<EmergencyReport>;
+typedef _ReportsState = AsyncValue<EmergencyReportsList>;
 typedef _TriageState = AsyncValue<EmergencyReport?>;
-typedef _SpecialistState = AsyncValue<SpecialistResult?>;
 
 // Strategy provider for location resolution.
 final Provider<LocationHelper> locationHelperProvider =
     Provider<LocationHelper>((Ref ref) => const GeolocatorLocationHelper());
-
-// ============================================================================
-// Specialist
-// ============================================================================
-
-class SpecialistController extends AsyncNotifier<SpecialistResult?> {
-  @override
-  Future<SpecialistResult?> build() async => null;
-
-  Future<void> submit(String symptoms) async {
-    state = const _SpecialistState.loading();
-    state = await AsyncValue.guard<SpecialistResult?>(
-      () => ref.read(aiRepositoryProvider).analyzeSymptoms(symptoms: symptoms),
-    );
-  }
-
-  void clear() {
-    state = const _SpecialistState.data(null);
-  }
-}
-
-final specialistControllerProvider =
-    AsyncNotifierProvider<SpecialistController, SpecialistResult?>(
-      SpecialistController.new,
-    );
 
 // ============================================================================
 // Triage - text / image / voice
@@ -132,21 +108,21 @@ final triageControllerProvider =
 // Emergency reports history
 // ============================================================================
 
-class EmergencyReportsController extends AsyncNotifier<_EmergencyReportsList> {
+class EmergencyReportsController extends AsyncNotifier<EmergencyReportsList> {
   @override
-  Future<_EmergencyReportsList> build() async {
+  Future<EmergencyReportsList> build() async {
     return ref.read(aiRepositoryProvider).getEmergencyReports();
   }
 
   Future<void> refresh() async {
     state = const _ReportsState.loading();
-    state = await AsyncValue.guard<_EmergencyReportsList>(
+    state = await AsyncValue.guard<EmergencyReportsList>(
       () => ref.read(aiRepositoryProvider).getEmergencyReports(),
     );
   }
 }
 
 final emergencyReportsProvider =
-    AsyncNotifierProvider<EmergencyReportsController, _EmergencyReportsList>(
+    AsyncNotifierProvider<EmergencyReportsController, EmergencyReportsList>(
       EmergencyReportsController.new,
     );

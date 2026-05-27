@@ -38,10 +38,12 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
-  animation: dr-overlay-fade-in 0.18s ease-out;
+  /* خلفية مظلمة احترافية للـ medical modal:
+     • لون رمادي-أزرق غامق (slate-900) يحاكي تطبيقات الـ EHR الاحترافية
+     • opacity 100% — لا تشوف أي شي وراها
+     • مريحة للعين (مش أسود نقي اللي بيكون قاسي) */
+  background: #0f172a;
+  animation: dr-overlay-fade-in 0.2s ease-out;
 }
 
 @keyframes dr-overlay-fade-in {
@@ -58,13 +60,35 @@
   width: 100%;
   max-width: 560px;
   max-height: calc(100vh - 40px);
-  background: var(--tm-card);
+  /* أبيض نقي صلب — مش متغير عشان نتأكد إنه ما في أي شفافية أو
+     اختلاط مع الـ backdrop المظلم. هاد المعيار الذهبي
+     للـ medical modals الاحترافية. */
+  background: #ffffff;
   border-radius: 18px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  /* shadow أقوى مع طبقتين:
+     1) العمق العام (مظلل عميق)
+     2) حافة ضوئية ناعمة تبرز الـ panel من الخلفية */
+  box-shadow:
+    0 25px 70px -10px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  animation: dr-overlay-pop-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: dr-overlay-pop-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* توهج خفيف حول الـ panel حسب لون التحذير (HIGH/MEDIUM).
+   هذا يخلق إحساس "إنذار" بصري بدون ما يصير صارخ. */
+.dr-overlay-panel:has(.dr-overlay-header--high) {
+  box-shadow:
+    0 25px 70px -10px rgba(220, 38, 38, 0.35),
+    0 0 0 1px rgba(220, 38, 38, 0.15);
+}
+
+.dr-overlay-panel:has(.dr-overlay-header--medium) {
+  box-shadow:
+    0 25px 70px -10px rgba(217, 119, 6, 0.32),
+    0 0 0 1px rgba(217, 119, 6, 0.12);
 }
 
 @keyframes dr-overlay-pop-in {
@@ -102,7 +126,10 @@
 
 .dr-overlay-header-titles {
   flex: 1;
+  /* min-width: 0 يسمح للـ flex item ينضغط، لكن نحتاج overflow: visible
+     عشان نسمح للـ subtitle's <strong> أن يظهر بالكامل بدون قص */
   min-width: 0;
+  overflow: visible;
 }
 
 .dr-overlay-title {
@@ -116,14 +143,23 @@
   margin: 4px 0 0;
   font-size: 13px;
   color: rgba(255, 255, 255, 0.92);
+  /* يلف النص لسطر جديد إذا اسم الدواء طويل بدل ما ينقص */
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
 }
 
 .dr-overlay-subtitle strong {
   font-weight: 700;
   background: rgba(255, 255, 255, 0.18);
-  padding: 1px 8px;
+  padding: 2px 10px;
   border-radius: 6px;
-  display: inline-block;
+  /* inline (مش inline-block) عشان ما ينقص لو الـ container ضيق.
+     بهيك لو اسم الدواء طويل، يلف بشكل طبيعي مع المحاذاة. */
+  display: inline;
+  /* الاتجاه LTR للأسماء الإنجليزية، unicode-bidi: isolate يضمن
+     الكلمة تتعامل كوحدة مستقلة عن الـ RTL flow. */
+  unicode-bidi: isolate;
 }
 
 .dr-overlay-close {
@@ -168,8 +204,9 @@
 /* Fields — reason, advice, warning, interaction */
 
 .dr-overlay-field {
-  background: var(--tm-background);
-  border: 1px solid var(--tm-border);
+  /* الكروت الداخلية: لون رمادي-أبيض ناعم جداً يميزها عن الـ panel الأبيض */
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 12px 14px;
 }
@@ -236,9 +273,9 @@
   font-family: inherit;
   font-size: 13.5px;
   line-height: 1.6;
-  color: var(--tm-text);
-  background: var(--tm-background);
-  border: 1.5px solid var(--tm-border);
+  color: #0f172a;
+  background: #f8fafc;
+  border: 1.5px solid #e2e8f0;
   border-radius: 10px;
   resize: vertical;
   min-height: 60px;
@@ -277,8 +314,9 @@
   justify-content: flex-end;
   gap: 10px;
   padding: 16px 22px;
-  background: var(--tm-surface);
-  border-top: 1px solid var(--tm-border);
+  /* لون رمادي فاتح صلب — يفصل الـ footer عن الـ body بصرياً */
+  background: #f8fafc;
+  border-top: 1px solid #e2e8f0;
   flex-wrap: wrap;
 }
 
@@ -351,7 +389,26 @@
    ──────────────────────────────────────────────────────────────────────── */
 
 [data-theme="dark"] .dr-overlay {
-  background: rgba(0, 0, 0, 0.7);
+  /* في الـ dark mode نزيد القتامة شوي */
+  background: #020617;
+}
+
+[data-theme="dark"] .dr-overlay-panel {
+  box-shadow:
+    0 25px 70px -10px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .dr-overlay-panel:has(.dr-overlay-header--high) {
+  box-shadow:
+    0 25px 70px -10px rgba(239, 68, 68, 0.45),
+    0 0 0 1px rgba(239, 68, 68, 0.2);
+}
+
+[data-theme="dark"] .dr-overlay-panel:has(.dr-overlay-header--medium) {
+  box-shadow:
+    0 25px 70px -10px rgba(245, 158, 11, 0.4),
+    0 0 0 1px rgba(245, 158, 11, 0.18);
 }
 
 [data-theme="dark"] .dr-overlay-field--warning {

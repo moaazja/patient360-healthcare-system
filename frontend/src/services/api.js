@@ -41,19 +41,49 @@ api.interceptors.request.use(
 );
 
 // Add response interceptor for error handling
+//
+// Defense-in-depth design:
+//   A 401 from the backend should only force a logout when it represents
+//   an ACTUAL authentication failure (token missing, expired, or invalid).
+//   Some backend endpoints may incorrectly return 401 for non-auth failures
+//   (e.g. validation errors like "wrong verification code"). Reacting to
+//   those by clearing credentials and redirecting was bouncing users out
+//   of their dashboards on simple input mistakes.
+//
+//   We therefore inspect the response body for a recognisable auth-failure
+//   signal (an explicit error code, or auth-related wording in the message)
+//   before clearing state. Anything else surfaces normally to the calling
+//   component, which can show the error message inline without leaving the
+//   page.
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Don't redirect during login attempt itself
     if (error.response?.status === 401) {
       const isLoginAttempt = error.config?.url?.includes('/auth/login');
+      const hasToken = !!localStorage.getItem('token');
 
-      if (!isLoginAttempt && localStorage.getItem('token')) {
-        // Only redirect if it's NOT a login attempt and user has a token
+      // Recognise a real authentication failure either by an explicit
+      // backend error code, or by auth-related wording in the message.
+      const code = String(error.response?.data?.code || '').toUpperCase();
+      const message = String(error.response?.data?.message || '');
+      const isRealAuthFailure =
+        code === 'TOKEN_EXPIRED' ||
+        code === 'INVALID_TOKEN' ||
+        code === 'UNAUTHENTICATED' ||
+        code === 'NO_TOKEN' ||
+        /\btoken\b|\bjwt\b|expired|unauthenticated|not authenticated|please log in|please login|انتهت الجلسة|انتهت صلاحية الجلسة|غير مصادق|الرجاء تسجيل الدخول/i.test(
+          message,
+        );
+
+      if (!isLoginAttempt && hasToken && isRealAuthFailure) {
         localStorage.removeItem('token');
         localStorage.removeItem('user');
         window.location.href = '/login';
       }
+      // Otherwise: leave the user where they are. The 401 was almost
+      // certainly a backend mis-use of the status code for a validation
+      // failure, and the component-level `try/catch` will display the
+      // error message to the user.
     }
     return Promise.reject(error);
   }
@@ -1086,33 +1116,8 @@ export const patientAPI = {
   },
 
   // ════════════════════════════════════════════════════════════════
-  // SECTION 9 — AI ASSISTANT
+  // SECTION 9 — EMERGENCY AI ASSISTANT
   // ════════════════════════════════════════════════════════════════
-
-  /* BACKEND TODO: already exists at /api/patient/ai-symptom-analysis (inline handler in routes/patient.js:197) — migrate to proper controller */
-  /**
-   * Specialist-recommender AI. Sends Arabic symptom text to the FastAPI
-   * service on :8001 and returns the suggested specialist, disease, and
-   * body system.
-   *
-   * Ephemeral: not persisted in v1 (no collection). Consider persisting
-   * to emergency_reports in a future pass if history is desired.
-   *
-   * @param {{ symptoms: string }} payload
-   * @returns {Promise<{
-   *   success: true,
-   *   data: { specialist: string, disease: string, organ_system: string }
-   * }>}
-   */
-  analyzeSymptoms: async (payload) => {
-    try {
-      const response = await api.post('/patient/ai-symptom-analysis', payload);
-      return response.data;
-    } catch (error) {
-      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحليل الأعراض';
-      throw { message: errorMessage, ...error.response?.data };
-    }
-  },
 
   /**
    * Emergency triage AI — proxies to Redwan's FastAPI via Node backend.

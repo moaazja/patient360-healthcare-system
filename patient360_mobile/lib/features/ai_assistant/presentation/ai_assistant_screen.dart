@@ -1,9 +1,20 @@
 // ════════════════════════════════════════════════════════════════════════════
 //  AIAssistantScreen — Patient 360° (mobile)
 //  ──────────────────────────────────────────────────────────────────────────
-//  Mirrors the web's renderAIAssistant() in PatientDashboard.jsx. Two
-//  subtabs: استشارة الأخصائي + الإسعاف الأولي. The triage tab now supports
-//  three input modes — text / image / voice — matching the web 1:1.
+//  Mirrors the web's renderAIAssistant() in PatientDashboard.jsx. A single
+//  triage surface with three input modes — text / image / voice — matching
+//  the web 1:1.
+//
+//  Visual structure (top to bottom):
+//    1. PageHeader            (AppBar with title + subtitle + bell + theme)
+//    2. _IntroPanel           (red banner: "الإسعاف الأولي الذكي")
+//    3. InputModeToggle       (text / image / voice tabs)
+//    4. Input area            (whichever mode is selected)
+//    5. ResultCard            (async result, or empty/loading/error)
+//    6. _HistorySection       (past emergency reports)
+//
+//  Critical reports (severity = critical) automatically open a dialog
+//  prompting the user to dial the ambulance hotline 110.
 // ════════════════════════════════════════════════════════════════════════════
 
 import 'dart:io';
@@ -22,7 +33,6 @@ import '../../../shared/widgets/page_header.dart';
 import '../../home/presentation/providers/home_providers.dart';
 import '../domain/emergency_report.dart';
 import '../domain/severity_level.dart';
-import '../domain/specialist_result.dart';
 import 'providers/ai_providers.dart';
 import 'widgets/emergency_report_tile.dart';
 import 'widgets/empty_state.dart';
@@ -32,8 +42,6 @@ import 'widgets/input_mode_toggle.dart';
 import 'widgets/input_text.dart';
 import 'widgets/report_detail_sheet.dart';
 import 'widgets/result_card.dart';
-
-enum _AiTab { specialist, triage }
 
 const String _ambulanceNumber = '110';
 
@@ -45,8 +53,6 @@ class AIAssistantScreen extends ConsumerStatefulWidget {
 }
 
 class _AIAssistantScreenState extends ConsumerState<AIAssistantScreen> {
-  _AiTab _tab = _AiTab.triage;
-  final TextEditingController _specialistText = TextEditingController();
   final TextEditingController _triageText = TextEditingController();
   AiInputMode _triageMode = AiInputMode.text;
   XFile? _triageImage;
@@ -56,7 +62,6 @@ class _AIAssistantScreenState extends ConsumerState<AIAssistantScreen> {
 
   @override
   void dispose() {
-    _specialistText.dispose();
     _triageText.dispose();
     super.dispose();
   }
@@ -82,37 +87,17 @@ class _AIAssistantScreenState extends ConsumerState<AIAssistantScreen> {
       drawer: const AppDrawer(),
       appBar: PageHeader(
         title: 'المساعد الذكي',
-        subtitle: 'استشارة الأخصائي والإسعاف الأولي',
+        subtitle: 'الإسعاف الأولي الذكي',
         unreadCount: unread,
       ),
-      body: Column(
-        children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: _SubTabRow(
-              current: _tab,
-              onChange: (_AiTab t) => setState(() => _tab = t),
-            ),
-          ),
-          Expanded(
-            child: IndexedStack(
-              index: _tab.index,
-              children: <Widget>[
-                _SpecialistTab(controller: _specialistText),
-                _TriageTab(
-                  textController: _triageText,
-                  mode: _triageMode,
-                  onModeChange: (AiInputMode m) =>
-                      setState(() => _triageMode = m),
-                  pickedImage: _triageImage,
-                  onImageChange: (XFile? f) => setState(() => _triageImage = f),
-                  pickedAudio: _triageAudio,
-                  onAudioChange: (File? f) => setState(() => _triageAudio = f),
-                ),
-              ],
-            ),
-          ),
-        ],
+      body: _TriageContent(
+        textController: _triageText,
+        mode: _triageMode,
+        onModeChange: (AiInputMode m) => setState(() => _triageMode = m),
+        pickedImage: _triageImage,
+        onImageChange: (XFile? f) => setState(() => _triageImage = f),
+        pickedAudio: _triageAudio,
+        onAudioChange: (File? f) => setState(() => _triageAudio = f),
       ),
     );
   }
@@ -174,162 +159,11 @@ Future<void> _dialAmbulance() async {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Subtab row
+// Triage content — the body of the screen
 // ════════════════════════════════════════════════════════════════════════════
 
-class _SubTabRow extends StatelessWidget {
-  const _SubTabRow({required this.current, required this.onChange});
-
-  final _AiTab current;
-  final ValueChanged<_AiTab> onChange;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: AppRadii.radiusLg,
-        border: Border.all(color: scheme.outline),
-      ),
-      child: Row(
-        children: <Widget>[
-          Expanded(
-            child: _SubTabButton(
-              icon: LucideIcons.stethoscope,
-              label: 'استشارة الأخصائي',
-              selected: current == _AiTab.specialist,
-              onTap: () => onChange(_AiTab.specialist),
-            ),
-          ),
-          Expanded(
-            child: _SubTabButton(
-              icon: LucideIcons.siren,
-              label: 'الإسعاف الأولي',
-              selected: current == _AiTab.triage,
-              onTap: () => onChange(_AiTab.triage),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SubTabButton extends StatelessWidget {
-  const _SubTabButton({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    final Color fg = selected ? scheme.primary : scheme.onSurfaceVariant;
-    final Color bg = selected ? scheme.surfaceContainer : Colors.transparent;
-
-    return Material(
-      color: bg,
-      borderRadius: AppRadii.radiusMd,
-      elevation: selected ? 1 : 0,
-      shadowColor: scheme.primary.withValues(alpha: 0.06),
-      child: InkWell(
-        borderRadius: AppRadii.radiusMd,
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: <Widget>[
-              Icon(icon, size: 16, color: fg),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: fg,
-                    fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// Specialist tab
-// ════════════════════════════════════════════════════════════════════════════
-
-class _SpecialistTab extends ConsumerWidget {
-  const _SpecialistTab({required this.controller});
-
-  final TextEditingController controller;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final AsyncValue<SpecialistResult?> async = ref.watch(
-      specialistControllerProvider,
-    );
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
-      children: <Widget>[
-        const _IntroPanel(
-          tone: _IntroTone.info,
-          title: 'اختر الأخصائي المناسب لأعراضك',
-          body:
-              'اكتب أعراضك وسيقترح لك المساعد الذكي نوع الطبيب المناسب '
-              'لحالتك. هذه النتيجة للإرشاد فقط ولا تحل محل الاستشارة الطبية.',
-        ),
-        const SizedBox(height: 16),
-        InputText(
-          controller: controller,
-          maxLength: 2000,
-          disabled: async.isLoading,
-          hintText:
-              'صف أعراضك بلغة واضحة، مثل: ألم في الصدر وضيق في التنفس منذ يومين...',
-          onSubmit: () {
-            final String text = controller.text.trim();
-            if (text.isEmpty) return;
-            // ignore: discarded_futures
-            ref.read(specialistControllerProvider.notifier).submit(text);
-          },
-        ),
-        const SizedBox(height: 16),
-        if (async.isLoading)
-          const ResultCard.loading()
-        else if (async.hasError)
-          ResultCard.error(error: async.error!)
-        else if (async.value != null)
-          ResultCard.specialist(result: async.value!)
-        else
-          const ResultCard.empty(),
-      ],
-    );
-  }
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// Triage tab
-// ════════════════════════════════════════════════════════════════════════════
-
-class _TriageTab extends ConsumerWidget {
-  const _TriageTab({
+class _TriageContent extends ConsumerWidget {
+  const _TriageContent({
     required this.textController,
     required this.mode,
     required this.onModeChange,
@@ -367,7 +201,6 @@ class _TriageTab extends ConsumerWidget {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       children: <Widget>[
         const _IntroPanel(
-          tone: _IntroTone.emergency,
           title: 'الإسعاف الأولي الذكي',
           body:
               'صف حالتك أو ارفع صورة للإصابة وسنوفر لك إرشادات الإسعاف '
@@ -453,76 +286,53 @@ class _TriageTab extends ConsumerWidget {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Intro panel
+// Intro panel — red emergency banner at the top of the screen
 // ════════════════════════════════════════════════════════════════════════════
 
-enum _IntroTone { info, emergency }
-
 class _IntroPanel extends StatelessWidget {
-  const _IntroPanel({
-    required this.tone,
-    required this.title,
-    required this.body,
-  });
+  const _IntroPanel({required this.title, required this.body});
 
-  final _IntroTone tone;
   final String title;
   final String body;
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    final bool isEmergency = tone == _IntroTone.emergency;
-
-    final Color bg = isEmergency
-        ? const Color(0xFFFFEBEE)
-        : scheme.surfaceContainerHighest;
-    final Color borderColor = isEmergency
-        ? const Color(0xFFFFCDD2)
-        : scheme.outline;
-    final Color titleColor = isEmergency ? AppColors.error : scheme.primary;
-    final Color bodyColor = isEmergency
-        ? const Color(0xFFB71C1C)
-        : scheme.onSurfaceVariant;
-
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: bg,
+        color: const Color(0xFFFFEBEE),
         borderRadius: AppRadii.radiusMd,
-        border: Border.all(color: borderColor),
+        border: Border.all(color: const Color(0xFFFFCDD2)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          if (isEmergency) ...<Widget>[
-            const Icon(
-              LucideIcons.triangleAlert,
-              size: 20,
-              color: AppColors.error,
-            ),
-            const SizedBox(width: 12),
-          ],
+          const Icon(
+            LucideIcons.triangleAlert,
+            size: 20,
+            color: AppColors.error,
+          ),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
                   title,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    color: titleColor,
+                    color: AppColors.error,
                     fontFamily: 'Cairo',
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   body,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 13,
                     height: 1.6,
-                    color: bodyColor,
+                    color: Color(0xFFB71C1C),
                     fontFamily: 'Cairo',
                   ),
                 ),
@@ -536,7 +346,7 @@ class _IntroPanel extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// History section
+// History section — past emergency reports
 // ════════════════════════════════════════════════════════════════════════════
 
 class _HistorySection extends StatelessWidget {

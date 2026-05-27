@@ -134,7 +134,6 @@
 [data-theme="dark"] .pd-ai-panel,
 [data-theme="dark"] .pd-ai-result-card,
 [data-theme="dark"] .pd-ai-input-image-dropzone,
-[data-theme="dark"] .pd-ai-subtabs,
 [data-theme="dark"] .pd-quick-action,
 [data-theme="dark"] .pd-booking-doctor,
 [data-theme="dark"] .pd-booking-slot,
@@ -159,8 +158,6 @@
 [data-theme="dark"] .pd-tabs { background: #1A2F31 !important; border-color: #2A4A4D !important; }
 [data-theme="dark"] .pd-tab { color: #90A4AE !important; }
 [data-theme="dark"] .pd-tab.is-active { background: #162628 !important; color: #4DB6AC !important; }
-[data-theme="dark"] .pd-ai-subtab { color: #90A4AE !important; }
-[data-theme="dark"] .pd-ai-subtab.is-active { background: #162628 !important; color: #4DB6AC !important; }
 
 /* ── Typography ─────────────────────────────────────────────────────── */
 [data-theme="dark"] h1,
@@ -2202,37 +2199,6 @@ select.pd-form-input {
    ══════════════════════════════════════════════════════════════════════ */
 
 .pd-ai-assistant { display: flex; flex-direction: column; gap: 20px; }
-.pd-ai-subtabs {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  background: var(--tm-surface);
-  border-radius: var(--pd-radius-lg);
-  border: 1px solid var(--tm-border);
-}
-.pd-ai-subtab {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 12px;
-  background: transparent;
-  border: none;
-  border-radius: var(--pd-radius-md);
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--tm-text-secondary);
-  cursor: pointer;
-  transition: all var(--pd-transition);
-  font-family: inherit;
-}
-.pd-ai-subtab:hover:not(.is-active) { color: var(--tm-primary); }
-.pd-ai-subtab.is-active {
-  background: var(--tm-card-bg, #FFFFFF);
-  color: var(--tm-primary);
-  box-shadow: var(--pd-shadow-sm);
-}
 
 .pd-ai-panel {
   background: var(--tm-card-bg, #FFFFFF);
@@ -4466,7 +4432,6 @@ select.pd-form-input {
 
   .pd-section-toolbar { flex-direction: column; align-items: stretch; }
   .pd-tabs { width: 100%; overflow-x: auto; }
-  .pd-ai-subtabs { flex-direction: column; }
 
   /* pdmr-* mobile adjustments */
   .pdmr-toolbar { padding: 12px; }
@@ -5009,23 +4974,6 @@ select.pd-form-input {
 [data-theme="dark"] .pd-ai-assistant,
 [data-theme="dark"] .pd-ai-page {
   background: transparent !important;
-}
-
-/* Sub-tabs (استشارة الأخصائي / الإسعاف الأولي) */
-[data-theme="dark"] .pd-ai-subtabs {
-  background: var(--tm-card-bg) !important;
-  border-color: var(--tm-border) !important;
-}
-[data-theme="dark"] .pd-ai-subtab {
-  background: transparent !important;
-  color: var(--tm-text-secondary) !important;
-}
-[data-theme="dark"] .pd-ai-subtab:hover:not(.is-active) {
-  color: var(--tm-accent) !important;
-}
-[data-theme="dark"] .pd-ai-subtab.is-active {
-  background: var(--tm-action) !important;
-  color: #ffffff !important;
 }
 
 /* Panel + intro */

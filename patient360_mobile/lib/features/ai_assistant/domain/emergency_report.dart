@@ -1,5 +1,8 @@
 import 'package:flutter/foundation.dart';
 
+import '../../../core/utils/logger.dart';
+import 'ai_condition.dart';
+import 'ai_prediction.dart';
 import 'emergency_location.dart';
 import 'severity_level.dart';
 
@@ -7,19 +10,39 @@ import 'severity_level.dart';
 /// new reports and lists past ones — never edits or deletes after the fact
 /// (the schema is append-only for v1).
 ///
-/// ─── BACKEND FIELD-NAME TOLERANCE ─────────────────────────────────────
+/// ─── BACKEND FIELD-NAME TOLERANCE ────────────────────────────────────────
 /// The current backend (controllers/emergencyController.js) uses two
 /// non-canonical field names that drift from patient360_db_final.js:
 ///
 ///   Schema says           Backend writes        We accept
-///   ────────────          ──────────────        ─────────
+///   ────────────          ─────────────         ─────────
 ///   aiConfidence          aiConfidenceScore     both ✓
 ///   voiceNoteUrl          audioUrl              both ✓
 ///
 /// This way the mobile model works against:
 ///   * the current backend (writes drift fields),
 ///   * a future fixed backend (writes canonical fields),
-///   * the FastAPI proxy version from the (ممنوع اللمس) chat.
+///   * the FastAPI proxy version of the response.
+///
+/// ─── RICH AI PAYLOAD (matches the web ResultCard contract) ───────────────
+/// In addition to the seven legacy fields, the backend (when proxying
+/// the FastAPI service) emits an enriched response with:
+///
+///   ambiguityLevel       — `confident | uncertain | very_ambiguous |
+///                          multi | out_of_scope | low_confidence_image`
+///   diseaseClass         — backend label, e.g. `"Heart_Attack"`
+///   diseaseNameAr        — Arabic localized name, e.g. `"نوبة قلبية"`
+///   domain               — `emergency | wound | eye | medical`
+///   secondaryClass       — alternate diagnosis label
+///   secondaryNameAr      — alternate diagnosis Arabic name
+///   secondaryConfidence  — 0..1 confidence of the alternate
+///   clarifyingQuestions  — list of follow-up questions for the patient
+///   topPredictions       — top-5 candidate classes with probabilities
+///   conditions           — present only for `multi` mode
+///   outOfScopeMessage    — message_ar for `out_of_scope` mode
+///
+/// All of these are nullable / default-empty so the model continues to
+/// work against the legacy minimal payload (no enriched fields).
 @immutable
 class EmergencyReport {
   const EmergencyReport({
@@ -46,6 +69,17 @@ class EmergencyReport {
     this.location,
     this.ambulanceCalledAt,
     this.resolvedAt,
+    this.ambiguityLevel,
+    this.diseaseClass,
+    this.diseaseNameAr,
+    this.domain,
+    this.secondaryClass,
+    this.secondaryNameAr,
+    this.secondaryConfidence,
+    this.clarifyingQuestions = const <String>[],
+    this.topPredictions = const <AiPrediction>[],
+    this.conditions = const <AiCondition>[],
+    this.outOfScopeMessage,
   });
 
   factory EmergencyReport.fromJson(Map<String, dynamic> json) {
@@ -89,7 +123,9 @@ class EmergencyReport {
       textDescription: json['textDescription'] as String?,
       imageUrl: json['imageUrl'] as String?,
       voiceNoteUrl: voiceUrlRaw,
-      voiceTranscript: json['voiceTranscript'] as String?,
+      voiceTranscript:
+          (json['voiceTranscript'] as String?) ??
+              (json['transcription'] as String?),
       aiRiskLevel: severityFromWire(json['aiRiskLevel'] as String?),
       aiFirstAid: firstAid,
       aiAssessment: json['aiAssessment'] as String?,
@@ -104,9 +140,38 @@ class EmergencyReport {
       ambulanceStatus: (json['ambulanceStatus'] as String?) ?? 'not_called',
       status: (json['status'] as String?) ?? 'active',
       resolvedAt: asDateOrNull(json['resolvedAt']),
+      // ── Rich AI payload (all nullable / empty-defaulted) ──────────────
+      ambiguityLevel:
+          (json['ambiguityLevel'] as String?) ??
+              (json['ambiguity_level'] as String?),
+      diseaseClass:
+          (json['diseaseClass'] as String?) ?? (json['class'] as String?),
+      diseaseNameAr:
+          (json['diseaseNameAr'] as String?) ?? (json['name_ar'] as String?),
+      domain: json['domain'] as String?,
+      secondaryClass:
+          (json['secondaryClass'] as String?) ??
+              (json['class_2nd'] as String?),
+      secondaryNameAr:
+          (json['secondaryNameAr'] as String?) ??
+              (json['name_ar_2nd'] as String?),
+      secondaryConfidence: _readSecondaryConfidence(
+        (json['secondaryConfidence']) ?? (json['conf_2nd']),
+      ),
+      clarifyingQuestions: _readClarifyingQuestions(
+        json['clarifyingQuestions'] ?? json['clarifying_questions'],
+      ),
+      topPredictions: _readTopPredictions(
+        json['topPredictions'] ?? json['top5'],
+      ),
+      conditions: _readConditions(json['conditions']),
+      outOfScopeMessage:
+          (json['outOfScopeMessage'] as String?) ??
+              (json['message_ar'] as String?),
     );
   }
 
+  // ── Core fields ─────────────────────────────────────────────────────────
   final String id;
   final String? patientPersonId;
   final String? patientChildId;
@@ -122,9 +187,7 @@ class EmergencyReport {
   final SeverityLevel aiRiskLevel;
   final List<String> aiFirstAid;
 
-  /// Free-text Arabic prose summary from the AI (e.g. "الحالة حرجة وتتطلب
-  /// تدخلاً فورياً..."). Optional — current Node mock returns it; the
-  /// FastAPI variant may not.
+  /// Free-text Arabic prose summary from the AI.
   final String? aiAssessment;
 
   /// 0.0..1.0 — drives the gradient on the confidence bar.
@@ -133,9 +196,7 @@ class EmergencyReport {
   final String? aiModelVersion;
   final DateTime? aiProcessedAt;
 
-  /// AI's recommendation flag — true for high/critical assessments. Used
-  /// to prompt the patient with the "Call Ambulance" CTA without forcing
-  /// the dial.
+  /// AI's recommendation flag — true for high/critical assessments.
   final bool? recommendAmbulance;
 
   final EmergencyLocation? location;
@@ -146,4 +207,127 @@ class EmergencyReport {
   /// One of: `active | resolved | false_alarm | referred_to_hospital`.
   final String status;
   final DateTime? resolvedAt;
+
+  // ── Rich AI payload (enriched FastAPI response) ─────────────────────────
+
+  /// Discriminator that selects which ResultCard branch to render:
+  ///   `confident | uncertain | very_ambiguous | multi | out_of_scope |
+  ///    low_confidence_image`
+  ///
+  /// Null on legacy reports — UI falls back to the standard single-result
+  /// branch in that case.
+  final String? ambiguityLevel;
+
+  /// Backend class label for the primary diagnosis, e.g. `"Heart_Attack"`.
+  final String? diseaseClass;
+
+  /// Arabic localized primary diagnosis name, e.g. `"نوبة قلبية"`.
+  final String? diseaseNameAr;
+
+  /// One of: `emergency | wound | eye | medical` — drives the [DomainBadge]
+  /// theme.
+  final String? domain;
+
+  /// Backend class label for the alternate diagnosis.
+  final String? secondaryClass;
+
+  /// Arabic localized alternate diagnosis name.
+  final String? secondaryNameAr;
+
+  /// Confidence of the alternate diagnosis, normalized 0..1.
+  final double? secondaryConfidence;
+
+  /// Follow-up questions the AI suggests asking the patient. Used only
+  /// for `uncertain` / `very_ambiguous` branches.
+  final List<String> clarifyingQuestions;
+
+  /// Top-N candidate classes with probabilities. Almost always length 5
+  /// when present.
+  final List<AiPrediction> topPredictions;
+
+  /// Multi-symptom mode payload. Empty for single-condition responses;
+  /// non-empty triggers the `multi` branch in ResultCard.
+  final List<AiCondition> conditions;
+
+  /// Localized message for `out_of_scope` and `low_confidence_image`
+  /// branches. Falls back to `message_ar` from the FastAPI service.
+  final String? outOfScopeMessage;
+
+  // ── Convenience accessors ───────────────────────────────────────────────
+
+  /// True iff the report carries a non-empty `conditions[]` array.
+  /// Selects the multi branch in ResultCard.
+  bool get isMulti => conditions.isNotEmpty;
+
+  /// True iff [ambiguityLevel] is `out_of_scope`.
+  bool get isOutOfScope => ambiguityLevel == 'out_of_scope';
+
+  /// True iff [ambiguityLevel] is `low_confidence_image`.
+  bool get isLowConfidenceImage => ambiguityLevel == 'low_confidence_image';
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Parsing helpers (file-private)
+// ────────────────────────────────────────────────────────────────────────────
+
+double? _readSecondaryConfidence(Object? raw) {
+  if (raw == null) return null;
+  if (raw is num && raw == 0) return null;
+  if (raw is String && raw.trim().isEmpty) return null;
+  return parseProbability(raw);
+}
+
+List<String> _readClarifyingQuestions(Object? raw) {
+  if (raw is! List) return const <String>[];
+  final List<String> out = <String>[];
+  for (final Object? entry in raw) {
+    if (entry == null) continue;
+    if (entry is String) {
+      final String s = entry.trim();
+      if (s.isNotEmpty) out.add(s);
+      continue;
+    }
+    // Some FastAPI variants emit `{ question: "..." }` objects.
+    if (entry is Map) {
+      final Object? q = entry['question'] ?? entry['q'] ?? entry['text'];
+      if (q is String && q.trim().isNotEmpty) out.add(q.trim());
+    }
+  }
+  return List<String>.unmodifiable(out);
+}
+
+List<AiPrediction> _readTopPredictions(Object? raw) {
+  if (raw is! List) return const <AiPrediction>[];
+  final List<AiPrediction> out = <AiPrediction>[];
+  for (final Object? entry in raw) {
+    try {
+      final AiPrediction? p = AiPrediction.fromJson(entry);
+      if (p != null) out.add(p);
+    } catch (e, st) {
+      appLogger.w(
+        'EmergencyReport topPredictions parse failed',
+        error: e,
+        stackTrace: st,
+      );
+    }
+  }
+  return List<AiPrediction>.unmodifiable(out);
+}
+
+List<AiCondition> _readConditions(Object? raw) {
+  if (raw is! List) return const <AiCondition>[];
+  final List<AiCondition> out = <AiCondition>[];
+  for (final Object? entry in raw) {
+    try {
+      final AiCondition? c = AiCondition.fromJson(entry);
+      if (c != null) out.add(c);
+    } catch (e, st) {
+      appLogger.w(
+        'EmergencyReport conditions parse failed',
+        error: e,
+        stackTrace: st,
+      );
+    }
+  }
+  return List<AiCondition>.unmodifiable(out);
 }

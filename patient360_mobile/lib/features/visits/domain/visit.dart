@@ -1,3 +1,16 @@
+// ════════════════════════════════════════════════════════════════════════════
+//  Visit (domain model)
+//  ──────────────────────────────────────────────────────────────────────────
+//  Mirrors the `visits` collection. Some fields (appointmentId, doctorId,
+//  hospitalId, patientPersonId, patientChildId) can come back from the
+//  backend in *either* of two shapes depending on whether the route
+//  populated them:
+//    • String     — raw ObjectId, e.g. "69e78cabc45fded36723ed3b"
+//    • Object/Map — populated document, e.g. { "_id": "...", "name": "..." }
+//  The `_asIdString` helper accepts both and returns the id string, so the
+//  parser never crashes when a route changes its populate strategy.
+// ════════════════════════════════════════════════════════════════════════════
+
 import 'package:flutter/foundation.dart';
 
 import '../../appointments/domain/doctor_summary.dart';
@@ -5,10 +18,6 @@ import 'ecg_analysis.dart';
 import 'prescribed_medication.dart';
 import 'vital_signs.dart';
 
-/// One clinical encounter — mirrors the `visits` collection. Embedded
-/// sub-documents (vitalSigns, prescribedMedications, ecgAnalysis) come back
-/// inline from the backend; we parse them into nested model classes so the
-/// UI never has to fish through raw maps.
 @immutable
 class Visit {
   const Visit({
@@ -54,23 +63,29 @@ class Visit {
 
     final List<PrescribedMedication> meds =
         (json['prescribedMedications'] as List<dynamic>?)
-                ?.map(
-                  (dynamic e) => PrescribedMedication.fromJson(
-                    (e as Map<dynamic, dynamic>).cast<String, dynamic>(),
-                  ),
-                )
-                .toList() ??
-            const <PrescribedMedication>[];
+            ?.map(
+              (dynamic e) => PrescribedMedication.fromJson(
+                (e as Map<dynamic, dynamic>).cast<String, dynamic>(),
+              ),
+            )
+            .toList() ??
+        const <PrescribedMedication>[];
+
+    // ── doctor: prefer the explicit summary object if the route populated
+    //    it, otherwise fall back to the doctor field if doctorId itself
+    //    came in as a populated object.
+    final Map<String, dynamic>? doctorMap =
+        asMap(json['doctor']) ?? asMap(json['doctorId']);
 
     return Visit(
       id: (json['_id'] ?? json['id']).toString(),
       visitType: (json['visitType'] as String?) ?? 'regular',
-      patientPersonId: json['patientPersonId'] as String?,
-      patientChildId: json['patientChildId'] as String?,
-      doctorId: json['doctorId'] as String?,
-      dentistId: json['dentistId'] as String?,
-      hospitalId: json['hospitalId'] as String?,
-      appointmentId: json['appointmentId'] as String?,
+      patientPersonId: _asIdString(json['patientPersonId']),
+      patientChildId: _asIdString(json['patientChildId']),
+      doctorId: _asIdString(json['doctorId']),
+      dentistId: _asIdString(json['dentistId']),
+      hospitalId: _asIdString(json['hospitalId']),
+      appointmentId: _asIdString(json['appointmentId']),
       visitDate: asDate(json['visitDate']),
       status: (json['status'] as String?) ?? 'in_progress',
       chiefComplaint: (json['chiefComplaint'] as String?) ?? '',
@@ -89,10 +104,27 @@ class Visit {
           : EcgAnalysis.fromJson(asMap(json['ecgAnalysis'])!),
       paymentStatus: (json['paymentStatus'] as String?) ?? 'pending',
       createdAt: asDate(json['createdAt'], fallback: DateTime.now()),
-      doctor: asMap(json['doctor']) == null
-          ? null
-          : DoctorSummary.fromJson(asMap(json['doctor'])!),
+      doctor: doctorMap == null ? null : DoctorSummary.fromJson(doctorMap),
     );
+  }
+
+  /// Coerces a backend ObjectId field that may arrive as either:
+  ///   • a raw string  ("69e78cab...")
+  ///   • a populated   Map (with `_id` or `id` inside)
+  ///   • null / missing
+  /// into a String id, or null when nothing usable is present.
+  ///
+  /// This guards against the route flipping its populate strategy — a
+  /// change on the backend should never crash JSON parsing on the client.
+  static String? _asIdString(Object? v) {
+    if (v == null) return null;
+    if (v is String) return v.isEmpty ? null : v;
+    if (v is Map) {
+      final Object? raw = v['_id'] ?? v['id'];
+      if (raw is String && raw.isNotEmpty) return raw;
+      if (raw != null) return raw.toString();
+    }
+    return null;
   }
 
   final String id;
@@ -119,4 +151,3 @@ class Visit {
   final DateTime createdAt;
   final DoctorSummary? doctor;
 }
-

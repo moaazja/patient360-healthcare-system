@@ -782,7 +782,13 @@ exports.verifyPrescription = async (req, res) => {
     const stored = String(prescription.verificationCode || '');
     const entered = String(verificationCode);
     if (stored.length !== entered.length || stored !== entered) {
-      return res.status(401).json({
+      // HTTP semantics: 400 (Bad Request) is the correct status for a
+      // validation failure on the request body. 401 must be reserved for
+      // actual authentication failures (missing or expired token) — using
+      // it here previously caused the global axios interceptor in the
+      // frontend to clear credentials and bounce the pharmacist out to
+      // the login page whenever they mistyped a code.
+      return res.status(400).json({
         success: false,
         verified: false,
         message: 'رمز التحقق غير صحيح'

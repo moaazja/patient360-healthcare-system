@@ -9,7 +9,6 @@ import '../../../core/network/dio_client.dart';
 import '../../../core/utils/logger.dart';
 import '../domain/emergency_location.dart';
 import '../domain/emergency_report.dart';
-import '../domain/specialist_result.dart';
 
 /// All AI-assistant network access flows through this repository so the UI
 /// stays Dio-agnostic and the unit tests can swap in a fake.
@@ -34,39 +33,7 @@ class AiRepository {
 
   final Dio _dio;
 
-  // ─── Specialist recommender ───────────────────────────────────────────
-  // (Separate feature — left untouched in Phase 1.)
-
-  /// POST `/api/patient/ai-symptom-analysis` with `{ symptoms }`. Returns
-  /// the deserialized [SpecialistResult]. The schema is intentionally
-  /// ephemeral — see CLAUDE.md "AI history storage" decision.
-  Future<SpecialistResult> analyzeSymptoms({
-    required String symptoms,
-  }) async {
-    try {
-      final Response<dynamic> res = await _dio.post<dynamic>(
-        '/patient/ai-symptom-analysis',
-        data: <String, dynamic>{'symptoms': symptoms},
-      );
-      final Map<String, dynamic> body =
-          (res.data as Map<dynamic, dynamic>).cast<String, dynamic>();
-      // Backend may wrap the payload under `result` or return it flat.
-      final Map<String, dynamic> raw = body.containsKey('result')
-          ? (body['result'] as Map<dynamic, dynamic>).cast<String, dynamic>()
-          : body;
-      return SpecialistResult.fromJson(raw);
-    } on DioException catch (e, st) {
-      appLogger.e('analyzeSymptoms failed', error: e, stackTrace: st);
-      throw ApiException.fromDioError(e);
-    } on ApiException {
-      rethrow;
-    } catch (e, st) {
-      appLogger.e('analyzeSymptoms unknown', error: e, stackTrace: st);
-      throw ApiException.unknown(e);
-    }
-  }
-
-  // ─── Emergency triage ─────────────────────────────────────────────────
+  // ─── Emergency triage ────────────────────────────────────────────────
 
   /// Multipart POST `/api/emergency`. Accepts a text description, an
   /// image, OR a recorded audio clip (or text + image for `combined`);
@@ -102,8 +69,8 @@ class AiRepository {
           receiveTimeout: const Duration(seconds: 90),
         ),
       );
-      final Map<String, dynamic> body =
-          (res.data as Map<dynamic, dynamic>).cast<String, dynamic>();
+      final Map<String, dynamic> body = (res.data as Map<dynamic, dynamic>)
+          .cast<String, dynamic>();
       final Object? rawReport = body['report'] ?? body['emergencyReport'];
       final Map<String, dynamic> reportJson = rawReport is Map
           ? rawReport.cast<String, dynamic>()
@@ -199,7 +166,7 @@ class AiRepository {
     return form;
   }
 
-  // ─── History ──────────────────────────────────────────────────────────
+  // ─── History ─────────────────────────────────────────────────────────
 
   /// GET `/api/emergency/mine?page=1&limit=20`. v1 only loads the first
   /// page; pagination lands in a later prompt.
@@ -212,19 +179,21 @@ class AiRepository {
         '/emergency/mine',
         queryParameters: <String, dynamic>{'page': page, 'limit': limit},
       );
-      final Map<String, dynamic> body =
-          (res.data as Map<dynamic, dynamic>).cast<String, dynamic>();
+      final Map<String, dynamic> body = (res.data as Map<dynamic, dynamic>)
+          .cast<String, dynamic>();
       final List<dynamic> raw =
           (body['reports'] as List<dynamic>?) ??
-              (body['emergencyReports'] as List<dynamic>?) ??
-              const <dynamic>[];
+          (body['emergencyReports'] as List<dynamic>?) ??
+          const <dynamic>[];
       return raw
           .whereType<Map<dynamic, dynamic>>()
           .map((Map<dynamic, dynamic> m) => m.cast<String, dynamic>())
           .map(EmergencyReport.fromJson)
           .toList()
-        ..sort((EmergencyReport a, EmergencyReport b) =>
-            b.reportedAt.compareTo(a.reportedAt));
+        ..sort(
+          (EmergencyReport a, EmergencyReport b) =>
+              b.reportedAt.compareTo(a.reportedAt),
+        );
     } on DioException catch (e, st) {
       appLogger.e('getEmergencyReports failed', error: e, stackTrace: st);
       throw ApiException.fromDioError(e);

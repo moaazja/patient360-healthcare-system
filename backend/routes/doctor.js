@@ -37,6 +37,7 @@ const FileUploadManager = require('../utils/fileUpload');
 // Models
 const Patient = require('../models/Patient');
 const Person = require('../models/Person');
+const Children = require('../models/Children');
 const Account = require('../models/Account');
 const Doctor = require('../models/Doctor');
 const Dentist = require('../models/Dentist');
@@ -173,27 +174,182 @@ const upload = multer({
 
 /**
  * @route   GET /api/doctor/search/:nationalId
- * @desc    Search for a patient by national ID
+ * @desc    Search for a patient by national ID (adult) OR childRegistrationNumber (child)
  * @access  Private (Doctor only)
+ *
+ * Accepts two input formats:
+ *   • 11-digit national ID         → CRN-20260424-00001 style won't match;
+ *                                     looks up Person first, then any Children
+ *                                     that already received their nationalId
+ *                                     (migration status: ready / migrated).
+ *   • CRN-YYYYMMDD-XXXXX           → looks up Children directly by
+ *                                     childRegistrationNumber.
+ *
+ * Response shape is identical for both paths so the frontend's
+ * `selectPatient(patient)` flow doesn't need to branch — `childRegistrationNumber`
+ * is included in the payload when the result is a child, and `nationalId`
+ * when it's an adult (or migrated child who now has a nationalId).
  */
 router.get('/search/:nationalId', protect, restrictTo('doctor', 'dentist'), async (req, res) => {
   try {
-    const { nationalId } = req.params;
-    console.log('🔍 Searching for:', nationalId);
+    // Normalize: trim, uppercase (CRN must match case-insensitively from the UI),
+    // strip any accidental whitespace the frontend may have allowed through.
+    const rawInput = String(req.params.nationalId || '').trim().toUpperCase();
+    console.log('🔍 Searching for:', rawInput);
 
+    if (!rawInput) {
+      return res.status(400).json({
+        success: false,
+        message: 'الرقم الوطني أو رقم تسجيل الطفل مطلوب',
+      });
+    }
+
+    const isAdultId  = /^\d{11}$/.test(rawInput);
+    const isChildCRN = /^CRN-\d{8}-\d{5}$/.test(rawInput);
+
+    if (!isAdultId && !isChildCRN) {
+      return res.status(400).json({
+        success: false,
+        message: 'الصيغة غير صحيحة. أدخل 11 رقم وطني أو CRN-YYYYMMDD-XXXXX',
+      });
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Helper — build the unified patient payload for a CHILD record.
+    // Mirrors the adult response so the frontend treats them identically.
+    // ────────────────────────────────────────────────────────────────────────
+    const buildChildResponse = async (child) => {
+      const patient = await Patient.findOne({ childId: child._id }).lean();
+      const account = await Account.findOne({ childId: child._id })
+        .select('-password')
+        .lean();
+
+      return {
+        // ── Identity (from children collection) ────────────────────────────
+        _id: child._id,
+        childRegistrationNumber: child.childRegistrationNumber,
+        nationalId: child.nationalId || null, // populated only after migration
+        firstName: child.firstName,
+        fatherName: child.fatherName,
+        lastName: child.lastName,
+        motherName: child.motherName,
+        dateOfBirth: child.dateOfBirth,
+        gender: child.gender,
+        phoneNumber: child.phoneNumber,
+        alternativePhoneNumber: child.alternativePhoneNumber,
+        governorate: child.governorate,
+        city: child.city,
+        district: child.district,
+        street: child.street,
+        building: child.building,
+        address: child.address,
+        profilePhoto: child.profilePhoto,
+        isActive: child.isActive,
+
+        // ── Child-specific fields ──────────────────────────────────────────
+        isChild: true,
+        parentNationalId: child.parentNationalId,
+        parentPersonId: child.parentPersonId,
+        guardianName: child.guardianName,
+        guardianRelationship: child.guardianRelationship,
+        guardianPhoneNumber: child.guardianPhoneNumber,
+        schoolName: child.schoolName,
+        grade: child.grade,
+        hasReceivedNationalId: child.hasReceivedNationalId,
+        migrationStatus: child.migrationStatus,
+
+        // ── Fields that don't apply to children (kept as null for parity) ──
+        maritalStatus: null,
+        occupation: null,
+        education: null,
+
+        // ── Medical profile (from patients collection — childId link) ──────
+        patientRecordId: patient ? patient._id : null,
+        bloodType: patient ? patient.bloodType : 'unknown',
+        rhFactor: patient ? patient.rhFactor : 'unknown',
+        height: patient ? patient.height : null,
+        weight: patient ? patient.weight : null,
+        bmi: patient ? patient.bmi : null,
+        smokingStatus: patient ? patient.smokingStatus : null,
+        alcoholConsumption: patient ? patient.alcoholConsumption : null,
+        exerciseFrequency: patient ? patient.exerciseFrequency : null,
+        dietType: patient ? patient.dietType : null,
+        chronicDiseases: patient ? (patient.chronicDiseases || []) : [],
+        allergies: patient ? (patient.allergies || []) : [],
+        familyHistory: patient ? (patient.familyHistory || []) : [],
+        currentMedications: patient ? (patient.currentMedications || []) : [],
+        previousSurgeries: patient ? (patient.previousSurgeries || []) : [],
+        emergencyContact: patient ? patient.emergencyContact : null,
+        medicalCardNumber: patient ? patient.medicalCardNumber : null,
+        totalVisits: patient ? (patient.totalVisits || 0) : 0,
+        lastVisitDate: patient ? patient.lastVisitDate : null,
+
+        // ── Account metadata ───────────────────────────────────────────────
+        email: account ? account.email : null,
+        accountActive: account ? account.isActive : null,
+        registrationDate: account ? account.createdAt : null,
+
+        // ── Timestamps ─────────────────────────────────────────────────────
+        createdAt: child.createdAt,
+        updatedAt: (patient && patient.updatedAt) || child.updatedAt,
+      };
+    };
+
+    // ────────────────────────────────────────────────────────────────────────
+    // BRANCH 1 — CRN input: look up Children directly
+    // ────────────────────────────────────────────────────────────────────────
+    if (isChildCRN) {
+      const child = await Children.findOne({
+        childRegistrationNumber: rawInput,
+        isDeleted: { $ne: true },
+      }).lean();
+
+      console.log('📥 Child found:', child ? '✅' : '❌');
+
+      if (!child) {
+        return res.status(404).json({
+          success: false,
+          message: 'لم يتم العثور على الطفل برقم التسجيل المُدخل',
+        });
+      }
+
+      const patientData = await buildChildResponse(child);
+      console.log(
+        '📤 Patient search response (child) keys:',
+        Object.keys(patientData).length,
+        '| CRN:', patientData.childRegistrationNumber,
+      );
+      return res.json({ success: true, patient: patientData });
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // BRANCH 2 — 11-digit national ID: Person first, then migrated Children
+    // ────────────────────────────────────────────────────────────────────────
     const person = await Person.findOne({
-      $or: [
-        { nationalId: nationalId },
-        { childId: nationalId }
-      ]
+      nationalId: rawInput,
+      isDeleted: { $ne: true },
     }).lean();
 
     console.log('📥 Person found:', person ? '✅' : '❌');
 
     if (!person) {
+      // Fallback: maybe this 11-digit number belongs to a child who has
+      // already received their nationalId (migrationStatus: ready/migrated
+      // but record still in children collection).
+      const migratedChild = await Children.findOne({
+        nationalId: rawInput,
+        isDeleted: { $ne: true },
+      }).lean();
+
+      if (migratedChild) {
+        console.log('📥 Migrated child found by nationalId: ✅');
+        const patientData = await buildChildResponse(migratedChild);
+        return res.json({ success: true, patient: patientData });
+      }
+
       return res.status(404).json({
         success: false,
-        message: 'لم يتم العثور على المريض'
+        message: 'لم يتم العثور على المريض',
       });
     }
 
@@ -201,11 +357,13 @@ router.get('/search/:nationalId', protect, restrictTo('doctor', 'dentist'), asyn
     if (!patient) {
       return res.status(404).json({
         success: false,
-        message: 'لم يتم العثور على بيانات المريض'
+        message: 'لم يتم العثور على بيانات المريض',
       });
     }
 
-    const account = await Account.findOne({ personId: person._id }).select('-password').lean();
+    const account = await Account.findOne({ personId: person._id })
+      .select('-password')
+      .lean();
 
     // Explicit merge — do NOT rely on spread ordering, which can behave
     // unexpectedly when either document contains nested ObjectIds or arrays.
@@ -215,6 +373,8 @@ router.get('/search/:nationalId', protect, restrictTo('doctor', 'dentist'), asyn
       // ── Identity (from persons collection) ────────────────────────────────
       _id: person._id,
       nationalId: person.nationalId,
+      childRegistrationNumber: null, // adults don't have a CRN
+      isChild: false,
       firstName: person.firstName,
       fatherName: person.fatherName,
       lastName: person.lastName,
@@ -263,14 +423,14 @@ router.get('/search/:nationalId', protect, restrictTo('doctor', 'dentist'), asyn
 
       // ── Misc the frontend may reference ───────────────────────────────────
       createdAt: person.createdAt,
-      updatedAt: patient.updatedAt || person.updatedAt
+      updatedAt: patient.updatedAt || person.updatedAt,
     };
 
     console.log(
       '📤 Patient search response keys:',
       Object.keys(patientData).length,
       '| bloodType:', patientData.bloodType,
-      '| allergies:', Array.isArray(patientData.allergies) ? patientData.allergies.length : 'not array'
+      '| allergies:', Array.isArray(patientData.allergies) ? patientData.allergies.length : 'not array',
     );
 
     return res.json({ success: true, patient: patientData });
@@ -278,7 +438,7 @@ router.get('/search/:nationalId', protect, restrictTo('doctor', 'dentist'), asyn
     console.error('Search patient error:', error);
     return res.status(500).json({
       success: false,
-      message: 'حدث خطأ في البحث عن المريض'
+      message: 'حدث خطأ في البحث عن المريض',
     });
   }
 });

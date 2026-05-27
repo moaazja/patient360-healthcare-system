@@ -17,6 +17,7 @@ final class RouteNames {
 
   // Secondary (drawer only).
   static const String visits = '/visits';
+  static const String labDetail = '/lab-results/:id';
   static const String ai = '/ai';
   static const String drugRisk = '/drug-risk';
   static const String reviews = '/reviews';

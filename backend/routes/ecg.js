@@ -12,12 +12,18 @@
  *  Multer config: organizes uploads via FileUploadManager into:
  *    uploads/ecgs/<year>/<month>/patient_<id>/ecg_<timestamp>_<rand>.<ext>
  *
- *  Critical fixes vs. previous version:
- *    - Function name casing: analyzeEcg → analyzeECG, testEcgService → testECGService
- *      (controller exports use uppercase 'CG' to match medical convention)
- *    - Multer field name: 'ecg_image' → 'image' to match what controller expects
- *      (controller reads req.file from form-data field named 'image')
- *    - Added GET /visit/:visitId route to expose getVisitECG controller method
+ *  CHANGES FROM PREVIOUS VERSION (Bug fixes):
+ *    - Multer field name corrected: 'image' → 'ecg_image' to match the
+ *      frontend (DoctorDashboard.jsx line 1663:
+ *        formData.append('ecg_image', ecgFile))
+ *      The previous swap to 'image' was based on a misdiagnosis — the real
+ *      mismatch was inside the controller (sending 'image' to Flask, which
+ *      expects 'file'). That issue is now fixed in ecgController.js.
+ *
+ *  Field-name contract across the 3 layers (must stay consistent):
+ *      React (formData)  → Node Multer  → Flask
+ *      'ecg_image'       → 'ecg_image' → 'file'
+ *                          ^ same       ^ translated by controller
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -114,15 +120,16 @@ const upload = multer({
  * @access  Private (doctor only — controller verifies isECGSpecialist)
  *
  * Multipart body:
- *   image    — ECG image file (JPG/PNG, max 10 MB)
- *   visitId  — required, the visit to attach the analysis to
+ *   ecg_image — ECG image file (JPG/PNG, max 10 MB) ← MUST match the
+ *               frontend field name (DoctorDashboard.jsx:1663)
+ *   visitId   — required, the visit to attach the analysis to
  *   patientId? — optional, used for organized file storage
  */
 router.post(
   '/analyze',
   protect,
   authorize('doctor', 'admin'),
-  upload.single('image'),
+  upload.single('ecg_image'),
   ecgController.analyzeECG
 );
 

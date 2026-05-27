@@ -10,22 +10,20 @@ import 'package:patient360_mobile/features/ai_assistant/domain/emergency_locatio
 /// always resolves with a `null` instead of throwing — without booting
 /// the geolocator plugin.
 class _FakeLocationHelper implements LocationHelper {
-  _FakeLocationHelper.deniedPermission()
-      : _mode = _Mode.denied,
-        _result = null;
+  _FakeLocationHelper.deniedPermission() : _mode = _Mode.denied, _result = null;
   _FakeLocationHelper.permanentlyDenied()
-      : _mode = _Mode.permanentlyDenied,
-        _result = null;
+    : _mode = _Mode.permanentlyDenied,
+      _result = null;
   _FakeLocationHelper.serviceDisabled()
-      : _mode = _Mode.serviceDisabled,
-        _result = null;
+    : _mode = _Mode.serviceDisabled,
+      _result = null;
   _FakeLocationHelper.timesOut(Duration delay)
-      : _mode = _Mode.timesOut,
-        _result = null,
-        _delay = delay;
+    : _mode = _Mode.timesOut,
+      _result = null,
+      _delay = delay;
   _FakeLocationHelper.success(EmergencyLocation loc)
-      : _mode = _Mode.success,
-        _result = loc;
+    : _mode = _Mode.success,
+      _result = loc;
 
   final _Mode _mode;
   final EmergencyLocation? _result;
@@ -52,25 +50,41 @@ class _FakeLocationHelper implements LocationHelper {
         return _result;
     }
   }
+
+  @override
+  Future<EmergencyLocation> getLocationOrGovernorateFallback({
+    String? governorate,
+    Duration timeout = const Duration(seconds: 3),
+  }) async {
+    final EmergencyLocation? gps = await getCurrentLocationWithTimeout(
+      timeout: timeout,
+    );
+    if (gps != null) return gps;
+    // Test-only fallback: return a deterministic Damascus-center point so
+    // tests don't depend on the real governorate coordinates table.
+    return const EmergencyLocation(lat: 33.5138, lng: 36.2765, accuracy: 0);
+  }
 }
 
 enum _Mode { denied, permanentlyDenied, serviceDisabled, timesOut, success }
 
 void main() {
-  test('returns null within 3s when permission is denied — does not throw',
-      () async {
-    final LocationHelper helper = _FakeLocationHelper.deniedPermission();
-    final Stopwatch sw = Stopwatch()..start();
-    final EmergencyLocation? result =
-        await helper.getCurrentLocationWithTimeout();
-    sw.stop();
-    expect(result, isNull);
-    expect(
-      sw.elapsed.inSeconds,
-      lessThan(3),
-      reason: 'denied permission should resolve well under the 3s ceiling',
-    );
-  });
+  test(
+    'returns null within 3s when permission is denied — does not throw',
+    () async {
+      final LocationHelper helper = _FakeLocationHelper.deniedPermission();
+      final Stopwatch sw = Stopwatch()..start();
+      final EmergencyLocation? result = await helper
+          .getCurrentLocationWithTimeout();
+      sw.stop();
+      expect(result, isNull);
+      expect(
+        sw.elapsed.inSeconds,
+        lessThan(3),
+        reason: 'denied permission should resolve well under the 3s ceiling',
+      );
+    },
+  );
 
   test('returns null when permission permanently denied', () async {
     final LocationHelper helper = _FakeLocationHelper.permanentlyDenied();
@@ -88,7 +102,9 @@ void main() {
     );
     final Stopwatch sw = Stopwatch()..start();
     final EmergencyLocation? result = await helper
-        .getCurrentLocationWithTimeout(timeout: const Duration(milliseconds: 100));
+        .getCurrentLocationWithTimeout(
+          timeout: const Duration(milliseconds: 100),
+        );
     sw.stop();
     expect(result, isNull);
     expect(sw.elapsed.inSeconds, lessThan(3));
@@ -98,8 +114,8 @@ void main() {
     final LocationHelper helper = _FakeLocationHelper.success(
       const EmergencyLocation(lat: 33.5138, lng: 36.2765, accuracy: 12),
     );
-    final EmergencyLocation? result =
-        await helper.getCurrentLocationWithTimeout();
+    final EmergencyLocation? result = await helper
+        .getCurrentLocationWithTimeout();
     expect(result, isNotNull);
     expect(result!.lat, closeTo(33.5138, 1e-9));
     expect(result.accuracy, 12);

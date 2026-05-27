@@ -1,23 +1,41 @@
 // ════════════════════════════════════════════════════════════════════════════
 //  ResultCard
 //  ──────────────────────────────────────────────────────────────────────────
-//  Variant-driven card displaying AI analysis output. Mirrors the web's
-//  `frontend/src/components/ai/ResultCard.jsx` + `.pd-ai-result-card` CSS.
+//  Variant-driven card displaying AI emergency triage output. Mirrors the
+//  web's `frontend/src/components/ai/ResultCard.jsx` 1:1, including the
+//  full set of FastAPI `ambiguity_level` branches.
 //
-//  Constructors (kept compatible with `ai_assistant_screen.dart`):
+//  Constructors:
 //    .loading()                              → 3 shimmer rows
 //    .error({required Object error})         → red banner + message
 //    .empty({String? title, String? sub})    → sparkles icon + invitation
-//    .triage({required EmergencyReport})     → severity + first aid + confidence
-//    .specialist({required SpecialistResult}) → 3 themed rows
+//    .triage({required EmergencyReport})     → 4-branch rich display
 //
-//  Visual fidelity goals — matched 1:1 against the web:
-//    • Card chrome: white card-bg, border, radius-lg, 20px padding
-//    • Triage header: title + SeverityBadge separated by a divider
-//    • Emergency banner: full-bleed red box with icon + bold "حالة طارئة"
-//      message — pulses with the same 1.5s timing as `pd-pulse-critical`
-//    • Loading skeleton: 70% / 90% / 60% rows with linear shimmer
-//    • Error state: light-red box + AlertCircle + Arabic message
+//  ─── 4-BRANCH ROUTING (matches the web) ──────────────────────────────
+//
+//  When the .triage variant is used, the card picks ONE of four layouts
+//  based on the report's `ambiguityLevel` and `conditions` array:
+//
+//    1. out_of_scope         → InfoBanner with shield icon + first-aid
+//       Trigger: report.isOutOfScope
+//       Use case: AI says the symptom is outside the medical scope
+//
+//    2. low_confidence_image → InfoBanner + retry suggestion + confidence
+//       Trigger: report.isLowConfidenceImage
+//       Use case: uploaded image is too blurry / dark / non-medical
+//
+//    3. multi                → MultiBanner + stacked MultiConditionCard
+//       Trigger: report.isMulti  (conditions[] is non-empty)
+//       Use case: AI detected multiple symptoms in one text submission
+//
+//    4. single result        → Full diagnostic layout (default)
+//       Trigger: anything else (confident, uncertain, very_ambiguous,
+//                or no ambiguityLevel at all — legacy reports)
+//       Use case: One primary diagnosis with optional secondary + clarifying
+//
+//  Backward compatibility: every new field on EmergencyReport is nullable
+//  or empty-defaulted, so legacy reports loaded from the database (with
+//  only the original 7 fields) still render the single-result branch.
 // ════════════════════════════════════════════════════════════════════════════
 
 import 'package:flutter/material.dart';
@@ -25,86 +43,78 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_radii.dart';
+import '../../domain/ai_condition.dart';
 import '../../domain/emergency_report.dart';
-import '../../domain/specialist_result.dart';
+import 'clarifying_questions_list.dart';
 import 'confidence_bar.dart';
+import 'diagnosis_header.dart';
 import 'empty_state.dart';
 import 'first_aid_steps.dart';
+import 'info_banner.dart';
+import 'multi_banner.dart';
+import 'multi_condition_card.dart';
+import 'secondary_diagnosis_card.dart';
 import 'severity_badge.dart';
+import 'top_predictions_accordion.dart';
+import 'voice_transcript_block.dart';
 
-enum _CardVariant { loading, error, empty, triage, specialist }
+enum _CardVariant { loading, error, empty, triage }
 
 class ResultCard extends StatelessWidget {
-  // ─── Public constructors ────────────────────────────────────────────
+  // ── Public constructors ────────────────────────────────────────────────
 
   const ResultCard.loading({super.key})
-      : _variant = _CardVariant.loading,
-        _error = null,
-        _emptyTitle = null,
-        _emptySubtitle = null,
-        _report = null,
-        _specialist = null;
+    : _variant = _CardVariant.loading,
+      _error = null,
+      _emptyTitle = null,
+      _emptySubtitle = null,
+      _report = null;
 
   const ResultCard.error({super.key, required Object error})
-      : _variant = _CardVariant.error,
-        _error = error,
-        _emptyTitle = null,
-        _emptySubtitle = null,
-        _report = null,
-        _specialist = null;
+    : _variant = _CardVariant.error,
+      _error = error,
+      _emptyTitle = null,
+      _emptySubtitle = null,
+      _report = null;
 
-  const ResultCard.empty({
-    super.key,
-    String? emptyTitle,
-    String? emptySubtitle,
-  })  : _variant = _CardVariant.empty,
-        _error = null,
-        _emptyTitle = emptyTitle,
-        _emptySubtitle = emptySubtitle,
-        _report = null,
-        _specialist = null;
+  const ResultCard.empty({super.key, String? emptyTitle, String? emptySubtitle})
+    : _variant = _CardVariant.empty,
+      _error = null,
+      _emptyTitle = emptyTitle,
+      _emptySubtitle = emptySubtitle,
+      _report = null;
 
   const ResultCard.triage({super.key, required EmergencyReport report})
-      : _variant = _CardVariant.triage,
-        _error = null,
-        _emptyTitle = null,
-        _emptySubtitle = null,
-        _report = report,
-        _specialist = null;
-
-  const ResultCard.specialist({super.key, required SpecialistResult result})
-      : _variant = _CardVariant.specialist,
-        _error = null,
-        _emptyTitle = null,
-        _emptySubtitle = null,
-        _report = null,
-        _specialist = result;
+    : _variant = _CardVariant.triage,
+      _error = null,
+      _emptyTitle = null,
+      _emptySubtitle = null,
+      _report = report;
 
   final _CardVariant _variant;
   final Object? _error;
   final String? _emptyTitle;
   final String? _emptySubtitle;
   final EmergencyReport? _report;
-  final SpecialistResult? _specialist;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
 
-    // Error and triage variants self-style their backgrounds; the others
-    // render inside the standard card chrome.
+    // The error variant has its own background; everything else renders
+    // inside the standard card chrome.
     final bool selfStyled = _variant == _CardVariant.error;
 
     final Widget child = switch (_variant) {
       _CardVariant.loading => const _LoadingBody(),
       _CardVariant.error => _ErrorBody(error: _error!),
       _CardVariant.empty => _EmptyBody(
-          title: _emptyTitle ?? 'ابدأ التحليل',
-          subtitle: _emptySubtitle ??
-              'أدخل أعراضك أو ارفع صورة طبية لبدء الاستشارة الذكية.',
-        ),
+        title: _emptyTitle ?? 'ابدأ التحليل',
+        subtitle:
+            _emptySubtitle ??
+            'أدخل أعراضك أو ارفع صورة طبية لبدء الاستشارة الذكية.',
+      ),
       _CardVariant.triage => _TriageBody(report: _report!),
-      _CardVariant.specialist => _SpecialistBody(result: _specialist!),
     };
 
     if (selfStyled) return child;
@@ -178,7 +188,6 @@ class _LoadingBodyState extends State<_LoadingBody>
       child: AnimatedBuilder(
         animation: _ctl,
         builder: (BuildContext _, Widget? __) {
-          // The shimmer slides a brighter band left-to-right across the row.
           final double t = _ctl.value;
           return Container(
             height: 20,
@@ -233,8 +242,11 @@ class _ErrorBody extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            const Icon(LucideIcons.circleAlert,
-                size: 28, color: AppColors.error),
+            const Icon(
+              LucideIcons.circleAlert,
+              size: 28,
+              color: AppColors.error,
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
@@ -275,7 +287,7 @@ class _EmptyBody extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Triage variant — header, optional emergency banner, first aid, confidence
+// Triage variant — 4-branch router
 // ════════════════════════════════════════════════════════════════════════════
 
 class _TriageBody extends StatelessWidget {
@@ -285,19 +297,286 @@ class _TriageBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    final List<String> steps = List<String>.from(report.aiFirstAid);
+    // ── Branch 1: Out of scope ─────────────────────────────────────────
+    if (report.isOutOfScope) {
+      return _OutOfScopeBranch(report: report);
+    }
 
-    // Both fields are nullable in the domain model — coerce to safe defaults
-    // before passing to non-nullable child widgets.
+    // ── Branch 2: Low confidence image ─────────────────────────────────
+    if (report.isLowConfidenceImage) {
+      return _LowConfidenceImageBranch(report: report);
+    }
+
+    // ── Branch 3: Multi-condition ──────────────────────────────────────
+    if (report.isMulti) {
+      return _MultiConditionBranch(report: report);
+    }
+
+    // ── Branch 4: Single result (default) ──────────────────────────────
+    return _SingleResultBranch(report: report);
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Branch 1: out_of_scope — symptom outside the medical scope
+// ────────────────────────────────────────────────────────────────────────────
+
+class _OutOfScopeBranch extends StatelessWidget {
+  const _OutOfScopeBranch({required this.report});
+
+  final EmergencyReport report;
+
+  @override
+  Widget build(BuildContext context) {
+    final String message = (report.outOfScopeMessage?.trim().isNotEmpty == true)
+        ? report.outOfScopeMessage!
+        : (report.aiAssessment?.trim().isNotEmpty == true
+              ? report.aiAssessment!
+              : 'هذا الموضوع خارج نطاق النظام الطبي.');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _TriageHeader(report: report),
+        const SizedBox(height: 16),
+        InfoBanner(
+          icon: LucideIcons.shieldAlert,
+          title: 'خارج نطاق التحليل الطبي',
+          body: message,
+        ),
+        if (report.aiFirstAid.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 16),
+          const _SectionLabel(text: 'إرشادات'),
+          const SizedBox(height: 8),
+          FirstAidSteps(steps: report.aiFirstAid),
+        ],
+      ],
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Branch 2: low_confidence_image — image was too blurry / non-medical
+// ────────────────────────────────────────────────────────────────────────────
+
+class _LowConfidenceImageBranch extends StatelessWidget {
+  const _LowConfidenceImageBranch({required this.report});
+
+  final EmergencyReport report;
+
+  @override
+  Widget build(BuildContext context) {
+    final String message = (report.outOfScopeMessage?.trim().isNotEmpty == true)
+        ? report.outOfScopeMessage!
+        : (report.aiAssessment?.trim().isNotEmpty == true
+              ? report.aiAssessment!
+              : 'يرجى التقاط صورة أوضح وإعادة المحاولة.');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _TriageHeader(report: report),
+        const SizedBox(height: 16),
+        InfoBanner(
+          icon: LucideIcons.imageOff,
+          title: 'جودة الصورة غير كافية',
+          body: message,
+        ),
+        if ((report.aiConfidence ?? 0) > 0) ...<Widget>[
+          const SizedBox(height: 16),
+          ConfidenceBar(confidence: report.aiConfidence!),
+        ],
+      ],
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Branch 3: multi — multiple symptoms detected in a single text
+// ────────────────────────────────────────────────────────────────────────────
+
+class _MultiConditionBranch extends StatelessWidget {
+  const _MultiConditionBranch({required this.report});
+
+  final EmergencyReport report;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<AiCondition> conditions = report.conditions;
     final bool isEmergency = report.recommendAmbulance ?? false;
-    final double confidence = report.aiConfidence ?? 0.0;
     final String? assessment = report.aiAssessment;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        // ── Header: title + severity badge separated by a divider ──
+        _TriageHeader(report: report),
+        const SizedBox(height: 16),
+        MultiBanner(count: conditions.length),
+        if (assessment != null && assessment.trim().isNotEmpty) ...<Widget>[
+          const SizedBox(height: 12),
+          _AssessmentText(text: assessment),
+        ],
+        if (isEmergency) ...<Widget>[
+          const SizedBox(height: 12),
+          const _EmergencyBanner(),
+        ],
+        // Only surface the voice-transcript block when the patient
+        // actually submitted a voice note — never echo `textDescription`
+        // back as a "transcript".
+        if (_isVoiceInput(report) &&
+            report.voiceTranscript != null &&
+            report.voiceTranscript!.trim().isNotEmpty) ...<Widget>[
+          const SizedBox(height: 12),
+          VoiceTranscriptBlock(transcript: report.voiceTranscript),
+        ],
+        const SizedBox(height: 16),
+        // Stacked condition cards — one per detected condition.
+        for (int i = 0; i < conditions.length; i++) ...<Widget>[
+          if (i > 0) const SizedBox(height: 12),
+          MultiConditionCard(condition: conditions[i], index: i),
+        ],
+      ],
+    );
+  }
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Branch 4: single — primary diagnosis with optional supplementary blocks
+// ────────────────────────────────────────────────────────────────────────────
+
+class _SingleResultBranch extends StatelessWidget {
+  const _SingleResultBranch({required this.report});
+
+  final EmergencyReport report;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool isEmergency = report.recommendAmbulance ?? false;
+    final double confidence = report.aiConfidence ?? 0.0;
+    final String? assessment = report.aiAssessment;
+    final List<String> steps = List<String>.from(report.aiFirstAid);
+
+    // Whether any enriched field has content — drives whether we render
+    // the diagnosis header at all.
+    final bool hasDiagnosisInfo =
+        (report.diseaseNameAr?.trim().isNotEmpty == true) ||
+        (report.diseaseClass?.trim().isNotEmpty == true) ||
+        (report.domain?.trim().isNotEmpty == true);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        // ── Header: title + severity badge ──────────────────────────
+        _TriageHeader(report: report),
+
+        // ── Diagnosis header (name + domain badge + confidence chip) ─
+        if (hasDiagnosisInfo) ...<Widget>[
+          const SizedBox(height: 16),
+          DiagnosisHeader(
+            diseaseNameAr: report.diseaseNameAr,
+            diseaseClass: report.diseaseClass,
+            domain: report.domain,
+            confidence: report.aiConfidence,
+          ),
+        ],
+
+        // ── Voice transcript (only when input was actually voice) ────
+        // The backend sometimes echoes `textDescription` back into the
+        // `voiceTranscript` field. Guard with the input mode so we only
+        // ever show this block when the patient really submitted audio.
+        if (_isVoiceInput(report) &&
+            report.voiceTranscript != null &&
+            report.voiceTranscript!.trim().isNotEmpty) ...<Widget>[
+          const SizedBox(height: 12),
+          VoiceTranscriptBlock(transcript: report.voiceTranscript),
+        ],
+
+        // ── Clinical assessment paragraph ────────────────────────────
+        if (assessment != null && assessment.trim().isNotEmpty) ...<Widget>[
+          const SizedBox(height: 16),
+          _AssessmentText(text: assessment),
+        ],
+
+        // ── Emergency banner ─────────────────────────────────────────
+        if (isEmergency) ...<Widget>[
+          const SizedBox(height: 16),
+          const _EmergencyBanner(),
+        ],
+
+        // ── First aid steps ─────────────────────────────────────────
+        if (steps.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 16),
+          const _SectionLabel(text: 'خطوات الإسعاف الأولي'),
+          const SizedBox(height: 8),
+          FirstAidSteps(steps: steps),
+        ],
+
+        // ── Confidence bar (only when confidence is real) ────────────
+        if (confidence > 0) ...<Widget>[
+          const SizedBox(height: 16),
+          ConfidenceBar(confidence: confidence),
+        ],
+
+        // ── Secondary diagnosis (uncertain / very_ambiguous) ─────────
+        if (_hasSecondaryDiagnosis(report)) ...<Widget>[
+          const SizedBox(height: 16),
+          SecondaryDiagnosisCard(
+            secondaryNameAr: report.secondaryNameAr,
+            secondaryClass: report.secondaryClass,
+            secondaryConfidence: report.secondaryConfidence,
+          ),
+        ],
+
+        // ── Clarifying questions (uncertain / very_ambiguous) ────────
+        if (report.clarifyingQuestions.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 12),
+          ClarifyingQuestionsList(questions: report.clarifyingQuestions),
+        ],
+
+        // ── Top-N predictions accordion ──────────────────────────────
+        if (report.topPredictions.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 12),
+          TopPredictionsAccordion(predictions: report.topPredictions),
+        ],
+      ],
+    );
+  }
+
+  /// Decides whether the SecondaryDiagnosisCard has anything worth
+  /// rendering — must have at least a name or class.
+  static bool _hasSecondaryDiagnosis(EmergencyReport r) {
+    return (r.secondaryNameAr?.trim().isNotEmpty == true) ||
+        (r.secondaryClass?.trim().isNotEmpty == true);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Shared sub-widgets used by every triage branch
+// ════════════════════════════════════════════════════════════════════════════
+
+/// True iff the report was submitted as a voice note. Accepts both the
+/// pure-voice mode and the `combined` mode (voice + text). Anything else
+/// — including legacy reports with no `inputType` — is treated as a
+/// non-voice submission so we never echo the patient's typed text back
+/// as a fake "transcript".
+bool _isVoiceInput(EmergencyReport report) {
+  final String t = report.inputType.toLowerCase();
+  return t == 'voice' || t == 'combined';
+}
+
+/// "نتيجة التحليل" title + severity badge separated by a divider.
+class _TriageHeader extends StatelessWidget {
+  const _TriageHeader({required this.report});
+
+  final EmergencyReport report;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
         Padding(
           padding: const EdgeInsets.only(bottom: 12),
           child: Row(
@@ -318,47 +597,50 @@ class _TriageBody extends StatelessWidget {
           ),
         ),
         Container(height: 1, color: scheme.outline),
-        const SizedBox(height: 16),
-
-        // ── Optional emergency banner ──
-        if (isEmergency) ...<Widget>[
-          const _EmergencyBanner(),
-          const SizedBox(height: 16),
-        ],
-
-        // ── Optional clinical assessment text from the AI ──
-        if (assessment != null && assessment.trim().isNotEmpty) ...<Widget>[
-          Text(
-            assessment,
-            style: TextStyle(
-              fontSize: 14,
-              height: 1.6,
-              color: scheme.onSurface,
-              fontFamily: 'Cairo',
-            ),
-          ),
-          const SizedBox(height: 16),
-        ],
-
-        // ── First aid steps section ──
-        if (steps.isNotEmpty) ...<Widget>[
-          const _SectionLabel(text: 'خطوات الإسعاف الأولي'),
-          const SizedBox(height: 8),
-          FirstAidSteps(steps: steps),
-          const SizedBox(height: 16),
-        ],
-
-        // ── Confidence bar ──
-        ConfidenceBar(confidence: confidence),
       ],
     );
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// Pulsing red emergency banner
-// ════════════════════════════════════════════════════════════════════════════
+/// Clinical assessment prose with a small accent icon.
+class _AssessmentText extends StatelessWidget {
+  const _AssessmentText({required this.text});
 
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Icon(
+            LucideIcons.messageSquareText,
+            size: 14,
+            color: scheme.secondary,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: 14,
+              height: 1.7,
+              color: scheme.onSurface,
+              fontFamily: 'Cairo',
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Pulsing red emergency banner with the same 1.5s timing as the web's
+/// `pd-pulse-critical` CSS keyframe.
 class _EmergencyBanner extends StatefulWidget {
   const _EmergencyBanner();
 
@@ -437,152 +719,7 @@ class _EmergencyBannerState extends State<_EmergencyBanner>
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// Specialist variant — 3 themed rows (specialist, disease, organ system)
-// ════════════════════════════════════════════════════════════════════════════
-
-class _SpecialistBody extends StatelessWidget {
-  const _SpecialistBody({required this.result});
-
-  final SpecialistResult result;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-
-    // Read fields via toString() of the result. The defensive approach
-    // tolerates unknown shapes — if your SpecialistResult exposes specific
-    // getters, this section can be tightened later.
-    final String specialist = _safeRead(result, 'specialist');
-    final String disease = _safeRead(result, 'disease');
-    final String organSystem = _safeRead(result, 'organSystem');
-
-    final List<_SpecRow> rows = <_SpecRow>[
-      _SpecRow(
-        icon: LucideIcons.stethoscope,
-        label: 'الطبيب المختص',
-        value: specialist,
-      ),
-      _SpecRow(
-        icon: LucideIcons.activity,
-        label: 'التشخيص المحتمل',
-        value: disease,
-      ),
-      _SpecRow(
-        icon: LucideIcons.heartPulse,
-        label: 'الجهاز',
-        value: organSystem,
-      ),
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        Text(
-          'نتيجة التحليل',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w700,
-            color: scheme.primary,
-            fontFamily: 'Cairo',
-          ),
-        ),
-        const SizedBox(height: 16),
-        for (int i = 0; i < rows.length; i++) ...<Widget>[
-          if (i > 0) const SizedBox(height: 12),
-          rows[i],
-        ],
-      ],
-    );
-  }
-}
-
-// Best-effort field reader. SpecialistResult is opaque to this widget;
-// rather than risk a compile error if a field name differs, we tolerate
-// unknown shapes by returning a placeholder.
-String _safeRead(Object obj, String field) {
-  try {
-    final String full = obj.toString();
-    // If toString hasn't been implemented, returns "Instance of '...'"
-    if (full.startsWith("Instance of '")) return '—';
-    return full;
-  } catch (_) {
-    return '—';
-  }
-}
-
-class _SpecRow extends StatelessWidget {
-  const _SpecRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    final bool isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.backgroundDark : AppColors.background,
-        borderRadius: AppRadii.radiusMd,
-      ),
-      child: Row(
-        children: <Widget>[
-          Container(
-            width: 36,
-            height: 36,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: scheme.surfaceContainerHighest,
-              borderRadius: AppRadii.radiusMd,
-            ),
-            child: Icon(icon, size: 20, color: scheme.secondary),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: scheme.onSurfaceVariant,
-                    letterSpacing: 0.4,
-                    fontFamily: 'Cairo',
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  value.isEmpty ? '—' : value,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: scheme.primary,
-                    fontFamily: 'Cairo',
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// Section label — small uppercase action-color label above subsections
-// ════════════════════════════════════════════════════════════════════════════
-
+/// Small uppercase action-color label above subsections.
 class _SectionLabel extends StatelessWidget {
   const _SectionLabel({required this.text});
 

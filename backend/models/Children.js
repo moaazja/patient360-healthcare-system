@@ -24,6 +24,11 @@
 
 const mongoose = require('mongoose');
 
+// Eagerly load Counter so `mongoose.model('Counter')` is available
+// inside generateRegistrationNumber. This avoids ordering issues in
+// models/index.js and ensures the atomic counter is always ready.
+require('./Counter');
+
 const { Schema } = mongoose;
 
 // ── Reusable enums (kept in sync with the locked schema) ────────────────────
@@ -283,26 +288,35 @@ ChildrenSchema.pre('save', function autoSetMigrationStatus(next) {
 
 /**
  * Generate the next available childRegistrationNumber for today.
- * Format: CRN-YYYYMMDD-XXXXX where XXXXX is a 5-digit zero-padded counter
- * scoped to the current calendar day.
+ * Format: CRN-YYYYMMDD-XXXXX (5-digit zero-padded daily counter)
  *
- * @returns {Promise<string>}
+ * Concurrency-safe by design:
+ *   Uses the `counters` collection with MongoDB's atomic `findOneAndUpdate`
+ *   + `$inc`. Two simultaneous registrations cannot receive the same
+ *   sequence value — MongoDB serializes the write at the document level.
+ *
+ *   This replaces the previous `countDocuments` + `+1` implementation,
+ *   which suffered from a classic read-then-write race condition that
+ *   would throw E11000 (duplicate key) when two children registered in
+ *   the same millisecond.
+ *
+ * @returns {Promise<string>} e.g. "CRN-20260525-00008"
  */
 ChildrenSchema.statics.generateRegistrationNumber = async function generateRegistrationNumber() {
+  const Counter = mongoose.model('Counter');
+
   const now = new Date();
   const yyyy = now.getFullYear();
   const mm = String(now.getMonth() + 1).padStart(2, '0');
   const dd = String(now.getDate()).padStart(2, '0');
   const datePart = `${yyyy}${mm}${dd}`;
-  const prefix = `CRN-${datePart}-`;
 
-  // Count children already registered today, then increment
-  const todayCount = await this.countDocuments({
-    childRegistrationNumber: { $regex: `^${prefix}` },
-  });
+  // Atomic increment — race-condition-safe.
+  // First call of the day creates the counter via upsert and returns 1.
+  const seq = await Counter.next(`child_${datePart}`);
 
-  const sequence = String(todayCount + 1).padStart(5, '0');
-  return `${prefix}${sequence}`;
+  const sequence = String(seq).padStart(5, '0');
+  return `CRN-${datePart}-${sequence}`;
 };
 
 // ── Query helpers ───────────────────────────────────────────────────────────

@@ -135,6 +135,8 @@ import {
   ChevronUp,
   Building2,
   UserCheck,
+  GraduationCap,
+  BookOpen,
 } from 'lucide-react';
 
 import Navbar from '../components/common/Navbar';
@@ -525,6 +527,164 @@ const formatArabicDate = (date) => {
     month: 'long',
     day: 'numeric',
   });
+};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Personal information helpers
+// Used by the "المعلومات الشخصية الكاملة" section in the patient overview tab.
+// Keep these self-contained so the overview can render any patient (adult or
+// child) without branching at every field.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Reusable info sub-section: a labelled group of icon + label + value fields
+ * rendered as a responsive 2-column grid that gracefully collapses on mobile.
+ *
+ * Each field item supports:
+ *   - icon  (ReactNode)     leading icon
+ *   - label (string)        bold label (e.g. "اسم الأم")
+ *   - value (string|null)   displayed value; null/undefined/'' → "غير محدد"
+ *   - ltr   (bool)          force LTR direction (phones, emails, IDs)
+ *   - mono  (bool)          monospace font (IDs, codes)
+ *   - span  (1|2)           grid span (2 = full row, used for long addresses)
+ */
+const DDInfoSubsection = ({ title, fields }) => {
+  if (!fields || fields.length === 0) return null;
+  return (
+    <div style={{ marginBottom: '18px' }}>
+      <h4
+        style={{
+          margin: '0 0 12px 0',
+          fontSize: '13px',
+          fontWeight: 600,
+          color: '#00897B',
+          letterSpacing: '0.2px',
+          textTransform: 'none',
+        }}
+      >
+        {title}
+      </h4>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gap: '12px',
+        }}
+      >
+        {fields.map((f, i) => {
+          const hasValue = f.value !== null && f.value !== undefined && f.value !== '';
+          return (
+            <div
+              key={i}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '10px',
+                padding: '10px 12px',
+                background: 'rgba(224, 242, 241, 0.35)',
+                borderRadius: '10px',
+                gridColumn: f.span === 2 ? 'span 2' : 'auto',
+                minHeight: '52px',
+              }}
+            >
+              <div
+                style={{
+                  width: '28px',
+                  height: '28px',
+                  flexShrink: 0,
+                  borderRadius: '7px',
+                  background: '#fff',
+                  color: '#00897B',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginTop: '2px',
+                }}
+              >
+                {f.icon}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: '11.5px',
+                    fontWeight: 500,
+                    color: '#4DB6AC',
+                    marginBottom: '3px',
+                  }}
+                >
+                  {f.label}
+                </div>
+                <div
+                  dir={f.ltr ? 'ltr' : 'rtl'}
+                  style={{
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    color: hasValue ? '#0D3B3E' : '#9aa5a4',
+                    fontFamily: f.mono
+                      ? '"Cascadia Code", Consolas, "Courier New", monospace'
+                      : f.ltr
+                        ? 'Inter, sans-serif'
+                        : 'inherit',
+                    textAlign: f.ltr ? 'left' : 'right',
+                    wordBreak: 'break-word',
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {hasValue ? f.value : 'غير محدد'}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+const translateGuardianRelationship = (rel) => {
+  const map = {
+    father: 'الأب',
+    mother: 'الأم',
+    grandfather: 'الجد',
+    grandmother: 'الجدة',
+    uncle: 'العم / الخال',
+    aunt: 'العمة / الخالة',
+    sibling: 'أخ / أخت',
+    other: 'آخر',
+  };
+  return map[rel] || rel || null;
+};
+
+const translateMigrationStatus = (status) => {
+  const map = {
+    pending: 'قيد الانتظار (لم يستلم الرقم الوطني بعد)',
+    ready: 'جاهز للترحيل (استلم الرقم الوطني)',
+    migrated: 'تم الترحيل لجدول البالغين',
+  };
+  return map[status] || status || null;
+};
+
+const translateMaritalStatus = (status) => {
+  const map = {
+    single: 'أعزب / عزباء',
+    married: 'متزوج / متزوجة',
+    divorced: 'مطلق / مطلقة',
+    widowed: 'أرمل / أرملة',
+  };
+  return map[status] || status || null;
+};
+
+const translateEducation = (level) => {
+  const map = {
+    none: 'بدون',
+    primary: 'ابتدائي',
+    secondary: 'ثانوي',
+    diploma: 'دبلوم',
+    bachelor: 'بكالوريوس',
+    master: 'ماجستير',
+    doctorate: 'دكتوراه',
+  };
+  return map[level] || level || null;
 };
 
 /**
@@ -1321,13 +1481,20 @@ const DoctorDashboard = () => {
      ───────────────────────────────────────────────────────────────── */
 
   const handleSearchPatient = useCallback(async () => {
-    const id = searchId.trim();
+    const id = searchId.trim().toUpperCase();
     if (!id) {
-      setSearchError('الرجاء إدخال الرقم الوطني للمريض');
+      setSearchError('الرجاء إدخال رقم وطني أو رقم تسجيل طفل');
       return;
     }
-    if (!/^\d{11}$/.test(id)) {
-      setSearchError('الرقم الوطني يجب أن يكون 11 رقم بالضبط');
+
+    // Accept BOTH formats:
+    //   ‣ 11-digit national ID  (adult, e.g. 01122334455)
+    //   ‣ CRN-YYYYMMDD-XXXXX    (child under 14, e.g. CRN-20260424-00001)
+    const isAdultId  = /^\d{11}$/.test(id);
+    const isChildCRN = /^CRN-\d{8}-\d{4,5}$/.test(id);
+
+    if (!isAdultId && !isChildCRN) {
+      setSearchError('الصيغة غير صحيحة. أدخل 11 رقم وطني للبالغين، أو CRN-YYYYMMDD-XXXXX للأطفال');
       return;
     }
 
@@ -3718,8 +3885,8 @@ const DoctorDashboard = () => {
                 </div>
                 <h2>ابحث عن المريض برقم الهوية</h2>
                 <p>
-                  أدخل الرقم الوطني المكون من 11 رقم للبحث في قاعدة البيانات الطبية المركزية.
-                  للأطفال أقل من 14 سنة، استخدم رقم تسجيل الطفل الخاص.
+                  أدخل الرقم الوطني المكوّن من 11 رقم للبالغين، أو رقم تسجيل الطفل
+                  بصيغة <span dir="ltr" style={{ fontFamily: 'monospace' }}>CRN-YYYYMMDD-XXXXX</span> للأطفال أقل من 14 سنة.
                 </p>
 
                 <div className="dd-search-form">
@@ -3729,16 +3896,23 @@ const DoctorDashboard = () => {
                       ref={searchInputRef}
                       type="text"
                       className="dd-search-input"
-                      placeholder="11 رقم"
+                      placeholder="11 رقم وطني  أو  CRN-YYYYMMDD-XXXXX"
                       value={searchId}
                       onChange={(e) => {
-                        setSearchId(e.target.value.replace(/\D/g, '').slice(0, 11));
+                        // Accept digits, uppercase letters (CRN prefix), and dashes.
+                        // Normalize to uppercase so 'crn-...' is auto-fixed.
+                        const cleaned = e.target.value
+                          .toUpperCase()
+                          .replace(/[^0-9A-Z-]/g, '')
+                          .slice(0, 20); // CRN-20260424-00001 = 18 chars; 20 is a safe ceiling
+                        setSearchId(cleaned);
                         setSearchError(null);
                       }}
                       onKeyDown={(e) => e.key === 'Enter' && handleSearchPatient()}
-                      maxLength={11}
-                      inputMode="numeric"
+                      maxLength={20}
                       autoComplete="off"
+                      dir="ltr"
+                      style={{ textAlign: 'center', letterSpacing: '0.5px' }}
                     />
                   </div>
                   <button
@@ -4058,6 +4232,148 @@ const DoctorDashboard = () => {
                         )}
                       </div>
                     </div>
+                  </section>
+
+                  {/* ═════════════════════════════════════════════════════
+                       Comprehensive personal information
+                       Renders ALL demographic data the backend returns.
+                       Adapts conditionally to child vs adult patients.
+                      ═════════════════════════════════════════════════════ */}
+                  <section
+                    style={{
+                      background: 'var(--surface, #ffffff)',
+                      borderRadius: '14px',
+                      padding: '20px 24px',
+                      marginBottom: '20px',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.03)',
+                      border: '1px solid rgba(0,0,0,0.06)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        marginBottom: '18px',
+                        paddingBottom: '12px',
+                        borderBottom: '1px solid rgba(0,0,0,0.06)',
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: '36px',
+                          height: '36px',
+                          borderRadius: '10px',
+                          background: 'rgba(0, 137, 123, 0.1)',
+                          color: '#00897B',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <IdCard size={20} strokeWidth={2.2} />
+                      </div>
+                      <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 600, color: '#0D3B3E' }}>
+                        المعلومات الشخصية الكاملة
+                      </h3>
+                    </div>
+
+                    {/* ── Sub-section: Identity ─────────────────────────── */}
+                    <DDInfoSubsection
+                      title="معلومات الهوية"
+                      fields={[
+                        { icon: <User size={16} strokeWidth={2.2} />, label: 'الاسم الأول', value: selectedPatient.firstName },
+                        { icon: <User size={16} strokeWidth={2.2} />, label: 'اسم الأب', value: selectedPatient.fatherName },
+                        { icon: <User size={16} strokeWidth={2.2} />, label: 'اسم العائلة', value: selectedPatient.lastName },
+                        { icon: <Heart size={16} strokeWidth={2.2} />, label: 'اسم الأم', value: selectedPatient.motherName },
+                        { icon: <Calendar size={16} strokeWidth={2.2} />, label: 'تاريخ الميلاد', value: formatArabicDate(selectedPatient.dateOfBirth) },
+                        {
+                          icon: <IdCard size={16} strokeWidth={2.2} />,
+                          label: selectedPatient.isChild || selectedPatient.childRegistrationNumber ? 'رقم تسجيل الطفل' : 'الرقم الوطني',
+                          value: selectedPatient.childRegistrationNumber || selectedPatient.nationalId,
+                          mono: true,
+                        },
+                        { icon: <User size={16} strokeWidth={2.2} />, label: 'الجنس', value: selectedPatient.gender === 'male' ? 'ذكر' : selectedPatient.gender === 'female' ? 'أنثى' : null },
+                      ]}
+                    />
+
+                    {/* ── Sub-section: Address ──────────────────────────── */}
+                    <DDInfoSubsection
+                      title="العنوان"
+                      fields={[
+                        { icon: <MapPin size={16} strokeWidth={2.2} />, label: 'المحافظة', value: selectedPatient.governorate },
+                        { icon: <MapPin size={16} strokeWidth={2.2} />, label: 'المدينة', value: selectedPatient.city },
+                        { icon: <MapPin size={16} strokeWidth={2.2} />, label: 'الحي / المنطقة', value: selectedPatient.district },
+                        { icon: <MapPin size={16} strokeWidth={2.2} />, label: 'الشارع', value: selectedPatient.street },
+                        { icon: <Home size={16} strokeWidth={2.2} />, label: 'البناء / رقم المنزل', value: selectedPatient.building },
+                        { icon: <Home size={16} strokeWidth={2.2} />, label: 'العنوان الكامل', value: selectedPatient.address, span: 2 },
+                      ]}
+                    />
+
+                    {/* ── Sub-section: Contact ──────────────────────────── */}
+                    <DDInfoSubsection
+                      title="معلومات التواصل"
+                      fields={[
+                        { icon: <Phone size={16} strokeWidth={2.2} />, label: 'الهاتف', value: selectedPatient.phoneNumber, ltr: true },
+                        { icon: <Phone size={16} strokeWidth={2.2} />, label: 'هاتف بديل', value: selectedPatient.alternativePhoneNumber, ltr: true },
+                        { icon: <Mail size={16} strokeWidth={2.2} />, label: 'البريد الإلكتروني', value: selectedPatient.email, ltr: true },
+                      ]}
+                    />
+
+                    {/* ── CHILD-ONLY sub-sections ──────────────────────── */}
+                    {(selectedPatient.isChild || selectedPatient.childRegistrationNumber) && (
+                      <>
+                        <DDInfoSubsection
+                          title="معلومات الأهل والوصي"
+                          fields={[
+                            { icon: <IdCard size={16} strokeWidth={2.2} />, label: 'الرقم الوطني للأب', value: selectedPatient.parentNationalId, mono: true, ltr: true },
+                            { icon: <UserCheck size={16} strokeWidth={2.2} />, label: 'اسم الوصي', value: selectedPatient.guardianName },
+                            { icon: <Users size={16} strokeWidth={2.2} />, label: 'صلة قرابة الوصي', value: translateGuardianRelationship(selectedPatient.guardianRelationship) },
+                            { icon: <Phone size={16} strokeWidth={2.2} />, label: 'هاتف الوصي', value: selectedPatient.guardianPhoneNumber, ltr: true },
+                          ]}
+                        />
+
+                        {(selectedPatient.schoolName || selectedPatient.grade) && (
+                          <DDInfoSubsection
+                            title="المعلومات الدراسية"
+                            fields={[
+                              { icon: <GraduationCap size={16} strokeWidth={2.2} />, label: 'اسم المدرسة', value: selectedPatient.schoolName },
+                              { icon: <BookOpen size={16} strokeWidth={2.2} />, label: 'الصف الدراسي', value: selectedPatient.grade },
+                            ]}
+                          />
+                        )}
+
+                        <DDInfoSubsection
+                          title="حالة الترحيل (Migration)"
+                          fields={[
+                            {
+                              icon: <ShieldCheck size={16} strokeWidth={2.2} />,
+                              label: 'حصل على الرقم الوطني',
+                              value: selectedPatient.hasReceivedNationalId ? 'نعم' : 'لا',
+                            },
+                            {
+                              icon: <ClipboardList size={16} strokeWidth={2.2} />,
+                              label: 'حالة الترحيل',
+                              value: translateMigrationStatus(selectedPatient.migrationStatus),
+                            },
+                          ]}
+                        />
+                      </>
+                    )}
+
+                    {/* ── ADULT-ONLY sub-section ───────────────────────── */}
+                    {!selectedPatient.isChild && !selectedPatient.childRegistrationNumber && (
+                      (selectedPatient.maritalStatus || selectedPatient.occupation || selectedPatient.education) && (
+                        <DDInfoSubsection
+                          title="معلومات اجتماعية ومهنية"
+                          fields={[
+                            { icon: <Heart size={16} strokeWidth={2.2} />, label: 'الحالة الاجتماعية', value: translateMaritalStatus(selectedPatient.maritalStatus) },
+                            { icon: <Briefcase size={16} strokeWidth={2.2} />, label: 'المهنة', value: selectedPatient.occupation },
+                            { icon: <Award size={16} strokeWidth={2.2} />, label: 'المستوى التعليمي', value: translateEducation(selectedPatient.education) },
+                          ]}
+                        />
+                      )
+                    )}
                   </section>
 
                   {/* Medical info tiles */}
