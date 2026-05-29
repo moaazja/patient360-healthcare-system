@@ -3,7 +3,7 @@
  *  Laboratory Model — Patient 360°
  *  ─────────────────────────────────────────────────────────────────────────
  *  Collection: laboratories
- *  Source of truth: patient360_db_final.js (collection 12)
+ *  Source of truth: patient360_db_final_v2.js (collection 12)
  *
  *  Laboratory registry. Referenced by:
  *    • lab_technicians.laboratoryId — staff affiliation
@@ -15,8 +15,17 @@
  *  with prices and turnaround times. Doctors querying for labs can filter by
  *  testCode to find labs that offer a specific test.
  *
- *  GeoJSON `location` field follows the same [lng, lat] convention as
- *  Pharmacy.location — see Pharmacy.js for the full explanation.
+ *  ┌──── v2 SCHEMA CHANGE (2026-05-27) ─────────────────────────────────┐
+ *  │ ✗ REMOVED: GeoJSONPointSchema sub-schema (GPS coordinates)         │
+ *  │ ✗ REMOVED: `location` field on the main schema                     │
+ *  │ ✗ REMOVED: `location: 2dsphere` index                              │
+ *  │ ✗ REMOVED: static method `findNearby()`                            │
+ *  │ ✓ KEPT (simplified): static method `findOfferingTest()` — now      │
+ *  │   filters by testCode + governorate/city only (no GPS distance).   │
+ *  │                                                                    │
+ *  │ Reason: Team decision — GPS-based nearest-lab queries are out of   │
+ *  │   MVP scope. Text address fields provide sufficient location info. │
+ *  └────────────────────────────────────────────────────────────────────┘
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -46,11 +55,6 @@ const WEEKDAYS = [
   'Thursday', 'Friday', 'Saturday',
 ];
 
-const SYRIA_LNG_MIN = 35.5;
-const SYRIA_LNG_MAX = 42.5;
-const SYRIA_LAT_MIN = 32.0;
-const SYRIA_LAT_MAX = 37.5;
-
 // ── Sub-schemas ─────────────────────────────────────────────────────────────
 
 const OperatingHoursSchema = new Schema(
@@ -59,29 +63,6 @@ const OperatingHoursSchema = new Schema(
     openTime: { type: String, trim: true },
     closeTime: { type: String, trim: true },
     is24Hours: { type: Boolean, default: false },
-  },
-  { _id: false },
-);
-
-const GeoJSONPointSchema = new Schema(
-  {
-    type: { type: String, enum: ['Point'], required: true, default: 'Point' },
-    coordinates: {
-      type: [Number],
-      required: true,
-      validate: {
-        validator(coords) {
-          if (!Array.isArray(coords) || coords.length !== 2) return false;
-          const [lng, lat] = coords;
-          if (typeof lng !== 'number' || typeof lat !== 'number') return false;
-          return (
-            lng >= SYRIA_LNG_MIN && lng <= SYRIA_LNG_MAX
-            && lat >= SYRIA_LAT_MIN && lat <= SYRIA_LAT_MAX
-          );
-        },
-        message: 'الإحداثيات يجب أن تكون [خط الطول، خط العرض] داخل سوريا',
-      },
-    },
   },
   { _id: false },
 );
@@ -138,7 +119,7 @@ const LaboratorySchema = new Schema(
       match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, 'البريد الإلكتروني غير صحيح'],
     },
 
-    // ── Location (text) ───────────────────────────────────────────────────
+    // ── Location (text only — v2: GeoJSON removed) ────────────────────────
     governorate: {
       type: String,
       enum: GOVERNORATES,
@@ -154,12 +135,6 @@ const LaboratorySchema = new Schema(
       type: String,
       required: [true, 'العنوان مطلوب'],
       trim: true,
-    },
-
-    // ── Location (GeoJSON — REQUIRED for nearest-lab queries) ─────────────
-    location: {
-      type: GeoJSONPointSchema,
-      required: [true, 'إحداثيات GPS للمختبر مطلوبة'],
     },
 
     // ── Test catalog ──────────────────────────────────────────────────────
@@ -184,7 +159,7 @@ const LaboratorySchema = new Schema(
   },
 );
 
-// ── Indexes ─────────────────────────────────────────────────────────────────
+// ── Indexes (v2: 2dsphere index removed) ────────────────────────────────────
 
 LaboratorySchema.index({ governorate: 1, city: 1 }, { name: 'idx_location_text' });
 LaboratorySchema.index(
@@ -197,32 +172,19 @@ LaboratorySchema.index(
 );
 LaboratorySchema.index({ averageRating: -1 }, { name: 'idx_rating_desc' });
 
-// 2dsphere — REQUIRED for $near
-LaboratorySchema.index({ location: '2dsphere' }, { name: 'idx_location_geo' });
-
 // ── Static methods ──────────────────────────────────────────────────────────
 
-LaboratorySchema.statics.findNearby = function findNearby(longitude, latitude, maxDistanceMeters = 5000) {
-  return this.find({
-    location: {
-      $near: {
-        $geometry: { type: 'Point', coordinates: [longitude, latitude] },
-        $maxDistance: maxDistanceMeters,
-      },
-    },
-    isActive: true,
-    isAcceptingTests: true,
-  });
-};
-
 /**
- * Find labs that can perform a specific test, optionally near a location.
+ * Find labs that can perform a specific test, optionally filtered by
+ * governorate and/or city.
+ *
+ * v2 NOTE: GPS-based proximity filtering was removed. Callers can pass
+ * `governorate` and/or `city` to scope results geographically.
  *
  * @param {string} testCode - e.g. "CBC", "HbA1c"
  * @param {object} [opts]
- * @param {number} [opts.longitude]
- * @param {number} [opts.latitude]
- * @param {number} [opts.maxDistanceMeters=10000]
+ * @param {string} [opts.governorate] - one of GOVERNORATES
+ * @param {string} [opts.city]
  * @returns {mongoose.Query}
  */
 LaboratorySchema.statics.findOfferingTest = function findOfferingTest(testCode, opts = {}) {
@@ -233,17 +195,8 @@ LaboratorySchema.statics.findOfferingTest = function findOfferingTest(testCode, 
     isAcceptingTests: true,
   };
 
-  if (typeof opts.longitude === 'number' && typeof opts.latitude === 'number') {
-    query.location = {
-      $near: {
-        $geometry: {
-          type: 'Point',
-          coordinates: [opts.longitude, opts.latitude],
-        },
-        $maxDistance: opts.maxDistanceMeters || 10000,
-      },
-    };
-  }
+  if (opts.governorate) query.governorate = opts.governorate;
+  if (opts.city) query.city = opts.city;
 
   return this.find(query);
 };

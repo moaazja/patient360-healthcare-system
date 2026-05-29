@@ -10,7 +10,7 @@
  *  Boot sequence:
  *    1. Load environment variables
  *    2. Connect to MongoDB
- *    3. Register all 25 Mongoose models (via models/index.js barrel)
+ *    3. Register all 26 Mongoose models (via models/index.js barrel)
  *    4. Apply security middleware (helmet, cors)
  *    5. Apply body parsers + request logging
  *    6. Serve static uploads
@@ -264,6 +264,15 @@ const facilitySearch = require('./routes/facilitySearch');
 app.use('/api/pharmacies', facilitySearch.pharmacyRouter);
 app.use('/api/laboratories', facilitySearch.laboratoryRouter);
 
+// ── Facility Requests (v2.2) — public submit + admin manage ─────────────────
+// Used by SignUp.jsx to:
+//   • Search existing pharmacies/labs: /api/facilities/{pharmacies|laboratories}/search
+//   • Submit a new facility registration request: /api/facilities/requests
+// Admin endpoints live under /api/admin/facility-requests (mounted in admin routes).
+const facilitiesRoutes = require('./routes/facilities');
+app.use('/api/facilities', facilitiesRoutes);
+console.log('✅ Facility requests routes mounted at /api/facilities');
+
 // ============================================================================
 // 7. ROOT + HEALTH ENDPOINTS
 // ============================================================================
@@ -304,9 +313,10 @@ app.get('/', (req, res) => {
         migrateChild: 'POST   /api/admin/children/:id/migrate',
         hospitals: 'GET    /api/admin/hospitals',
         pharmacies: 'GET    /api/admin/pharmacies',
-        nearbyPharmacies: 'GET    /api/admin/pharmacies/nearby',
         laboratories: 'GET    /api/admin/laboratories',
-        nearbyLabs: 'GET    /api/admin/laboratories/nearby',
+        facilityRequests: 'GET    /api/admin/facility-requests',
+        approveFacility: 'POST   /api/admin/facility-requests/:id/approve',
+        rejectFacility: 'POST   /api/admin/facility-requests/:id/reject',
         auditLogs: 'GET    /api/admin/audit-logs',
         userActivity: 'GET    /api/admin/audit-logs/user-activity?email='
       },
@@ -446,6 +456,11 @@ app.get('/', (req, res) => {
         patientHistory:  'GET    /api/dental-caries/patient/:identifier (dentist/doctor)',
         getOne:          'GET    /api/dental-caries/:id (dentist/doctor)',
         health:          'GET    /api/dental-caries/health (dentist/doctor/admin)'
+      },
+      facilities: {
+        searchPharmacies:   'GET  /api/facilities/pharmacies/search?q=... (PUBLIC, signup)',
+        searchLaboratories: 'GET  /api/facilities/laboratories/search?q=... (PUBLIC, signup)',
+        submitRequest:      'POST /api/facilities/requests (PUBLIC, signup)'
       }
     }
   });

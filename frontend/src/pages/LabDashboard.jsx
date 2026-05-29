@@ -606,11 +606,16 @@ const LabDashboard = () => {
   // SAMPLE COLLECTION HANDLERS
   // ============================================================================
 
-  /** Search patient by national ID */
+  /** Search patient by national ID (adult) or {parentId}-NN (child) — v2.3 */
   const handleSearchPatient = useCallback(async () => {
     const clean = searchNationalId.trim();
-    if (clean.length !== 11 || !/^\d{11}$/.test(clean)) {
-      setSearchError('الرجاء إدخال رقم وطني صحيح مكون من 11 رقم');
+    // v2.3 (Muath's spec) — Accept two formats:
+    //   ‣ Adult:  11-digit national ID         (e.g. 01222333444)
+    //   ‣ Child:  {parentNationalId}-NN        (e.g. 01222333444-01)
+    const isAdult = /^\d{11}$/.test(clean);
+    const isChild = /^\d{11}-\d{2}$/.test(clean);
+    if (!isAdult && !isChild) {
+      setSearchError('الصيغة غير صحيحة. أدخل 11 رقم للبالغ أو رقم الأب-XX للطفل (مثل: 01222333444-01)');
       return;
     }
     setSearchLoading(true);
@@ -1293,10 +1298,16 @@ const LabDashboard = () => {
                       type="text"
                       dir="ltr"
                       className="lab-search-input"
-                      placeholder="أدخل الرقم الوطني (11 رقم)..."
-                      maxLength={11}
+                      placeholder="11 رقم وطني  أو  xxxxxxxxxxx-NN"
+                      maxLength={14}
                       value={searchNationalId}
-                      onChange={(e) => setSearchNationalId(e.target.value.replace(/\D/g, ''))}
+                      onChange={(e) => {
+                        // v2.3 — Accept digits and dash only (adult 11 digits OR child 11digits-NN)
+                        const cleaned = e.target.value
+                          .replace(/[^0-9-]/g, '')
+                          .slice(0, 14);
+                        setSearchNationalId(cleaned);
+                      }}
                       onKeyDown={(e) => e.key === 'Enter' && handleSearchPatient()}
                     />
                   </div>

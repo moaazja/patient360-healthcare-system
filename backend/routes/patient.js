@@ -45,6 +45,7 @@ const {
   Person, Children, Patient, Visit,
   LabTest, Prescription, Appointment, AuditLog,
   Notification, Review, EmergencyReport, Doctor,
+  Dentist,
   AvailabilitySlot
 } = require('../models');
 
@@ -687,61 +688,225 @@ router.get('/emergency-reports', protect, authorize('patient'), async (req, res)
 });
 
 /**
- * @route   GET /api/patient/doctors?specialization=...
+ * @route   GET /api/patient/doctors
+ * @desc    Browse/search providers (doctors + dentists) for booking, with
+ *          combinable filters. Any combination of filters may be supplied;
+ *          omitted filters are simply not applied.
+ *
+ * Query params (all optional):
+ *   specialization  — exact enum value. Medical specializations are
+ *                     snake_case (e.g. "cardiology"); dental ones are
+ *                     Title Case (e.g. "Orthodontics"). The value's shape
+ *                     decides which collection we search.
+ *   providerType    — 'doctor' | 'dentist'. Explicit override; when absent
+ *                     we infer from the specialization, and when neither is
+ *                     given we return BOTH doctors and dentists.
+ *   governorate     — patient's preferred governorate (matched against the
+ *                     provider's person.governorate).
+ *   minFee, maxFee  — numeric consultationFee bounds (inclusive).
+ *   availableOn     — ISO date (YYYY-MM-DD). Only providers who have at
+ *                     least one free availability_slot on that calendar day
+ *                     are returned.
+ *
+ * Returns a UNIFIED provider shape so the frontend renders one list:
+ *   { _id, providerType, firstName, fatherName, lastName, fullName,
+ *     specialization, consultationFee, currency, governorate, city,
+ *     averageRating, totalReviews, profilePhoto, hospital, ... }
  */
 router.get('/doctors', protect, authorize('patient'), async (req, res) => {
   try {
-    const query = {
-      isAvailable: true,
-      isAcceptingNewPatients: true,
-      verificationStatus: 'verified'
-    };
+    const {
+      specialization,
+      providerType,
+      governorate,
+      minFee,
+      maxFee,
+      availableOn,
+    } = req.query;
 
-    if (req.query.specialization) {
-      query.specialization = req.query.specialization;
+    // ── Dental specializations are Title Case in the locked schema. We use
+    //    this list both to validate and to infer providerType when the
+    //    caller didn't pass one explicitly. ────────────────────────────────
+    const DENTAL_SPECIALIZATIONS = new Set([
+      'General Dentistry', 'Orthodontics', 'Endodontics',
+      'Periodontics', 'Prosthodontics', 'Oral Surgery',
+      'Pediatric Dentistry', 'Cosmetic Dentistry', 'Implantology',
+    ]);
+
+    // Decide which collections to search.
+    //   - explicit providerType wins
+    //   - else infer from specialization shape
+    //   - else search BOTH
+    let searchDoctors = true;
+    let searchDentists = true;
+
+    if (providerType === 'doctor') {
+      searchDentists = false;
+    } else if (providerType === 'dentist') {
+      searchDoctors = false;
+    } else if (specialization) {
+      if (DENTAL_SPECIALIZATIONS.has(specialization)) {
+        searchDoctors = false;
+      } else {
+        searchDentists = false;
+      }
     }
 
-    const doctors = await Doctor.find(query)
-      .populate('personId', 'firstName fatherName lastName gender profilePhoto phoneNumber governorate city')
-      .populate('hospitalId', 'name arabicName governorate city')
-      .sort({ averageRating: -1, totalReviews: -1 })
-      .lean();
+    // ── Fee range filter (shared by both collections) ─────────────────────
+    const feeFilter = {};
+    if (minFee !== undefined && minFee !== '') {
+      const n = Number(minFee);
+      if (!Number.isNaN(n)) feeFilter.$gte = n;
+    }
+    if (maxFee !== undefined && maxFee !== '') {
+      const n = Number(maxFee);
+      if (!Number.isNaN(n)) feeFilter.$lte = n;
+    }
 
-    const doctorsFlat = doctors.map(d => ({
-      ...d,
-      firstName:  d.personId?.firstName,
-      fatherName: d.personId?.fatherName,
-      lastName:   d.personId?.lastName,
-      fullName:   [d.personId?.firstName, d.personId?.fatherName, d.personId?.lastName]
+    // ── availableOn → set of provider IDs free that day ───────────────────
+    // We pre-compute the IDs of providers who have at least one open slot on
+    // the requested calendar day, then constrain the provider query to them.
+    let doctorIdsWithSlots = null;   // null = "no date filter applied"
+    let dentistIdsWithSlots = null;
+
+    if (availableOn) {
+      const day = new Date(availableOn);
+      if (Number.isNaN(day.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'تاريخ التوفر غير صالح',
+        });
+      }
+      const startOfDay = new Date(day); startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(day); endOfDay.setHours(23, 59, 59, 999);
+
+      const slotBase = {
+        date: { $gte: startOfDay, $lte: endOfDay },
+        isAvailable: true,
+        status: 'available',
+        $expr: { $lt: ['$currentBookings', '$maxBookings'] },
+      };
+
+      if (searchDoctors) {
+        const ids = await AvailabilitySlot.find({
+          ...slotBase, doctorId: { $ne: null },
+        }).distinct('doctorId');
+        doctorIdsWithSlots = ids;
+      }
+      if (searchDentists) {
+        const ids = await AvailabilitySlot.find({
+          ...slotBase, dentistId: { $ne: null },
+        }).distinct('dentistId');
+        dentistIdsWithSlots = ids;
+      }
+    }
+
+    // ── Helper: flatten a populated provider into the unified shape ───────
+    const flattenProvider = (p, type) => ({
+      ...p,
+      providerType: type,
+      firstName:  p.personId?.firstName,
+      fatherName: p.personId?.fatherName,
+      lastName:   p.personId?.lastName,
+      fullName:   [p.personId?.firstName, p.personId?.fatherName, p.personId?.lastName]
                     .filter(Boolean).join(' '),
-      gender:       d.personId?.gender,
-      profilePhoto: d.personId?.profilePhoto,
-      phoneNumber:  d.personId?.phoneNumber,
-      governorate:  d.personId?.governorate,
-      city:         d.personId?.city,
-      hospital:     d.hospitalId
-    }));
+      gender:       p.personId?.gender,
+      profilePhoto: p.personId?.profilePhoto,
+      phoneNumber:  p.personId?.phoneNumber,
+      governorate:  p.personId?.governorate,
+      city:         p.personId?.city,
+      hospital:     p.hospitalId,
+    });
+
+    const results = [];
+
+    // ── DOCTORS ───────────────────────────────────────────────────────────
+    if (searchDoctors) {
+      const query = {
+        isAvailable: true,
+        isAcceptingNewPatients: true,
+        verificationStatus: 'verified',
+      };
+      if (specialization && !DENTAL_SPECIALIZATIONS.has(specialization)) {
+        query.specialization = specialization;
+      }
+      if (Object.keys(feeFilter).length) query.consultationFee = feeFilter;
+      if (doctorIdsWithSlots !== null) query._id = { $in: doctorIdsWithSlots };
+
+      let docs = await Doctor.find(query)
+        .populate('personId', 'firstName fatherName lastName gender profilePhoto phoneNumber governorate city')
+        .populate('hospitalId', 'name arabicName governorate city')
+        .sort({ averageRating: -1, totalReviews: -1 })
+        .lean();
+
+      // governorate is on the populated person, so filter post-populate
+      if (governorate) {
+        docs = docs.filter((d) => d.personId?.governorate === governorate);
+      }
+
+      docs.forEach((d) => results.push(flattenProvider(d, 'doctor')));
+    }
+
+    // ── DENTISTS ────────────────────────────────────────────────────────
+    if (searchDentists) {
+      const query = {
+        isAvailable: true,
+        isAcceptingNewPatients: true,
+        verificationStatus: 'verified',
+      };
+      if (specialization && DENTAL_SPECIALIZATIONS.has(specialization)) {
+        query.specialization = specialization;
+      }
+      if (Object.keys(feeFilter).length) query.consultationFee = feeFilter;
+      if (dentistIdsWithSlots !== null) query._id = { $in: dentistIdsWithSlots };
+
+      let dents = await Dentist.find(query)
+        .populate('personId', 'firstName fatherName lastName gender profilePhoto phoneNumber governorate city')
+        .populate('hospitalId', 'name arabicName governorate city')
+        .sort({ averageRating: -1, totalReviews: -1 })
+        .lean();
+
+      if (governorate) {
+        dents = dents.filter((d) => d.personId?.governorate === governorate);
+      }
+
+      dents.forEach((d) => results.push(flattenProvider(d, 'dentist')));
+    }
+
+    // Mixed list: sort by rating then review count so the best-rated
+    // provider surfaces first regardless of type.
+    results.sort((a, b) => {
+      const ra = a.averageRating || 0;
+      const rb = b.averageRating || 0;
+      if (rb !== ra) return rb - ra;
+      return (b.totalReviews || 0) - (a.totalReviews || 0);
+    });
 
     return res.json({
       success: true,
-      count: doctorsFlat.length,
-      doctors: doctorsFlat
+      count: results.length,
+      doctors: results,
     });
   } catch (error) {
     console.error('GET /doctors error:', error);
     return res.status(500).json({
       success: false,
-      message: 'حدث خطأ في جلب قائمة الأطباء'
+      message: 'حدث خطأ في جلب قائمة الأطباء',
     });
   }
 });
 
 /**
  * @route   GET /api/patient/doctors/:doctorId/slots
+ * @desc    Available slots for a provider (doctor OR dentist). The :doctorId
+ *          param is historical — it accepts either a doctor or dentist _id.
+ *          Pass ?providerType=dentist to query dentist slots; defaults to
+ *          doctor for backward compatibility.
  */
 router.get('/doctors/:doctorId/slots', protect, authorize('patient'), async (req, res) => {
   try {
     const { doctorId } = req.params;
+    const { providerType } = req.query;
 
     if (!doctorId.match(/^[0-9a-fA-F]{24}$/)) {
       return res.status(400).json({
@@ -753,8 +918,13 @@ router.get('/doctors/:doctorId/slots', protect, authorize('patient'), async (req
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
+    // Match on the correct owner field depending on provider type.
+    const ownerFilter = providerType === 'dentist'
+      ? { dentistId: doctorId }
+      : { doctorId };
+
     const slots = await AvailabilitySlot.find({
-      doctorId,
+      ...ownerFilter,
       date: { $gte: startOfToday },
       isAvailable: true,
       status: { $in: ['available', 'booked'] }

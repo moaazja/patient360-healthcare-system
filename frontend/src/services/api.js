@@ -140,6 +140,21 @@ export const authAPI = {
     return !!localStorage.getItem('token');
   },
 
+  /**
+   * Change the logged-in user's own password. Requires the current password
+   * for verification plus the new one. POST /auth/change-password (protected).
+   * @param {{ currentPassword: string, newPassword: string }} payload
+   */
+  changePassword: async ({ currentPassword, newPassword }) => {
+    try {
+      const response = await api.post('/auth/change-password', { currentPassword, newPassword });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'تعذّر تغيير كلمة المرور';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
   // ==========================================
   // ✅ FORGET PASSWORD FUNCTIONS
   // ==========================================
@@ -418,6 +433,74 @@ export const authAPI = {
       return Array.isArray(response.data) ? response.data : (response.data?.data || []);
     } catch (error) {
       const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في البحث عن المختبرات';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  // ==========================================
+  // ✅ FACILITY REQUEST SUBMISSION (v2.2 — added in SignUp v3)
+  // ==========================================
+
+  /**
+   * Submit a new facility registration request during signup.
+   * Used by SignUp.jsx when a pharmacist/lab_tech can't find their facility
+   * in the search and chooses to submit a new facility request.
+   *
+   * Public endpoint — no auth required.
+   *
+   * @param {Object} payload
+   * @param {'pharmacy'|'laboratory'} payload.facilityType
+   * @param {string} payload.name
+   * @param {string} [payload.arabicName]
+   * @param {string} [payload.license]
+   * @param {string} [payload.specificType]
+   * @param {string} [payload.phoneNumber]
+   * @param {string} [payload.email]
+   * @param {string} payload.governorate
+   * @param {string} payload.city
+   * @param {string} [payload.district]
+   * @param {string} payload.address
+   * @param {string} payload.submittedByEmail
+   * @param {string} [payload.submittedByName]
+   * @param {string} [payload.submittedByPhone]
+   * @param {string} [payload.linkedDoctorRequestId] - ObjectId of the linked doctor_request
+   * @param {string} [payload.notes]
+   * @returns {Promise<{ success: boolean, message: string, requestNumber: string, _id: string }>}
+   */
+  submitFacilityRequest: async (payload) => {
+    try {
+      const response = await api.post('/facilities/requests', payload);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تقديم طلب المنشأة';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /**
+   * Check the status of a previously submitted FACILITY registration request
+   * (pharmacy or laboratory). Accepts EITHER the FAC- request number (precise)
+   * or the email used at submission (fallback). No auth required — the owner
+   * tracks their request before any account exists.
+   *
+   * @param {{ requestNumber?: string, email?: string }} identifier
+   * @returns {Promise<{
+   *   success: boolean, requestNumber: string, facilityType: 'pharmacy'|'laboratory',
+   *   name: string, arabicName?: string,
+   *   status: 'pending'|'approved'|'rejected',
+   *   rejectionReason?: string, rejectionDetails?: string,
+   *   submittedAt?: string, reviewedAt?: string
+   * }>}
+   */
+  checkFacilityStatus: async ({ requestNumber, email } = {}) => {
+    try {
+      const params = {};
+      if (requestNumber && requestNumber.trim()) params.requestNumber = requestNumber.trim();
+      if (email && email.trim()) params.email = email.trim();
+      const response = await api.get('/facilities/requests/status', { params });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'لم يتم العثور على طلب بهذه البيانات';
       throw { message: errorMessage, ...error.response?.data };
     }
   },
@@ -2229,6 +2312,69 @@ export const adminAPI = {
       return response.data;
     } catch (error) {
       const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحديث المختبر';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  // SECTION 7.5 — FACILITY REQUESTS (v2.2)
+  //   Admin reviews pharmacy/laboratory registration requests submitted
+  //   by users during signup when their facility is not yet in the system.
+  // ════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/admin/facility-requests
+   * @param {{ page?, limit?, search?, facilityType?, status?, governorate? }} params
+   */
+  getFacilityRequests: async (params = {}) => {
+    try {
+      const response = await api.get('/admin/facility-requests', { params });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل طلبات المنشآت';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /**
+   * GET /api/admin/facility-requests/:id
+   */
+  getFacilityRequestById: async (requestId) => {
+    try {
+      const response = await api.get(`/admin/facility-requests/${requestId}`);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل تفاصيل الطلب';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /**
+   * POST /api/admin/facility-requests/:id/approve
+   * Approves the request → creates the actual pharmacy/laboratory.
+   * @param {Object} overrides - optional field overrides before creation
+   *                              { name?, license?, governorate?, city?, address?, ... }
+   */
+  approveFacilityRequest: async (requestId, overrides = {}) => {
+    try {
+      const response = await api.post(`/admin/facility-requests/${requestId}/approve`, overrides);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في قبول الطلب';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /**
+   * POST /api/admin/facility-requests/:id/reject
+   * @param {{ rejectionReason: 'duplicate'|'invalid_info'|'unverifiable'|'incomplete'|'other', rejectionDetails: string }} payload
+   */
+  rejectFacilityRequest: async (requestId, payload) => {
+    try {
+      const response = await api.post(`/admin/facility-requests/${requestId}/reject`, payload);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في رفض الطلب';
       throw { message: errorMessage, ...error.response?.data };
     }
   },

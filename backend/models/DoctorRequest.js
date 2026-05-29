@@ -21,9 +21,11 @@
  *  expects. Do NOT nest these — the UI breaks if you do.
  *
  *  ───────────────────────────────────────────────────────────────────────
- *  ⚠️  SECURITY NOTE on `plainPassword`:
- *  See original comment block — plaintext stored intentionally per team
- *  agreement for admin credential handoff workflow.
+ *  🔐  SECURITY — password handling:
+ *  `password` is stored as a bcrypt hash (hashed in authController at signup),
+ *  never as plaintext. The old `plainPassword` field was removed: applicants
+ *  reuse the same password they chose at signup, so there is no need to store
+ *  or display plaintext anywhere.
  *  ───────────────────────────────────────────────────────────────────────
  *
  *  ═══════════════════════════════════════════════════════════════════════
@@ -309,13 +311,11 @@ const DoctorRequestSchema = new Schema(
     },
 
     // ── Credentials ───────────────────────────────────────────────────────
+    // Stored as a bcrypt hash (hashed in authController at signup). On approval
+    // it is copied into the new Account as-is. Plaintext is NEVER stored.
     password: {
       type: String,
       required: [true, 'كلمة المرور مطلوبة'],
-      select: false,
-    },
-    plainPassword: {
-      type: String,
       select: false,
     },
 

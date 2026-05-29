@@ -1374,6 +1374,59 @@ const Login = () => {
               <div className="signup-link">
                 ليس لديك حساب؟ <Link to="/signup">سجل الآن</Link>
               </div>
+
+              {/* v2.2 — Facility registration entry-point for facility owners */}
+              <Link
+                to="/register-facility"
+                className="register-facility-cta"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  marginTop: 14,
+                  padding: '12px 14px',
+                  border: '1px dashed var(--tm-accent, #4DB6AC)',
+                  borderRadius: 10,
+                  backgroundColor: 'transparent',
+                  color: 'var(--tm-text, #0D3B3E)',
+                  textDecoration: 'none',
+                  fontSize: '0.9rem',
+                  fontWeight: 500,
+                  transition: 'all 0.2s ease',
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--tm-surface, rgba(0, 137, 123, 0.06))';
+                  e.currentTarget.style.borderStyle = 'solid';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                  e.currentTarget.style.borderStyle = 'dashed';
+                }}
+              >
+                <div style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 8,
+                  backgroundColor: 'var(--tm-surface, rgba(0, 137, 123, 0.12))',
+                  color: 'var(--tm-action, #00897B)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}>
+                  <Building2 size={18} strokeWidth={2.2} />
+                </div>
+                <div style={{ flex: 1, lineHeight: 1.5 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 2 }}>
+                    صاحب منشأة طبية؟
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--tm-text-muted, #607D8B)' }}>
+                    سجّل صيدليتك، مختبرك أو مشفاك في المنصة
+                  </div>
+                </div>
+                <ArrowLeft size={16} strokeWidth={2.5} style={{ color: 'var(--tm-action, #00897B)' }} />
+              </Link>
             </div>
           </div>
 

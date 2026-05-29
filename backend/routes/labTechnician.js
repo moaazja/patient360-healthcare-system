@@ -24,6 +24,9 @@ router.get('/dashboard-stats', labTechOnly, labTechnicianController.getMyDashboa
 router.get('/pending-orders', labTechOnly, labTechnicianController.getLabPendingOrders);
 router.get('/today-schedule', labTechOnly, labTechnicianController.getLabTodaySchedule);
 
+// ── Patient lookup (v2.3 — for sample collection / test processing workflow) ─
+router.get('/patient/:nationalId', labTechOnly, labTechnicianController.lookupPatient);
+
 // ── History ─────────────────────────────────────────────────────────────────
 router.get('/tests-performed', labTechOnly, labTechnicianController.getMyTestsPerformed);
 

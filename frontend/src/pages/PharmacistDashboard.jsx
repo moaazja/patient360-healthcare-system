@@ -530,11 +530,16 @@ const PharmacistDashboard = () => {
   // PRESCRIPTION DISPENSING HANDLERS
   // ============================================================================
 
-  /** Step 1 — search patient by national ID */
+  /** Step 1 — search patient by national ID (adult) or {parentId}-NN (child) */
   const handleSearchPatient = useCallback(async () => {
     const clean = searchNationalId.trim();
-    if (clean.length !== 11 || !/^\d{11}$/.test(clean)) {
-      setSearchError('الرجاء إدخال رقم وطني صحيح مكون من 11 رقم');
+    // v2.3 (Muath's spec) — Accept two formats:
+    //   ‣ Adult:  11-digit national ID         (e.g. 01222333444)
+    //   ‣ Child:  {parentNationalId}-NN        (e.g. 01222333444-01)
+    const isAdult = /^\d{11}$/.test(clean);
+    const isChild = /^\d{11}-\d{2}$/.test(clean);
+    if (!isAdult && !isChild) {
+      setSearchError('الصيغة غير صحيحة. أدخل 11 رقم للبالغ أو رقم الأب-XX للطفل (مثل: 01222333444-01)');
       return;
     }
     setSearchLoading(true);
@@ -774,8 +779,11 @@ const PharmacistDashboard = () => {
   const handleSearchOtcPatient = useCallback(async () => {
     const clean = otcPatientId.trim();
     if (!clean) { setOtcPatient(null); return; }
-    if (clean.length !== 11 || !/^\d{11}$/.test(clean)) {
-      openAlert('warning', 'رقم غير صحيح', 'الرقم الوطني يجب أن يكون 11 رقم');
+    // v2.3 — Accept adult (11 digits) or child ({parentId}-NN)
+    const isAdult = /^\d{11}$/.test(clean);
+    const isChild = /^\d{11}-\d{2}$/.test(clean);
+    if (!isAdult && !isChild) {
+      openAlert('warning', 'رقم غير صحيح', 'الصيغة غير صحيحة. أدخل 11 رقم للبالغ أو رقم الأب-XX للطفل');
       return;
     }
     setOtcPatientLoading(true);
@@ -1284,13 +1292,20 @@ const PharmacistDashboard = () => {
                     <Search className="ph-search-icon" />
                     <input
                       type="text"
-                      inputMode="numeric"
-                      maxLength={11}
+                      inputMode="text"
+                      maxLength={14}
                       dir="ltr"
                       className="ph-search-input"
-                      placeholder="11XXXXXXXXX"
+                      placeholder="11 رقم وطني  أو  xxxxxxxxxxx-NN"
                       value={searchNationalId}
-                      onChange={(e) => setSearchNationalId(e.target.value.replace(/\D/g, ''))}
+                      onChange={(e) => {
+                        // v2.3 — Accept digits and dash only.
+                        // Adult: 11 digits  |  Child: 11digits-NN  (max 14 chars)
+                        const cleaned = e.target.value
+                          .replace(/[^0-9-]/g, '')
+                          .slice(0, 14);
+                        setSearchNationalId(cleaned);
+                      }}
                       onKeyDown={(e) => e.key === 'Enter' && handleSearchPatient()}
                     />
                   </div>
@@ -1769,13 +1784,19 @@ const PharmacistDashboard = () => {
                     </label>
                     <input
                       type="text"
-                      inputMode="numeric"
+                      inputMode="text"
                       dir="ltr"
-                      maxLength={11}
+                      maxLength={14}
                       className="ph-input"
-                      placeholder="11XXXXXXXXX"
+                      placeholder="11 رقم وطني  أو  xxxxxxxxxxx-NN"
                       value={otcPatientId}
-                      onChange={(e) => setOtcPatientId(e.target.value.replace(/\D/g, ''))}
+                      onChange={(e) => {
+                        // v2.3 — Accept digits and dash only (adult 11 digits OR child 11digits-NN)
+                        const cleaned = e.target.value
+                          .replace(/[^0-9-]/g, '')
+                          .slice(0, 14);
+                        setOtcPatientId(cleaned);
+                      }}
                     />
                   </div>
                   <button

@@ -1,150 +1,220 @@
-// backend/middleware/uploadDoctorFiles.js
-// Multer configuration for professional registration file uploads
-// Supports: doctor, pharmacist, lab technician
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  Professional Registration File Upload Middleware
+ *  ─────────────────────────────────────────────────────────────────────────
+ *  📁 Path: backend/middleware/uploadDoctorFiles.js
+ *
+ *  Storage layout (v3 — organized by role + national ID):
+ *
+ *    backend/uploads/requests/
+ *    ├── doctor/
+ *    │   └── <nationalId>/
+ *    │       ├── licenseDocument/
+ *    │       │   └── <timestamp>.<ext>
+ *    │       ├── medicalCertificate/
+ *    │       │   └── <timestamp>.<ext>
+ *    │       └── profilePhoto/
+ *    │           └── <timestamp>.<ext>
+ *    ├── dentist/
+ *    │   └── <nationalId>/...
+ *    ├── pharmacist/
+ *    │   └── <nationalId>/
+ *    │       ├── licenseDocument/
+ *    │       ├── degreeDocument/
+ *    │       └── profilePhoto/
+ *    └── lab-technician/
+ *        └── <nationalId>/...
+ *
+ *  Why this layout:
+ *    - The admin opens \uploads\requests\<role>\<nationalId>\ and sees
+ *      exactly which professional type and which person the documents
+ *      belong to. No cross-contamination between doctor, dentist,
+ *      pharmacist, and lab technician applications.
+ *    - Easy to audit one role at a time.
+ *    - Approval flow (future) can rename the parent folder per role.
+ *
+ *  How role + nationalId are detected inside multer's destination callback:
+ *    - role: derived from the request URL — /register-doctor → 'doctor',
+ *      /register-pharmacist → 'pharmacist', etc. The URL is the source of
+ *      truth here because req.body doesn't carry a role field.
+ *    - nationalId: the frontend appends it to FormData BEFORE the file
+ *      fields. Multer parses text fields as they arrive, so by the time
+ *      the destination callback runs, req.body.nationalId is populated.
+ *      Falls back to a timestamp-based temp folder if missing.
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
 
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// ✅ Import file upload manager
-const FileUploadManager = require('../utils/fileUpload');
+const UPLOADS_ROOT = path.join(__dirname, '../uploads/requests');
 
-// Create uploads directory if it doesn't exist
-const uploadDir = path.join(__dirname, '../uploads/doctor-requests/pending');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-  console.log('✅ Created directory:', uploadDir);
+// Ensure the top-level requests folder exists at startup.
+if (!fs.existsSync(UPLOADS_ROOT)) {
+  fs.mkdirSync(UPLOADS_ROOT, { recursive: true });
+  console.log('📁 Created uploads root:', UPLOADS_ROOT);
 }
 
-// ✅ ORGANIZED STORAGE CONFIGURATION
+/**
+ * Sanitize a value before using it as a folder name.
+ * Strips anything that isn't alphanumeric or dash so a malicious / weird
+ * value can't escape the requests directory.
+ */
+function sanitizeFolderName(value) {
+  if (!value || typeof value !== 'string') return '';
+  return value.trim().replace(/[^a-zA-Z0-9-]/g, '');
+}
+
+/**
+ * Derive the professional role from the request URL.
+ * Returns one of: 'doctor' | 'dentist' | 'pharmacist' | 'lab-technician' | 'other'
+ *
+ * We read it from the URL (not req.body) because:
+ *   1. req.body doesn't have a role field — each endpoint knows its own role.
+ *   2. The URL is set by routing, so it can't be spoofed by the client.
+ */
+function detectRoleFromRequest(req) {
+  const url = String(req.originalUrl || req.url || '');
+  if (url.includes('register-doctor'))         return 'doctor';
+  if (url.includes('register-dentist'))        return 'dentist';
+  if (url.includes('register-pharmacist'))     return 'pharmacist';
+  if (url.includes('register-lab-technician')) return 'lab-technician';
+  return 'other';
+}
+
+// ── Storage configuration ────────────────────────────────────────────────────
+
 const storage = multer.diskStorage({
-  destination: async (req, file, cb) => {
+  destination: (req, file, cb) => {
     try {
-      // Generate temporary request ID
-      const tempRequestId = `request_temp_${Date.now()}_${Math.random().toString(36).substring(7)}`;
-      
-      // Generate organized path
-      const fileInfo = FileUploadManager.generateDoctorRequestPath(
-        tempRequestId,
-        file.fieldname,
-        file.originalname
+      // 1) Determine role from the URL.
+      const role = detectRoleFromRequest(req);
+
+      // 2) Pull national ID from the form body (frontend sends it first).
+      const rawNationalId = req.body && req.body.nationalId;
+      const cleanNationalId = sanitizeFolderName(rawNationalId);
+      const folderName = cleanNationalId || `temp_${Date.now()}`;
+
+      // 3) Final directory: requests/<role>/<nationalId>/<fieldname>/
+      const directory = path.join(
+        UPLOADS_ROOT,
+        role,
+        folderName,
+        file.fieldname
       );
-      
-      // Create directory
-      await FileUploadManager.ensureDirectory(fileInfo.directory);
-      
-      // Store for later use
-      if (!req.uploadDirectories) {
-        req.uploadDirectories = {};
+
+      // Create recursively if it doesn't exist.
+      if (!fs.existsSync(directory)) {
+        fs.mkdirSync(directory, { recursive: true });
+        console.log('📁 Created:', directory);
       }
-      req.uploadDirectories[file.fieldname] = fileInfo.directory;
-      req.tempRequestId = tempRequestId;
-      
-      cb(null, fileInfo.directory);
-      
+
+      cb(null, directory);
     } catch (error) {
-      console.error('Error in request storage:', error);
+      console.error('❌ destination error:', error);
       cb(error, null);
     }
   },
-  
+
   filename: (req, file, cb) => {
     try {
-      const tempRequestId = req.tempRequestId || `temp_${Date.now()}`;
-      
-      const fileInfo = FileUploadManager.generateDoctorRequestPath(
-        tempRequestId,
-        file.fieldname,
-        file.originalname
-      );
-      
-      cb(null, fileInfo.filename);
-      
+      // Timestamp-based name to avoid collisions across re-uploads.
+      const ext = path.extname(file.originalname).toLowerCase();
+      const filename = `${Date.now()}${ext}`;
+      cb(null, filename);
     } catch (error) {
-      console.error('Error generating filename:', error);
+      console.error('❌ filename error:', error);
       cb(error, null);
     }
-  }
+  },
 });
 
-// File filter - Accept only PDFs and images
+// ── File filter — accept only images and PDFs ────────────────────────────────
+
 const fileFilter = (req, file, cb) => {
-  console.log('🔎 File received:', file.originalname, 'Field:', file.fieldname);
-  
   const allowedMimes = [
     'image/jpeg',
     'image/jpg',
     'image/png',
     'image/gif',
     'image/webp',
-    'application/pdf'
+    'application/pdf',
   ];
-  
+
+  console.log('🔎 File received:', file.originalname, '| Field:', file.fieldname);
+
   if (allowedMimes.includes(file.mimetype)) {
-    console.log('✅ File type accepted:', file.mimetype);
     cb(null, true);
   } else {
-    console.log('❌ File type rejected:', file.mimetype);
-    cb(new Error(`نوع الملف غير مدعوم: ${file.mimetype}. الرجاء رفع صور (JPG, PNG) أو ملفات PDF فقط.`), false);
+    console.log('❌ Rejected:', file.mimetype);
+    cb(
+      new Error(
+        `نوع الملف غير مدعوم: ${file.mimetype}. الرجاء رفع صور (JPG, PNG) أو ملفات PDF فقط.`
+      ),
+      false
+    );
   }
 };
 
-// Base multer config (shared across all professional types)
+// ── Base multer config (shared) ──────────────────────────────────────────────
+
 const baseUpload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB max per file
-  }
+    fileSize: 10 * 1024 * 1024, // 10 MB per file
+  },
 });
 
-// ── Doctor upload fields (original — unchanged) ─────────────────────────────
+// ── Per-profession upload fields ─────────────────────────────────────────────
+
+// Doctor + Dentist (the dentist signup reuses this exact configuration).
 const uploadFields = baseUpload.fields([
   { name: 'medicalCertificate', maxCount: 1 },
-  { name: 'licenseDocument', maxCount: 1 },
-  { name: 'profilePhoto', maxCount: 1 }
+  { name: 'licenseDocument',    maxCount: 1 },
+  { name: 'profilePhoto',       maxCount: 1 },
 ]);
 
-// ── Pharmacist upload fields (new) ──────────────────────────────────────────
 const uploadPharmacistFields = baseUpload.fields([
   { name: 'licenseDocument', maxCount: 1 },
-  { name: 'degreeDocument', maxCount: 1 },
-  { name: 'profilePhoto', maxCount: 1 }
+  { name: 'degreeDocument',  maxCount: 1 },
+  { name: 'profilePhoto',    maxCount: 1 },
 ]);
 
-// ── Lab technician upload fields (new) ──────────────────────────────────────
 const uploadLabTechFields = baseUpload.fields([
   { name: 'licenseDocument', maxCount: 1 },
-  { name: 'degreeDocument', maxCount: 1 },
-  { name: 'profilePhoto', maxCount: 1 }
+  { name: 'degreeDocument',  maxCount: 1 },
+  { name: 'profilePhoto',    maxCount: 1 },
 ]);
 
-// Error handling middleware
+// ── Error handling middleware ────────────────────────────────────────────────
+
 const handleUploadErrors = (err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     console.error('❌ Multer error:', err);
-    
+
     if (err.code === 'LIMIT_FILE_SIZE') {
       return res.status(400).json({
         success: false,
-        message: 'حجم الملف كبير جداً. الحد الأقصى 10 ميغابايت لكل ملف'
+        message: 'حجم الملف كبير جداً. الحد الأقصى 10 ميغابايت لكل ملف',
       });
     }
-    
+
     return res.status(400).json({
       success: false,
-      message: 'خطأ في رفع الملف: ' + err.message
+      message: 'خطأ في رفع الملف: ' + err.message,
     });
   }
-  
+
   if (err) {
     console.error('❌ File upload error:', err);
     return res.status(400).json({
       success: false,
-      message: err.message || 'خطأ في رفع الملف'
+      message: err.message || 'خطأ في رفع الملف',
     });
   }
-  
+
   next();
 };
 
@@ -152,5 +222,5 @@ module.exports = {
   uploadFields,
   uploadPharmacistFields,
   uploadLabTechFields,
-  handleUploadErrors
+  handleUploadErrors,
 };

@@ -141,6 +141,60 @@ import '../styles/SignUp.css';
 
 
 /* ═══════════════════════════════════════════════════════════════════════
+   CUSTOM SVG ICONS — inline components that match Lucide's stroke style
+   ─────────────────────────────────────────────────────────────────────
+   Lucide React (v0.383) doesn't ship a dedicated tooth icon. The existing
+   `Smile` icon was a poor stand-in for the dentist role — it reads more
+   as "friendly customer service" than "dental professional", and the
+   facial shape doesn't communicate dentistry at first glance.
+
+   ToothIcon below is a hand-tuned SVG that mirrors Lucide's design DNA:
+   – 24×24 viewBox
+   – stroke-only (fill: none)
+   – currentColor so it inherits parent text/icon color in light + dark mode
+   – round line caps & joins for the soft Teal Medica feel
+   – props API compatible with Lucide so it slots in wherever <Smile /> sat
+   ═══════════════════════════════════════════════════════════════════════ */
+
+const ToothIcon = ({
+  size = 24,
+  strokeWidth = 1.8,
+  className = '',
+  ...props
+}) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth={strokeWidth}
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+    aria-hidden="true"
+    focusable="false"
+    {...props}
+  >
+    {/* Anatomically-suggestive tooth outline:
+        – Wider rounded crown on top (the visible part)
+        – Subtle neck (where the gum line would sit)
+        – Two diverging roots ending in soft points
+        The path is a single closed shape so it strokes cleanly without
+        gaps, and the gentle curves keep it visually consistent with
+        Lucide's other organic icons (Heart, Smile, Stethoscope). */}
+    <path d="M12 2.25C8.4 2.25 5.75 4.55 5.75 7.75c0 1.85.5 3.65 1.05 5.45.55 1.8.95 3.55 1.15 5.35.18 1.6.95 2.7 2.05 2.7 1 0 1.55-.9 1.75-2.15.2-1.3.32-2.55.5-3.8.08-.55.55-.65.65 0 .18 1.25.3 2.5.5 3.8.2 1.25.75 2.15 1.75 2.15 1.1 0 1.87-1.1 2.05-2.7.2-1.8.6-3.55 1.15-5.35.55-1.8 1.05-3.6 1.05-5.45 0-3.2-2.65-5.5-6.25-5.5z" />
+    {/* Subtle midline groove — gives the icon a hint of dental detail
+        without cluttering it. Skip rendering at small sizes by relying on
+        stroke-width; at 60px the groove is visible, at 14px it just adds
+        a touch of definition. */}
+    <path d="M12 11.5v3.5" opacity="0.55" />
+  </svg>
+);
+
+
+/* ═══════════════════════════════════════════════════════════════════════
    CONSTANTS — module-scoped (stable references, not recreated on render)
    All enum values mirror patient360_db_final.js exactly.
    ═══════════════════════════════════════════════════════════════════════ */
@@ -915,14 +969,40 @@ const FacilityAutocomplete = ({
                 <p className="facility-empty-sub">
                   لم نجد نتائج لـ "<strong>{query}</strong>"
                 </p>
-                <button
-                  type="button"
-                  className="facility-register-btn"
-                  onClick={handleStartNew}
-                >
-                  <Plus size={16} strokeWidth={2.5} />
-                  <span>{copy.newTitle}</span>
-                </button>
+                <div style={{
+                  marginTop: 12,
+                  padding: '12px 14px',
+                  backgroundColor: 'var(--tm-surface, rgba(0, 137, 123, 0.08))',
+                  borderRadius: 8,
+                  border: '1px solid var(--tm-accent, rgba(77, 182, 172, 0.5))',
+                  fontSize: '0.85rem',
+                  lineHeight: 1.6,
+                  color: 'var(--tm-text, #0D3B3E)',
+                }}>
+                  <strong style={{ display: 'block', marginBottom: 6 }}>
+                    {facilityType === 'pharmacy'
+                      ? '🏥 صيدليتك غير مسجلة بعد؟'
+                      : '🏥 مختبرك غير مسجل بعد؟'}
+                  </strong>
+                  <p style={{ margin: '0 0 8px' }}>
+                    يجب على مالك {facilityType === 'pharmacy' ? 'الصيدلية' : 'المختبر'} تسجيلها أولاً عبر صفحة تسجيل المنشآت، ثم يمكنك اختيارها من هنا.
+                  </p>
+                  <Link
+                    to="/register-facility"
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      color: 'var(--tm-action, #00897B)',
+                      fontWeight: 600,
+                      textDecoration: 'none',
+                      fontSize: '0.85rem',
+                    }}
+                  >
+                    <Plus size={14} strokeWidth={2.5} />
+                    اذهب إلى صفحة تسجيل المنشآت
+                  </Link>
+                </div>
               </div>
             ) : (
               <>
@@ -958,14 +1038,14 @@ const FacilityAutocomplete = ({
                 </div>
                 <div className="facility-dropdown-footer">
                   <span>لم تجد {facilityType === 'pharmacy' ? 'الصيدلية' : 'المختبر'}؟</span>
-                  <button
-                    type="button"
+                  <Link
+                    to="/register-facility"
                     className="facility-register-link"
-                    onClick={handleStartNew}
+                    style={{ textDecoration: 'none' }}
                   >
                     <Plus size={14} strokeWidth={2.5} />
-                    <span>تسجيل {facilityType === 'pharmacy' ? 'صيدلية' : 'مختبر'} جديد</span>
-                  </button>
+                    <span>صفحة تسجيل المنشآت</span>
+                  </Link>
                 </div>
               </>
             )}
@@ -1815,16 +1895,10 @@ const SignUp = () => {
       const years = parseInt(pharmacistFormData.yearsOfExperience, 10);
       if (Number.isNaN(years) || years < 0 || years > 60) e.yearsOfExperience = 'سنوات الخبرة يجب أن تكون بين 0-60';
 
-      // Facility: must have either existing OR a fully-filled new facility
-      const { selectedPharmacy, newPharmacy } = pharmacistFormData;
-      if (!selectedPharmacy && !newPharmacy) {
-        e.pharmacy = 'يجب اختيار الصيدلية أو تسجيل صيدلية جديدة';
-      } else if (newPharmacy) {
-        if (!newPharmacy.name?.trim()) e.pharmacy = 'اسم الصيدلية مطلوب';
-        else if (!newPharmacy.license?.trim()) e.pharmacy = 'رقم ترخيص الصيدلية مطلوب';
-        else if (!newPharmacy.governorate) e.pharmacy = 'محافظة الصيدلية مطلوبة';
-        else if (!newPharmacy.city?.trim()) e.pharmacy = 'مدينة الصيدلية مطلوبة';
-        else if (!newPharmacy.address?.trim()) e.pharmacy = 'عنوان الصيدلية مطلوب';
+      // v2.2 — Facility: must select an EXISTING pharmacy.
+      // Self-registration of new facilities now lives at /register-facility.
+      if (!pharmacistFormData.selectedPharmacy) {
+        e.pharmacy = 'يجب اختيار صيدلية مسجّلة في النظام. إذا كانت غير مسجلة، فعلى مالكها تسجيلها أولاً من صفحة "تسجيل المنشآت".';
       }
     }
 
@@ -1859,16 +1933,10 @@ const SignUp = () => {
       const years = parseInt(labTechFormData.yearsOfExperience, 10);
       if (Number.isNaN(years) || years < 0 || years > 60) e.yearsOfExperience = 'سنوات الخبرة يجب أن تكون بين 0-60';
 
-      // Facility: must have either existing OR a fully-filled new facility
-      const { selectedLaboratory, newLaboratory } = labTechFormData;
-      if (!selectedLaboratory && !newLaboratory) {
-        e.laboratory = 'يجب اختيار المختبر أو تسجيل مختبر جديد';
-      } else if (newLaboratory) {
-        if (!newLaboratory.name?.trim()) e.laboratory = 'اسم المختبر مطلوب';
-        else if (!newLaboratory.license?.trim()) e.laboratory = 'رقم ترخيص المختبر مطلوب';
-        else if (!newLaboratory.governorate) e.laboratory = 'محافظة المختبر مطلوبة';
-        else if (!newLaboratory.city?.trim()) e.laboratory = 'مدينة المختبر مطلوبة';
-        else if (!newLaboratory.address?.trim()) e.laboratory = 'عنوان المختبر مطلوب';
+      // v2.2 — Facility: must select an EXISTING laboratory.
+      // Self-registration of new facilities now lives at /register-facility.
+      if (!labTechFormData.selectedLaboratory) {
+        e.laboratory = 'يجب اختيار مختبر مسجّل في النظام. إذا كان غير مسجل، فعلى مالكه تسجيله أولاً من صفحة "تسجيل المنشآت".';
       }
     }
 
@@ -2159,12 +2227,13 @@ const SignUp = () => {
       formData.append('yearsOfExperience', pharmacistFormData.yearsOfExperience);
       formData.append('employmentType', pharmacistFormData.employmentType);
 
-      // Facility linkage — exactly one of these is set (enforced by validation)
-      if (pharmacistFormData.selectedPharmacy) {
-        formData.append('pharmacyId', pharmacistFormData.selectedPharmacy._id);
-      } else if (pharmacistFormData.newPharmacy) {
-        formData.append('newPharmacyData', JSON.stringify(pharmacistFormData.newPharmacy));
-      }
+      // ─────────────────────────────────────────────────────────────────
+      // v2.2 — Pharmacy MUST be selected from existing pharmacies.
+      // If a pharmacist's pharmacy doesn't exist yet, the owner must
+      // register it first via the /register-facility page.
+      // (Validation enforces selectedPharmacy is present before reaching here.)
+      // ─────────────────────────────────────────────────────────────────
+      formData.append('pharmacyId', pharmacistFormData.selectedPharmacy._id);
 
       // Additional notes
       if (pharmacistFormData.additionalNotes.trim()) {
@@ -2177,6 +2246,7 @@ const SignUp = () => {
       if (pharmacistFormData.profilePhoto)    formData.append('profilePhoto', pharmacistFormData.profilePhoto);
 
       const data = await authAPI.registerPharmacist(formData);
+
       setLoading(false);
 
       setRequestStatus('pending');
@@ -2236,12 +2306,11 @@ const SignUp = () => {
       formData.append('position', labTechFormData.position);
       formData.append('yearsOfExperience', labTechFormData.yearsOfExperience);
 
-      // Facility linkage
-      if (labTechFormData.selectedLaboratory) {
-        formData.append('laboratoryId', labTechFormData.selectedLaboratory._id);
-      } else if (labTechFormData.newLaboratory) {
-        formData.append('newLaboratoryData', JSON.stringify(labTechFormData.newLaboratory));
-      }
+      // ─────────────────────────────────────────────────────────────────
+      // v2.2 — Laboratory MUST be selected from existing laboratories.
+      // Owners register new labs separately via /register-facility.
+      // ─────────────────────────────────────────────────────────────────
+      formData.append('laboratoryId', labTechFormData.selectedLaboratory._id);
 
       if (labTechFormData.additionalNotes.trim()) {
         formData.append('additionalNotes', labTechFormData.additionalNotes.trim());
@@ -2253,6 +2322,7 @@ const SignUp = () => {
       if (labTechFormData.profilePhoto)    formData.append('profilePhoto', labTechFormData.profilePhoto);
 
       const data = await authAPI.registerLabTechnician(formData);
+
       setLoading(false);
 
       setRequestStatus('pending');
@@ -2551,8 +2621,16 @@ const SignUp = () => {
                 <Info size={20} strokeWidth={2} />
                 <div className="info-text">
                   <p>سيتم مراجعة طلبك من قبل وزارة الصحة السورية.</p>
-                  <p>عند قبول الطلب، سيتم إرسال بيانات الدخول إلى بريدك الإلكتروني:</p>
+                  <p>عند قبول الطلب، يمكنك تسجيل الدخول باستخدام بريدك الإلكتروني:</p>
                   <span className="email-highlight">{submittedEmail}</span>
+                </div>
+              </div>
+
+              <div className="status-info-box password-reminder-box">
+                <Shield size={20} strokeWidth={2} />
+                <div className="info-text">
+                  <p><strong>مهم: احتفظ بكلمة المرور التي أدخلتها</strong></p>
+                  <p>ستحتاج نفس كلمة المرور لتسجيل الدخول بعد قبول طلبك. لن يتم عرضها مرة أخرى لأسباب أمنية.</p>
                 </div>
               </div>
 
@@ -3098,7 +3176,7 @@ const SignUp = () => {
                   </li>
                   <li>
                     <Check size={14} strokeWidth={2.5} />
-                    <span>نظام <strong>ECG AI</strong> لأطباء القلب</span>
+                    <span>نماذج <strong>ذكاء اصطناعي</strong> متخصصة (قلب، عظام، وأكثر)</span>
                   </li>
                   <li>
                     <Check size={14} strokeWidth={2.5} />
@@ -3191,7 +3269,7 @@ const SignUp = () => {
                 style={{ animationDelay: '0.4s' }}
               >
                 <div className="sub-role-icon dentist-icon">
-                  <Smile size={28} strokeWidth={1.8} />
+                  <ToothIcon size={28} strokeWidth={1.8} />
                 </div>
                 <h3>طبيب أسنان</h3>
                 <p>تقديم طلب كطبيب أسنان معتمد في جميع تخصصات طب الأسنان</p>
@@ -3218,30 +3296,6 @@ const SignUp = () => {
                   <ArrowLeft size={16} strokeWidth={2.5} />
                 </div>
               </button>
-            </div>
-
-            {/* Check status section */}
-            <div className="check-status-section">
-              <div className="check-status-divider">
-                <span>أو</span>
-              </div>
-              <div className="check-status-card">
-                <h4>لديك طلب تسجيل سابق؟</h4>
-                <p>تحقق من حالة طلبك باستخدام البريد الإلكتروني المسجل</p>
-                <button
-                  type="button"
-                  className="check-status-btn"
-                  onClick={openStatusCheckModal}
-                >
-                  <Search size={16} strokeWidth={2.2} />
-                  <span>تحقق من الحالة</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="login-link">
-              لديك حساب بالفعل؟
-              <Link to="/">تسجيل الدخول</Link>
             </div>
           </div>
         </div>

@@ -33,7 +33,8 @@
  */
 
 const {
-  LabTechnician, Laboratory, LabTest, AuditLog
+  LabTechnician, Laboratory, LabTest, AuditLog,
+  Person, Children, Patient
 } = require('../models');
 
 // ============================================================================
@@ -400,6 +401,119 @@ exports.getLabTodaySchedule = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: error.message || 'حدث خطأ في جلب جدول اليوم'
+    });
+  }
+};
+
+// ============================================================================
+// 6. LOOKUP PATIENT BY NATIONAL ID (v2.3 — Muath's spec)
+// ============================================================================
+
+/**
+ * @route   GET /api/lab-technician/patient/:nationalId
+ * @desc    Find a patient by national ID (adult) or child registration number
+ *          and return their pending/in-progress lab tests so the lab tech
+ *          can pick one to process or collect a sample for.
+ * @access  Private (lab_technician)
+ *
+ * Accepts two formats:
+ *   1. Adult:  11-digit national ID            (e.g. 01222333444)
+ *   2. Child:  {parentNationalId}-NN           (e.g. 01222333444-01)
+ *
+ * Returns tests visible to this lab tech via `buildLabVisibilityFilter`
+ * (tests pre-assigned to their lab + free-floating orders).
+ */
+exports.lookupPatient = async (req, res) => {
+  try {
+    const labTech = await getLabTechFromAccount(req.account);
+
+    const { nationalId } = req.params;
+    const rawInput = String(nationalId || '').trim();
+
+    if (!rawInput) {
+      return res.status(400).json({
+        success: false,
+        message: 'الرقم الوطني مطلوب'
+      });
+    }
+
+    // Validate format — two accepted patterns
+    const isAdultId = /^\d{11}$/.test(rawInput);
+    const isChildId = /^\d{11}-\d{2}$/.test(rawInput);
+
+    if (!isAdultId && !isChildId) {
+      return res.status(400).json({
+        success: false,
+        message: 'الصيغة غير صحيحة. أدخل 11 رقم للبالغ أو رقم الأب-XX للطفل (مثل: 01222333444-01)'
+      });
+    }
+
+    // Identify patient as adult or child and load demographic record
+    let person = null;
+    let child = null;
+    let patientRef = null;
+
+    if (isAdultId) {
+      person = await Person.findOne({ nationalId: rawInput, isDeleted: { $ne: true } }).lean();
+      if (person) patientRef = { patientPersonId: person._id };
+    } else {
+      child = await Children.findOne({ childRegistrationNumber: rawInput, isDeleted: { $ne: true } }).lean();
+      if (child) patientRef = { patientChildId: child._id };
+    }
+
+    if (!patientRef) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على المريض'
+      });
+    }
+
+    // Load medical profile (allergies / chronic diseases — useful context
+    // for the lab tech when collecting samples or processing results)
+    const patientRecord = await Patient.findOne(
+      person ? { personId: person._id } : { childId: child._id }
+    ).lean();
+
+    // Lab tests this patient has — filtered to those visible to this lab tech
+    // (tests assigned to this lab OR free-floating orders), and only active
+    // statuses (not yet completed).
+    const labFilter = buildLabVisibilityFilter(labTech);
+    const labTests = await LabTest.find({
+      $and: [
+        labFilter,
+        patientRef,
+        { status: { $in: ['ordered', 'scheduled', 'sample_collected', 'in_progress'] } }
+      ]
+    })
+      .populate('orderedBy', 'specialization medicalLicenseNumber')
+      .sort({ priority: 1, orderDate: -1 })
+      .lean();
+
+    // Flatten the patient object so the frontend can read the demographic
+    // fields directly (matches the shape PharmacistController.lookupPatient
+    // returns, so LabDashboard can reuse the patient-card components).
+    const identity = person || child;
+    const patientPayload = {
+      ...identity,
+      personId: person?._id,
+      childId: child?._id,
+      isChild: !!child,
+      bloodType: patientRecord?.bloodType,
+      allergies: patientRecord?.allergies || [],
+      chronicDiseases: patientRecord?.chronicDiseases || [],
+      currentMedications: patientRecord?.currentMedications || []
+    };
+
+    return res.json({
+      success: true,
+      patient: patientPayload,
+      labTests
+    });
+  } catch (error) {
+    console.error('Lab tech lookup patient error:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'حدث خطأ في البحث عن المريض'
     });
   }
 };

@@ -177,13 +177,13 @@ const upload = multer({
  * @desc    Search for a patient by national ID (adult) OR childRegistrationNumber (child)
  * @access  Private (Doctor only)
  *
- * Accepts two input formats:
- *   • 11-digit national ID         → CRN-20260424-00001 style won't match;
- *                                     looks up Person first, then any Children
+ * Accepts two input formats (v2.3 — Muath's spec):
+ *   • 11-digit national ID         → looks up Person first, then any Children
  *                                     that already received their nationalId
  *                                     (migration status: ready / migrated).
- *   • CRN-YYYYMMDD-XXXXX           → looks up Children directly by
+ *   • {parentNationalId}-NN        → looks up Children directly by
  *                                     childRegistrationNumber.
+ *                                     Example: 01222333444-01, 01222333444-02
  *
  * Response shape is identical for both paths so the frontend's
  * `selectPatient(patient)` flow doesn't need to branch — `childRegistrationNumber`
@@ -205,12 +205,14 @@ router.get('/search/:nationalId', protect, restrictTo('doctor', 'dentist'), asyn
     }
 
     const isAdultId  = /^\d{11}$/.test(rawInput);
-    const isChildCRN = /^CRN-\d{8}-\d{5}$/.test(rawInput);
+    // v2.3 (Muath's spec) — Child format: {parentNationalId}-NN (2-digit padded)
+    // Examples: 01222333444-01, 01222333444-02
+    const isChildId  = /^\d{11}-\d{2}$/.test(rawInput);
 
-    if (!isAdultId && !isChildCRN) {
+    if (!isAdultId && !isChildId) {
       return res.status(400).json({
         success: false,
-        message: 'الصيغة غير صحيحة. أدخل 11 رقم وطني أو CRN-YYYYMMDD-XXXXX',
+        message: 'الصيغة غير صحيحة. أدخل 11 رقم للبالغ أو رقم الأب-XX للطفل (مثل: 01222333444-01)',
       });
     }
 
@@ -296,9 +298,9 @@ router.get('/search/:nationalId', protect, restrictTo('doctor', 'dentist'), asyn
     };
 
     // ────────────────────────────────────────────────────────────────────────
-    // BRANCH 1 — CRN input: look up Children directly
+    // BRANCH 1 — Child ID input ({parentNationalId}-NN): look up Children directly
     // ────────────────────────────────────────────────────────────────────────
-    if (isChildCRN) {
+    if (isChildId) {
       const child = await Children.findOne({
         childRegistrationNumber: rawInput,
         isDeleted: { $ne: true },
@@ -317,7 +319,7 @@ router.get('/search/:nationalId', protect, restrictTo('doctor', 'dentist'), asyn
       console.log(
         '📤 Patient search response (child) keys:',
         Object.keys(patientData).length,
-        '| CRN:', patientData.childRegistrationNumber,
+        '| Child ID:', patientData.childRegistrationNumber,
       );
       return res.json({ success: true, patient: patientData });
     }
@@ -445,51 +447,12 @@ router.get('/search/:nationalId', protect, restrictTo('doctor', 'dentist'), asyn
 
 
 /**
- * @route   GET /api/doctor/patients
- * @desc    Get all patients
- * @access  Private (Doctor only)
+ * NOTE — GET /api/doctor/patients was removed (May 27, 2026).
+ *   The previous endpoint returned every patient in the system to any
+ *   authenticated doctor or dentist, which violates the minimum-necessary-
+ *   access principle for medical records (ISO 18308:2011, HIPAA-equivalent).
+ *   Patient lookup is now strictly identifier-based via /api/doctor/search/:nationalId.
  */
-router.get('/patients', protect, restrictTo('doctor', 'dentist'), async (req, res) => {
-  try {
-    const patients = await Patient.find().populate('personId').lean();
-
-    const patientData = await Promise.all(
-      patients.map(async (patient) => {
-        const account = await Account.findOne({ personId: patient.personId._id })
-          .select('email isActive createdAt')
-          .lean();
-
-        return {
-          id: patient._id,
-          nationalId: patient.personId.nationalId,
-          childId: patient.personId.childId,
-          firstName: patient.personId.firstName,
-          lastName: patient.personId.lastName,
-          dateOfBirth: patient.personId.dateOfBirth,
-          gender: patient.personId.gender,
-          phoneNumber: patient.personId.phoneNumber,
-          email: account?.email,
-          isActive: account?.isActive,
-          registrationDate: account?.createdAt,
-          bloodType: patient.bloodType,
-          height: patient.height,
-          weight: patient.weight,
-          doctorOpinion: patient.doctorOpinion,
-          prescribedMedications: patient.prescribedMedications,
-          lastUpdated: patient.updatedAt
-        };
-      })
-    );
-
-    return res.json({ success: true, count: patientData.length, patients: patientData });
-  } catch (error) {
-    console.error('Get patients error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'حدث خطأ في جلب قائمة المرضى'
-    });
-  }
-});
 
 
 /**

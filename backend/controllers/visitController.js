@@ -66,6 +66,15 @@ async function resolvePatientRef(body) {
 
   // Lookup by national ID — could be adult OR child (with assigned nationalId)
   if (patientNationalId) {
+    // Safety net: if a CRN slipped into patientNationalId, resolve it as a CRN
+    // rather than searching national-ID fields (which won't match).
+    if (/^CRN-/i.test(String(patientNationalId).trim())) {
+      const crnChild = await Children.findOne({
+        childRegistrationNumber: String(patientNationalId).trim(),
+      }).lean();
+      return crnChild ? { patientChildId: crnChild._id } : null;
+    }
+
     const adult = await Person.findOne({ nationalId: patientNationalId }).lean();
     if (adult) return { patientPersonId: adult._id };
 
@@ -137,6 +146,7 @@ exports.createVisit = async (req, res) => {
       diagnosis,
       doctorNotes,
       followUpDate,
+      followUpTime,
       followUpNotes,
       visitPhotoUrl,
       appointmentId
@@ -189,17 +199,36 @@ exports.createVisit = async (req, res) => {
     }
 
     // ── 3. RESOLVE PATIENT REFERENCE ─────────────────────────────────────
-    // The patient ID can arrive three ways:
+    // The patient ID can arrive several ways:
     //   • req.params.nationalId  — /patient/:nationalId/visit (doctor dashboard)
+    //       BUT for children this param actually carries a CRN
+    //       (e.g. CRN-20260514-00001), NOT an 11-digit national ID.
     //   • req.body.patientNationalId — admin-created visits
     //   • req.body.childRegistrationNumber — pediatric visits
-    // Merge into the shape resolvePatientRef expects.
+    //
+    // We inspect the incoming identifier: if it looks like a CRN we route it
+    // to childRegistrationNumber so resolvePatientRef looks it up in the
+    // Children collection by the right field. Otherwise it's treated as a
+    // national ID. This is why adult visits worked but child visits failed:
+    // a CRN was being searched as Children.nationalId (which is empty for a
+    // child who hasn't received their national ID yet).
+    const rawIdentifier =
+      req.body.patientNationalId
+      || req.body.nationalId
+      || req.params.nationalId
+      || req.params.identifier
+      || '';
+
+    const looksLikeCRN = /^CRN-/i.test(String(rawIdentifier).trim());
+
     const resolverInput = {
       ...req.body,
-      patientNationalId: req.body.patientNationalId
-        || req.body.nationalId
-        || req.params.nationalId
-        || req.params.identifier
+      // Preserve any CRN the client already sent; otherwise derive from param.
+      childRegistrationNumber:
+        req.body.childRegistrationNumber
+        || (looksLikeCRN ? String(rawIdentifier).trim() : undefined),
+      // Only treat the identifier as a national ID when it's NOT a CRN.
+      patientNationalId: looksLikeCRN ? undefined : rawIdentifier,
     };
 
     const patientRef = await resolvePatientRef(resolverInput);
@@ -212,14 +241,21 @@ exports.createVisit = async (req, res) => {
     }
     console.log('✅ Patient resolved:', patientRef);
 
-    // ── 3.5 VALIDATE FOLLOW-UP DATE + CONFLICT CHECK ─────────────────────
-    // If the doctor set a follow-up date, we'll auto-generate an appointment
-    // for it (so it shows on the calendar). Before creating the visit, make
-    // sure that date/time doesn't collide with an existing appointment on
-    // this provider's schedule — reject the whole save if it does so we
-    // don't end up with a stranded visit and no follow-up.
+    // ── 3.5 VALIDATE FOLLOW-UP DATE + TIME + CONFLICT CHECK ──────────────
+    // If the doctor set a follow-up date (and now optionally a time), we'll
+    // auto-generate an appointment for it (so it shows on the calendar).
+    // Before creating the visit, make sure that date/time doesn't collide
+    // with an existing appointment on this provider's schedule — reject
+    // the whole save if it does so we don't end up with a stranded visit
+    // and no follow-up.
+    //
+    // The frontend now sends followUpTime as well, so each doctor can pick
+    // when in the day the follow-up should happen instead of every follow-up
+    // landing at 09:00 (which caused calendar pile-ups). The default below
+    // is kept as a safety net for backward compatibility with older clients.
     const FOLLOWUP_DEFAULT_TIME = '09:00';
     let followUpAppointmentDate = null;
+    let resolvedFollowUpTime = null;
 
     if (followUpDate) {
       const followUpObj = new Date(followUpDate);
@@ -230,7 +266,8 @@ exports.createVisit = async (req, res) => {
         });
       }
 
-      // Normalize to start of day — we always pair with FOLLOWUP_DEFAULT_TIME
+      // Normalize to start of day — the actual time-of-day is carried
+      // separately on appointmentTime (HH:MM string).
       followUpObj.setHours(0, 0, 0, 0);
 
       const today = new Date();
@@ -242,10 +279,50 @@ exports.createVisit = async (req, res) => {
         });
       }
 
+      // ── Resolve & validate follow-up time ─────────────────────────────
+      // Accept what the frontend sent, falling back to 09:00 if missing.
+      // Format must be strict HH:MM (24-hour) to match the Appointment
+      // schema's appointmentTime validator.
+      resolvedFollowUpTime = (followUpTime && typeof followUpTime === 'string')
+        ? followUpTime.trim()
+        : FOLLOWUP_DEFAULT_TIME;
+
+      if (!/^\d{2}:\d{2}$/.test(resolvedFollowUpTime)) {
+        return res.status(400).json({
+          success: false,
+          message: 'وقت المتابعة يجب أن يكون بصيغة HH:MM'
+        });
+      }
+
+      // Numeric sanity check — block "25:99" type values that match the
+      // regex but aren't real times.
+      const [hh, mm] = resolvedFollowUpTime.split(':').map(Number);
+      if (hh < 0 || hh > 23 || mm < 0 || mm > 59) {
+        return res.status(400).json({
+          success: false,
+          message: 'وقت المتابعة غير صالح'
+        });
+      }
+
+      // If the follow-up is for today, the time must be in the future.
+      // (followUpObj === today's midnight means same-day.)
+      if (followUpObj.getTime() === today.getTime()) {
+        const now = new Date();
+        const followUpDateTime = new Date(followUpObj);
+        followUpDateTime.setHours(hh, mm, 0, 0);
+        if (followUpDateTime <= now) {
+          return res.status(400).json({
+            success: false,
+            message: 'وقت المتابعة لا يمكن أن يكون في الماضي'
+          });
+        }
+      }
+
+      // ── Conflict check on the same provider's schedule ────────────────
       const Appointment = require('../models/Appointment');
       const conflictQuery = {
         appointmentDate: followUpObj,
-        appointmentTime: FOLLOWUP_DEFAULT_TIME,
+        appointmentTime: resolvedFollowUpTime,
         status: { $in: ['scheduled', 'confirmed', 'checked_in', 'in_progress'] }
       };
       if (resolvedDoctorId) conflictQuery.doctorId = resolvedDoctorId;
@@ -256,7 +333,7 @@ exports.createVisit = async (req, res) => {
         const arDate = followUpObj.toLocaleDateString('ar-EG');
         return res.status(409).json({
           success: false,
-          message: `هذا التاريخ (${arDate} عند الساعة ${FOLLOWUP_DEFAULT_TIME}) يتعارض مع موعد آخر في جدولك. الرجاء اختيار تاريخ آخر.`
+          message: `هذا التاريخ (${arDate} عند الساعة ${resolvedFollowUpTime}) يتعارض مع موعد آخر في جدولك. الرجاء اختيار وقت آخر.`
         });
       }
 
@@ -355,10 +432,17 @@ exports.createVisit = async (req, res) => {
     }
 
     // ── 4.6 CREATE FOLLOW-UP APPOINTMENT (if followUpDate was set) ───────
-    // Conflict was already checked above, so this should succeed. On the
-    // off-chance it fails, log the error and continue — the doctor will
-    // see the visit saved but no calendar entry and can retry.
+    // Conflict was already checked above, so this should succeed. If it
+    // fails, we track the error so the response can warn the doctor —
+    // previously the failure was silently swallowed and the doctor would
+    // see "saved successfully" with no calendar entry, with no way to know
+    // the follow-up was lost.
+    //
+    // Common failure mode (now fixed at the model level):
+    //   Appointment pre-validate hook rejecting dentist follow-ups
+    //   because the old check required doctorId for `follow_up` type.
     let followUpAppointment = null;
+    let followUpError = null;
     if (followUpAppointmentDate) {
       try {
         const Appointment = require('../models/Appointment');
@@ -368,7 +452,7 @@ exports.createVisit = async (req, res) => {
           doctorId: resolvedDoctorId || undefined,
           dentistId: resolvedDentistId || undefined,
           appointmentDate: followUpAppointmentDate,
-          appointmentTime: FOLLOWUP_DEFAULT_TIME,
+          appointmentTime: resolvedFollowUpTime || FOLLOWUP_DEFAULT_TIME,
           estimatedDuration: 30,
           reasonForVisit: (followUpNotes && followUpNotes.trim())
             || `موعد متابعة — ${diagnosis?.trim() || chiefComplaint.trim()}`,
@@ -380,6 +464,11 @@ exports.createVisit = async (req, res) => {
         console.log('✅ Follow-up appointment created:', followUpAppointment._id);
       } catch (apptError) {
         console.error('⚠️  Follow-up appointment creation failed:', apptError.message);
+        // Track the error so the response can surface it. We still don't
+        // throw, because the visit itself was saved and we want the doctor
+        // to see that success — but they need to know the follow-up didn't
+        // make it so they can rebook.
+        followUpError = apptError.message || 'فشل إنشاء موعد المتابعة';
       }
     }
 
@@ -419,6 +508,7 @@ exports.createVisit = async (req, res) => {
       // ── Notification 2: Follow-up appointment scheduled ─────────────────
       if (followUpAppointment) {
         const followUpDateAr = followUpAppointmentDate.toLocaleDateString('ar-EG');
+        const followUpTimeStr = resolvedFollowUpTime || FOLLOWUP_DEFAULT_TIME;
         createNotification({
           recipientPersonId: patientRef.patientPersonId,
           recipientChildId:  patientRef.patientChildId,
@@ -426,7 +516,7 @@ exports.createVisit = async (req, res) => {
           notificationType: 'appointment_confirmed',
           title:       'موعد متابعة',
           titleArabic: 'موعد متابعة',
-          body: `${doctorName} حدد لك موعد متابعة بتاريخ ${followUpDateAr} الساعة ${FOLLOWUP_DEFAULT_TIME}`,
+          body: `${doctorName} حدد لك موعد متابعة بتاريخ ${followUpDateAr} الساعة ${followUpTimeStr}`,
           channels: ['push', 'in_app'],
           relatedType: 'appointment',
           relatedId:   followUpAppointment._id,
@@ -465,7 +555,11 @@ exports.createVisit = async (req, res) => {
             appointmentDate: followUpAppointment.appointmentDate,
             appointmentTime: followUpAppointment.appointmentTime
           }
-        : null
+        : null,
+      // Surface follow-up creation failures so the frontend can warn the
+      // doctor. When followUpDate was set but followUpAppointment is null,
+      // this field tells the doctor why it didn't make it onto the calendar.
+      followUpError: followUpError || undefined
     });
 
   } catch (error) {

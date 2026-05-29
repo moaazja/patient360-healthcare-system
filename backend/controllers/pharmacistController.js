@@ -668,17 +668,31 @@ exports.markNotificationRead = async (req, res) => {
 exports.lookupPatient = async (req, res) => {
   try {
     const { nationalId } = req.params;
+    const rawInput = String(nationalId || '').trim();
 
-    // Identify as adult (11-digit national ID) vs child (CRN-...)
+    // v2.3 (Muath's spec) — Two formats supported:
+    //   1. Adult:  11-digit national ID  (e.g. 01222333444)
+    //   2. Child:  {parentNationalId}-NN (e.g. 01222333444-01)
+    const isAdultId = /^\d{11}$/.test(rawInput);
+    const isChildId = /^\d{11}-\d{2}$/.test(rawInput);
+
+    if (!isAdultId && !isChildId) {
+      return res.status(400).json({
+        success: false,
+        message: 'الصيغة غير صحيحة. أدخل 11 رقم للبالغ أو رقم الأب-XX للطفل (مثل: 01222333444-01)'
+      });
+    }
+
+    // Identify as adult vs child and look up the corresponding record
     let person = null;
     let child = null;
     let patientRef = null;
 
-    if (/^\d{11}$/.test(nationalId)) {
-      person = await Person.findOne({ nationalId }).lean();
+    if (isAdultId) {
+      person = await Person.findOne({ nationalId: rawInput }).lean();
       if (person) patientRef = { patientPersonId: person._id };
-    } else if (nationalId.startsWith('CRN-')) {
-      child = await Children.findOne({ childRegistrationNumber: nationalId }).lean();
+    } else if (isChildId) {
+      child = await Children.findOne({ childRegistrationNumber: rawInput }).lean();
       if (child) patientRef = { patientChildId: child._id };
     }
 

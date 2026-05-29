@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
 import SignUp from './pages/SignUp';
+import RegisterFacility from './pages/RegisterFacility';
 import PatientDashboard from './pages/PatientDashboard';
 import DoctorDashboard from './pages/DoctorDashboard';
 import AdminDashboard from './pages/AdminDashboard';
@@ -40,6 +41,7 @@ function App() {
           {/* Public Routes — صفحات عامة */}
           <Route path="/" element={<Login />} />
           <Route path="/signup" element={<SignUp />} />
+          <Route path="/register-facility" element={<RegisterFacility />} />
 
           {/* Protected Routes — صفحات محمية حسب الدور */}
           <Route

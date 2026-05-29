@@ -55,7 +55,11 @@ router.post('/:visitId/attachments',
         mimeType: req.file.mimetype,
         fileSize: req.file.size,
         filePath: req.file.path,
-        fileUrl: `/uploads/visits/${req.file.filename}`,
+        // URL includes the per-patient subfolder resolved by the upload
+        // middleware (nationalId or CRN), falling back to the raw filename.
+        fileUrl: req.uploadPatientFolder
+          ? `/uploads/visits/${req.uploadPatientFolder}/${req.file.filename}`
+          : `/uploads/visits/${req.file.filename}`,
         description: description || '',
         uploadedBy: req.user._id,
         uploadedAt: new Date()

@@ -119,11 +119,20 @@ const LabTestSchema = new Schema(
       sparse: true,
     },
 
-    // ── Ordering doctor + originating visit ───────────────────────────────
+    // ── Ordering provider + originating visit ─────────────────────────────
+    // orderedBy can reference either a Doctor or a Dentist. The companion
+    // field orderedByModel tells Mongoose which collection to populate from
+    // (dynamic refPath). Defaults to 'Doctor' for backward compatibility with
+    // existing records created before dentists could order tests.
     orderedBy: {
       type: Schema.Types.ObjectId,
-      ref: 'Doctor',
       required: [true, 'الطبيب الطالب مطلوب'],
+      refPath: 'orderedByModel',
+    },
+    orderedByModel: {
+      type: String,
+      enum: ['Doctor', 'Dentist'],
+      default: 'Doctor',
     },
     visitId: { type: Schema.Types.ObjectId, ref: 'Visit', sparse: true },
 

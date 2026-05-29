@@ -53,7 +53,7 @@
 const {
   Account, Person, Children, Patient, Doctor, Dentist, Pharmacist, LabTechnician,
   Hospital, Pharmacy, Laboratory,
-  Visit, AuditLog, DoctorRequest
+  Visit, AuditLog, DoctorRequest, EmergencyReport
 } = require('../models');
 
 // Slot controller — used by approveDoctorRequest to auto-generate the
@@ -126,7 +126,11 @@ exports.getStatistics = async (req, res) => {
       Account.countDocuments(),
       Account.countDocuments({ isActive: true }),
       Doctor.countDocuments(),
-      Doctor.countDocuments({ isAvailable: true }),
+      // "Active" = the doctor's login account is active (matches the status
+      // shown in the doctors table, which reads account.isActive). The old
+      // count used Doctor.isAvailable (a booking flag), which is unrelated to
+      // account status and always returned 0 here.
+      Account.countDocuments({ roles: 'doctor', isActive: true }),
       Dentist.countDocuments(),
       Pharmacist.countDocuments(),
       LabTechnician.countDocuments(),
@@ -191,6 +195,28 @@ exports.getStatistics = async (req, res) => {
       count: m.count,
     }));
 
+    // ── Doctor distribution by specialization (for the home chart) ────────
+    const specAgg = await Doctor.aggregate([
+      { $group: { _id: '$specialization', count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+    ]);
+    const doctorsBySpecialization = specAgg
+      .filter((s) => s._id)
+      .map((s) => ({ specialization: s._id, count: s.count }));
+
+    // ── Recent activity (latest audit-log events for the home feed) ───────
+    const recentLogs = await AuditLog.find({})
+      .sort({ createdAt: -1 })
+      .limit(8)
+      .lean();
+    const recentActivity = recentLogs.map((log) => ({
+      action: log.action,
+      description: log.description || log.action,
+      userEmail: log.userEmail,
+      success: log.success,
+      timestamp: log.createdAt,
+    }));
+
     return res.json({
       success: true,
       statistics: {
@@ -242,6 +268,22 @@ exports.getStatistics = async (req, res) => {
 
         // ── Trends ─────────────────────────────────────────────────────
         visitsByMonth,
+
+        // ── Home dashboard extras ──────────────────────────────────────
+        doctorsBySpecialization,
+        recentActivity,
+
+        // ── Aliases — match the field names AdminDashboard.jsx reads ────
+        // The UI uses slightly different keys than the canonical ones above.
+        // Providing both avoids touching dozens of call sites and keeps the
+        // canonical names available for other consumers.
+        inactiveDoctors: totalDoctors - activeDoctors,
+        activePatients: totalAdultPatients + totalChildPatients,
+        pendingRequests:
+          pendingDoctorRequests + pendingPharmacistRequests + pendingLabTechRequests + pendingDentistRequests,
+        visitsThisMonth: monthVisits,
+        criticalAlerts: criticalEmergencies,
+        activeEmergencies: criticalEmergencies,
 
         // ── Computed at ────────────────────────────────────────────────
         computedAt: new Date(),
@@ -1704,126 +1746,149 @@ exports.getDoctorRequestById = async (req, res) => {
 // ============================================================================
 
 /**
- * Helper: build Laboratory payload from newLaboratoryData in a DoctorRequest.
- * The request carries a loosely-typed Mixed object; here we validate the
- * required schema fields and normalise into the strict Laboratory shape.
+ * Helper: generate a unique placeholder registration number for an
+ * auto-created facility. Format: `<PREFIX>-<timestamp>-<random>`.
+ * e.g. PHARM-LZK4F1-A3F2  /  LAB-LZK4F1-XQ7B
+ */
+function generateRegistrationNumber(prefix) {
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const random = Math.random().toString(36).slice(2, 6).toUpperCase();
+  return `${prefix}-${timestamp}-${random}`;
+}
+
+/**
+ * Helper: build Laboratory payload from newLaboratoryData (or laboratoryName)
+ * in a DoctorRequest.
  *
- * Throws a user-facing Arabic error on missing required fields.
+ * v2.1 changes (2026-05-27):
+ *   ✗ Removed GeoJSON `location` field (GPS no longer required by schema)
+ *   ✗ Removed GOVERNORATE_CENTROIDS placeholder coordinates
+ *   🐛 registrationNumber is now auto-generated (was reusing the license
+ *      value, which collided with the unique index on labLicense).
+ *   ✓ Accepts multiple input shapes for `newData`:
+ *       (a) { name, license, governorate, city, address }  — legacy form
+ *       (b) { name }                                       — name-only object
+ *       (c) 'Laboratory Name String'                       — bare string
+ *     Missing address fields are taken from the applicant's own personal info.
+ *
+ * Throws a user-facing Arabic error if the laboratory name is missing.
  */
 function buildLaboratoryPayload(newData, applicant) {
-  if (!newData || typeof newData !== 'object') {
+  // ── Normalize input ────────────────────────────────────────────────────
+  let name;
+  let providedLicense;
+  let providedGovernorate;
+  let providedCity;
+  let providedAddress;
+
+  if (typeof newData === 'string') {
+    name = newData.trim();
+  } else if (newData && typeof newData === 'object') {
+    name                = (newData.name || '').trim();
+    providedLicense     = (newData.license || newData.labLicense || '').trim();
+    providedGovernorate = newData.governorate;
+    providedCity        = (newData.city || '').trim();
+    providedAddress     = (newData.address || '').trim();
+  } else {
     throw new Error('بيانات المختبر الجديد غير صالحة');
   }
 
-  const name = (newData.name || '').trim();
-  const license = (newData.license || newData.registrationNumber || '').trim();
-  const governorate = newData.governorate;
-  const city = (newData.city || '').trim();
-  const address = (newData.address || '').trim();
-
   if (!name) throw new Error('اسم المختبر الجديد مطلوب');
-  if (!license) throw new Error('رقم ترخيص المختبر الجديد مطلوب');
+
+  // ── Fall back to applicant info for missing address fields ─────────────
+  const governorate = providedGovernorate || applicant.governorate;
+  const city        = providedCity        || (applicant.city || '').trim();
+  const address     = providedAddress     || (applicant.address || '').trim();
+  const phoneNumber = applicant.phoneNumber || '0000000000';
+
   if (!governorate) throw new Error('محافظة المختبر الجديد مطلوبة');
-  if (!city) throw new Error('مدينة المختبر الجديد مطلوبة');
-  if (!address) throw new Error('عنوان المختبر الجديد مطلوب');
+  if (!city)        throw new Error('مدينة المختبر الجديد مطلوبة');
+  if (!address)     throw new Error('عنوان المختبر الجديد مطلوب');
 
-  // Placeholder GeoJSON at the center of the chosen governorate — Laboratory
-  // schema validator requires coordinates within Syria. Admin can refine
-  // the exact coordinates later via the Laboratories admin panel.
-  const GOVERNORATE_CENTROIDS = {
-    damascus:     [36.2765, 33.5138],
-    rif_dimashq:  [36.3090, 33.5238],
-    aleppo:       [37.1613, 36.2021],
-    homs:         [36.7156, 34.7324],
-    hama:         [36.7443, 35.1318],
-    latakia:      [35.7833, 35.5167],
-    tartus:       [35.8867, 34.8890],
-    idlib:        [36.6335, 35.9306],
-    deir_ez_zor:  [40.1500, 35.3333],
-    raqqa:        [39.0167, 35.9500],
-    hasakah:      [40.7417, 36.4833],
-    daraa:        [36.1062, 32.6189],
-    as_suwayda:   [36.5697, 32.7095],
-    quneitra:     [35.8242, 33.1258]
-  };
-  const coords = GOVERNORATE_CENTROIDS[governorate] || [36.2765, 33.5138];
-
+  // ── Build payload (no GeoJSON in v2.1) ─────────────────────────────────
   return {
     name,
-    arabicName: name,
-    registrationNumber: license.toUpperCase(),
-    labLicense: license.toUpperCase(),
+    registrationNumber: generateRegistrationNumber('LAB'),
+    ...(providedLicense ? { labLicense: providedLicense.toUpperCase() } : {}),
     labType: 'independent',
-    phoneNumber: applicant.phoneNumber || '0000000000',
+    phoneNumber,
     governorate,
     city,
     address,
-    location: {
-      type: 'Point',
-      coordinates: coords
-    },
     isActive: true,
-    isAcceptingTests: true
+    isAcceptingTests: true,
   };
 }
 
 /**
- * Helper: build Pharmacy payload from newPharmacyData in a DoctorRequest.
+ * Helper: build Pharmacy payload from newPharmacyData (or pharmacyName)
+ * in a DoctorRequest.
+ *
+ * v2.1 changes (2026-05-27):
+ *   ✗ Removed GeoJSON `location` field
+ *   ✗ Removed GOVERNORATE_CENTROIDS placeholder coordinates
+ *   🐛 registrationNumber is now auto-generated (was reusing the license
+ *      value for BOTH registrationNumber and pharmacyLicense, which carry
+ *      separate unique indexes — guaranteed collision risk).
+ *   🐛 Dropped `arabicName: name` fallback (English in an Arabic field).
+ *      Admin can edit arabicName via the admin panel.
+ *
+ * Same input shape flexibility as buildLaboratoryPayload.
  */
 function buildPharmacyPayload(newData, applicant) {
-  if (!newData || typeof newData !== 'object') {
+  // ── Normalize input ────────────────────────────────────────────────────
+  let name;
+  let providedLicense;
+  let providedGovernorate;
+  let providedCity;
+  let providedAddress;
+
+  if (typeof newData === 'string') {
+    name = newData.trim();
+  } else if (newData && typeof newData === 'object') {
+    name                = (newData.name || '').trim();
+    providedLicense     = (newData.license || newData.pharmacyLicense || '').trim();
+    providedGovernorate = newData.governorate;
+    providedCity        = (newData.city || '').trim();
+    providedAddress     = (newData.address || '').trim();
+  } else {
     throw new Error('بيانات الصيدلية الجديدة غير صالحة');
   }
 
-  const name = (newData.name || '').trim();
-  const license = (newData.license || newData.pharmacyLicense || '').trim();
-  const governorate = newData.governorate;
-  const city = (newData.city || '').trim();
-  const address = (newData.address || '').trim();
-
   if (!name) throw new Error('اسم الصيدلية الجديدة مطلوب');
-  if (!license) throw new Error('رقم ترخيص الصيدلية الجديدة مطلوب');
+
+  // ── Fall back to applicant info for missing address fields ─────────────
+  const governorate = providedGovernorate || applicant.governorate;
+  const city        = providedCity        || (applicant.city || '').trim();
+  const address     = providedAddress     || (applicant.address || '').trim();
+  const phoneNumber = applicant.phoneNumber || '0000000000';
+
   if (!governorate) throw new Error('محافظة الصيدلية الجديدة مطلوبة');
-  if (!city) throw new Error('مدينة الصيدلية الجديدة مطلوبة');
-  if (!address) throw new Error('عنوان الصيدلية الجديدة مطلوب');
+  if (!city)        throw new Error('مدينة الصيدلية الجديدة مطلوبة');
+  if (!address)     throw new Error('عنوان الصيدلية الجديدة مطلوب');
 
-  const GOVERNORATE_CENTROIDS = {
-    damascus:     [36.2765, 33.5138],
-    rif_dimashq:  [36.3090, 33.5238],
-    aleppo:       [37.1613, 36.2021],
-    homs:         [36.7156, 34.7324],
-    hama:         [36.7443, 35.1318],
-    latakia:      [35.7833, 35.5167],
-    tartus:       [35.8867, 34.8890],
-    idlib:        [36.6335, 35.9306],
-    deir_ez_zor:  [40.1500, 35.3333],
-    raqqa:        [39.0167, 35.9500],
-    hasakah:      [40.7417, 36.4833],
-    daraa:        [36.1062, 32.6189],
-    as_suwayda:   [36.5697, 32.7095],
-    quneitra:     [35.8242, 33.1258]
-  };
-  const coords = GOVERNORATE_CENTROIDS[governorate] || [36.2765, 33.5138];
+  // ── Resolve pharmacyLicense ────────────────────────────────────────────
+  // The pharmacies schema requires BOTH registrationNumber AND pharmacyLicense
+  // as unique. We auto-generate registrationNumber above; for pharmacyLicense
+  // we prefer (1) the value provided in newData, then (2) the applicant's own
+  // pharmacyLicenseNumber (their personal pharmacist license), and finally
+  // (3) an auto-generated placeholder. Admin can refine via the admin panel.
+  const pharmacyLicense = providedLicense
+    || (applicant.pharmacyLicenseNumber || '').trim()
+    || generateRegistrationNumber('LIC');
 
-  // Pharmacy schema requires BOTH registrationNumber and pharmacyLicense
-  // (two separate unique indexes). The applicant provides one value, so
-  // we reuse it for both — if this collides later, the admin can edit it.
+  // ── Build payload (no GeoJSON in v2.1) ─────────────────────────────────
   return {
     name,
-    arabicName: name,
-    registrationNumber: license.toUpperCase(),
-    pharmacyLicense: license.toUpperCase(),
+    registrationNumber: generateRegistrationNumber('PHARM'),
+    pharmacyLicense: pharmacyLicense.toUpperCase(),
     pharmacyType: 'community',
-    phoneNumber: applicant.phoneNumber || '0000000000',
+    phoneNumber,
     governorate,
     city,
     address,
-    location: {
-      type: 'Point',
-      coordinates: coords
-    },
     isActive: true,
-    isAcceptingOrders: true
+    isAcceptingOrders: true,
   };
 }
 
@@ -1902,114 +1967,62 @@ exports.approveDoctorRequest = async (req, res) => {
     // ══════════════════════════════════════════════════════════════════
 
     if (requestType === 'pharmacist') {
+      // v2.2: pharmacyId is REQUIRED. Inline creation via newPharmacyData
+      // is no longer supported. If user didn't pick an existing pharmacy
+      // during signup, they must submit a separate FacilityRequest first;
+      // when the admin approves that FacilityRequest, this doctor_request
+      // gets auto-populated with the resolved pharmacyId.
       const hasExisting = !!request.pharmacyId;
-      const hasNew = !!(request.newPharmacyData && Object.keys(request.newPharmacyData).length > 0);
-      if (!hasExisting && !hasNew) {
+      if (!hasExisting) {
         return res.status(400).json({
           success: false,
-          message: 'لا يمكن قبول الطلب: لم يحدد المتقدم صيدلية موجودة ولم يقدم بيانات صيدلية جديدة'
+          message: 'لا يمكن قبول الطلب: الصيدلية غير محددة. إذا كان المتقدم قد قدم طلب تسجيل صيدلية جديدة، يجب الموافقة عليه أولاً من تبويب "طلبات المنشآت".'
         });
       }
-      if (hasExisting) {
-        const pharmExists = await Pharmacy.findById(request.pharmacyId);
-        if (!pharmExists) {
-          return res.status(400).json({
-            success: false,
-            message: 'الصيدلية المحددة في الطلب غير موجودة في النظام (ربما حُذفت). يرجى مراجعة الطلب.'
-          });
-        }
+      const pharmExists = await Pharmacy.findById(request.pharmacyId);
+      if (!pharmExists) {
+        return res.status(400).json({
+          success: false,
+          message: 'الصيدلية المحددة في الطلب غير موجودة في النظام (ربما حُذفت). يرجى مراجعة الطلب.'
+        });
       }
     }
 
     if (requestType === 'lab_technician') {
+      // v2.2: laboratoryId is REQUIRED (see comment above for pharmacist).
       const hasExisting = !!request.laboratoryId;
-      const hasNew = !!(request.newLaboratoryData && Object.keys(request.newLaboratoryData).length > 0);
-      if (!hasExisting && !hasNew) {
+      if (!hasExisting) {
         return res.status(400).json({
           success: false,
-          message: 'لا يمكن قبول الطلب: لم يحدد المتقدم مختبراً موجوداً ولم يقدم بيانات مختبر جديد'
+          message: 'لا يمكن قبول الطلب: المختبر غير محدد. إذا كان المتقدم قد قدم طلب تسجيل مختبر جديد، يجب الموافقة عليه أولاً من تبويب "طلبات المنشآت".'
         });
       }
-      if (hasExisting) {
-        const labExists = await Laboratory.findById(request.laboratoryId);
-        if (!labExists) {
-          return res.status(400).json({
-            success: false,
-            message: 'المختبر المحدد في الطلب غير موجود في النظام (ربما حُذف). يرجى مراجعة الطلب.'
-          });
-        }
+      const labExists = await Laboratory.findById(request.laboratoryId);
+      if (!labExists) {
+        return res.status(400).json({
+          success: false,
+          message: 'المختبر المحدد في الطلب غير موجود في النظام (ربما حُذف). يرجى مراجعة الطلب.'
+        });
       }
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // STEP 0 — (if needed) CREATE NEW FACILITY FIRST
-    // We do this BEFORE Person/Account so the facility has a stable _id
-    // for the LabTechnician/Pharmacist creation downstream.
+    // STEP 0 — RESOLVE FACILITY ID
+    // v2.2: facility creation no longer happens here. The pre-flight
+    // checks above guarantee request.pharmacyId / request.laboratoryId
+    // exists. If the applicant submitted a FacilityRequest, the admin
+    // must approve that FIRST — which auto-populates the pharmacyId
+    // / laboratoryId on this doctor_request.
     // ══════════════════════════════════════════════════════════════════
 
     let resolvedFacilityId = null;
 
     if (requestType === 'lab_technician') {
-      if (request.laboratoryId) {
-        resolvedFacilityId = request.laboratoryId;
-        console.log(`🏢 Using existing laboratory: ${resolvedFacilityId}`);
-      } else {
-        console.log('🏢 Creating new Laboratory from newLaboratoryData...');
-        try {
-          const labPayload = buildLaboratoryPayload(request.newLaboratoryData, {
-            phoneNumber: request.phoneNumber
-          });
-          const newLab = await Laboratory.create(labPayload);
-          createdIds.laboratoryId = newLab._id;
-          resolvedFacilityId = newLab._id;
-          console.log(`✅ New Laboratory created: ${newLab._id} (${newLab.name})`);
-        } catch (labErr) {
-          console.error('❌ Laboratory creation failed:', labErr.message);
-          await rollback('Laboratory.create failed');
-          // Handle duplicate registrationNumber specifically
-          if (labErr.code === 11000) {
-            return res.status(400).json({
-              success: false,
-              message: 'رقم ترخيص المختبر الجديد مستخدم بالفعل. يرجى مراجعة البيانات.'
-            });
-          }
-          return res.status(400).json({
-            success: false,
-            message: 'فشل إنشاء المختبر الجديد: ' + labErr.message
-          });
-        }
-      }
-    }
-
-    if (requestType === 'pharmacist') {
-      if (request.pharmacyId) {
-        resolvedFacilityId = request.pharmacyId;
-        console.log(`🏢 Using existing pharmacy: ${resolvedFacilityId}`);
-      } else {
-        console.log('🏢 Creating new Pharmacy from newPharmacyData...');
-        try {
-          const pharmPayload = buildPharmacyPayload(request.newPharmacyData, {
-            phoneNumber: request.phoneNumber
-          });
-          const newPharm = await Pharmacy.create(pharmPayload);
-          createdIds.pharmacyId = newPharm._id;
-          resolvedFacilityId = newPharm._id;
-          console.log(`✅ New Pharmacy created: ${newPharm._id} (${newPharm.name})`);
-        } catch (pharmErr) {
-          console.error('❌ Pharmacy creation failed:', pharmErr.message);
-          await rollback('Pharmacy.create failed');
-          if (pharmErr.code === 11000) {
-            return res.status(400).json({
-              success: false,
-              message: 'رقم ترخيص الصيدلية الجديدة مستخدم بالفعل. يرجى مراجعة البيانات.'
-            });
-          }
-          return res.status(400).json({
-            success: false,
-            message: 'فشل إنشاء الصيدلية الجديدة: ' + pharmErr.message
-          });
-        }
-      }
+      resolvedFacilityId = request.laboratoryId;
+      console.log(`🏢 Using laboratory: ${resolvedFacilityId}`);
+    } else if (requestType === 'pharmacist') {
+      resolvedFacilityId = request.pharmacyId;
+      console.log(`🏢 Using pharmacy: ${resolvedFacilityId}`);
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -2405,6 +2418,78 @@ exports.rejectDoctorRequest = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'حدث خطأ أثناء رفض الطلب'
+    });
+  }
+};
+
+/**
+ * ════════════════════════════════════════════════════════════════════════════
+ * GET /api/admin/emergency-reports
+ * ────────────────────────────────────────────────────────────────────────────
+ * Lists emergency reports submitted from the mobile AI emergency feature.
+ * Supports optional filtering by risk level and status, plus pagination.
+ *
+ * Query params (all optional):
+ *   • riskLevel  — low | moderate | high | critical   (filters aiRiskLevel)
+ *   • status     — active | resolved | false_alarm | referred_to_hospital
+ *   • page       — default 1
+ *   • limit      — default 50
+ *
+ * Response: { success, reports, total, page, limit, counts }
+ *   counts = per-risk-level tallies for the filter chips in the UI.
+ * ════════════════════════════════════════════════════════════════════════════
+ */
+exports.getEmergencyReports = async (req, res) => {
+  try {
+    const RISK_LEVELS = ['low', 'moderate', 'high', 'critical'];
+    const STATUSES = ['active', 'resolved', 'false_alarm', 'referred_to_hospital'];
+
+    const { riskLevel, status } = req.query;
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+
+    // Build filter
+    const filter = {};
+    if (riskLevel && RISK_LEVELS.includes(riskLevel)) filter.aiRiskLevel = riskLevel;
+    if (status && STATUSES.includes(status)) filter.status = status;
+
+    const [reports, total, riskCounts] = await Promise.all([
+      EmergencyReport.find(filter)
+        .sort({ reportedAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .populate('patientPersonId', 'firstName lastName nationalId phoneNumber')
+        .populate('patientChildId', 'firstName lastName childRegistrationNumber')
+        .lean(),
+      EmergencyReport.countDocuments(filter),
+      // Per-risk-level counts (ignores the riskLevel filter so chips show totals)
+      EmergencyReport.aggregate([
+        ...(status && STATUSES.includes(status) ? [{ $match: { status } }] : []),
+        { $group: { _id: '$aiRiskLevel', count: { $sum: 1 } } },
+      ]),
+    ]);
+
+    // Shape counts into { all, low, moderate, high, critical }
+    const counts = { all: 0, low: 0, moderate: 0, high: 0, critical: 0 };
+    riskCounts.forEach((r) => {
+      if (r._id && counts[r._id] !== undefined) counts[r._id] = r.count;
+      counts.all += r.count;
+    });
+
+    return res.status(200).json({
+      success: true,
+      reports,
+      total,
+      page,
+      limit,
+      counts,
+    });
+  } catch (error) {
+    console.error('❌ getEmergencyReports error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'حدث خطأ أثناء تحميل تقارير الطوارئ',
+      error: error.message,
     });
   }
 };

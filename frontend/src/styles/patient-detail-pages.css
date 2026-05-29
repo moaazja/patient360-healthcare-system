@@ -931,3 +931,316 @@
   .dpg-result-stats { gap: 6px; }
   .dpg-result-stat { font-size: 11.5px; padding: 4px 10px; }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   MODAL SYSTEM — confirm dialogs & feedback toasts
+   ────────────────────────────────────────────────────────────────────
+   Used by AppointmentDetailPage's cancel-confirmation flow and its
+   success/error feedback. These classes were referenced in the JSX but
+   had no styles, so the modal rendered as an unstyled block stacked in
+   the page corner. This section gives them a proper centered overlay
+   that matches the Teal Medica design language used by .dpg-card.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* Full-screen dimmed overlay that centers its child modal. Fixed
+   positioning + high z-index lifts it above all dashboard content. */
+.dpg-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(13, 59, 62, 0.45);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  animation: dpgOverlayIn 0.2s ease;
+}
+
+@keyframes dpgOverlayIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* The modal card itself. */
+.dpg-modal {
+  width: 100%;
+  max-width: 460px;
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  background: var(--tm-card-bg);
+  border: 1px solid var(--tm-border);
+  border-radius: var(--pd-radius-xl);
+  box-shadow: 0 24px 60px rgba(13, 59, 62, 0.28);
+  display: flex;
+  flex-direction: column;
+  animation: dpgModalIn 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  direction: rtl;
+}
+
+@keyframes dpgModalIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── Header ─────────────────────────────────────────────────────────── */
+.dpg-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--tm-border);
+}
+
+.dpg-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--tm-primary);
+}
+
+.dpg-modal-title svg {
+  color: var(--tm-error);
+  flex-shrink: 0;
+}
+
+.dpg-modal-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--pd-radius-md);
+  background: transparent;
+  color: var(--tm-text-secondary);
+  cursor: pointer;
+  transition: background var(--pd-transition), color var(--pd-transition);
+  flex-shrink: 0;
+}
+
+.dpg-modal-close:hover {
+  background: var(--tm-surface);
+  color: var(--tm-primary);
+}
+
+/* ── Body ───────────────────────────────────────────────────────────── */
+.dpg-modal-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.dpg-modal-lead {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--tm-text-primary);
+}
+
+/* ── Radio fieldset (cancellation reasons) ──────────────────────────── */
+.dpg-modal-fieldset {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dpg-modal-fieldset legend {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--tm-text-secondary);
+  margin-bottom: 4px;
+  padding: 0;
+}
+
+.dpg-modal-radios {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dpg-modal-radio {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border: 1.5px solid var(--tm-border);
+  border-radius: var(--pd-radius-md);
+  cursor: pointer;
+  transition: border-color var(--pd-transition), background var(--pd-transition);
+  font-size: 14px;
+  color: var(--tm-text-primary);
+}
+
+.dpg-modal-radio:hover {
+  border-color: var(--tm-accent);
+  background: var(--tm-surface);
+}
+
+/* Highlight the row that contains the checked radio. */
+.dpg-modal-radio:has(input:checked) {
+  border-color: var(--tm-action);
+  background: rgba(0, 137, 123, 0.06);
+}
+
+[data-theme="dark"] .dpg-modal-radio:has(input:checked) {
+  background: rgba(77, 182, 172, 0.10);
+}
+
+.dpg-modal-radio input[type="radio"] {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--tm-action);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* ── Optional notes textarea ────────────────────────────────────────── */
+.dpg-modal-textarea-label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--tm-text-secondary);
+}
+
+.dpg-modal-textarea-label small {
+  font-weight: 500;
+  color: var(--tm-text-secondary);
+  opacity: 0.8;
+}
+
+.dpg-modal-textarea-label textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 76px;
+  padding: 11px 13px;
+  border: 1.5px solid var(--tm-border);
+  border-radius: var(--pd-radius-md);
+  background: var(--tm-background);
+  color: var(--tm-text-primary);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.55;
+  transition: border-color var(--pd-transition);
+}
+
+.dpg-modal-textarea-label textarea:focus {
+  outline: none;
+  border-color: var(--tm-action);
+}
+
+/* ── Footer (action buttons) ────────────────────────────────────────── */
+.dpg-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--tm-border);
+}
+
+/* ════════════════════════════════════════════════════════════════════
+   FEEDBACK TOAST (success / error after an action)
+   ──────────────────────────────────────────────────────────────────── */
+
+.dpg-feedback {
+  width: 100%;
+  max-width: 380px;
+  background: var(--tm-card-bg);
+  border: 1px solid var(--tm-border);
+  border-radius: var(--pd-radius-xl);
+  box-shadow: 0 24px 60px rgba(13, 59, 62, 0.28);
+  padding: 28px 24px 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  text-align: center;
+  animation: dpgModalIn 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+  direction: rtl;
+}
+
+.dpg-feedback-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dpg-feedback--success .dpg-feedback-icon {
+  background: rgba(56, 142, 60, 0.12);
+  color: #2e7d32;
+}
+
+.dpg-feedback--error .dpg-feedback-icon {
+  background: rgba(211, 47, 47, 0.12);
+  color: var(--tm-error);
+}
+
+.dpg-feedback p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--tm-text-primary);
+  font-weight: 500;
+}
+
+.dpg-feedback .pd-btn {
+  margin-top: 4px;
+  min-width: 120px;
+  justify-content: center;
+}
+
+/* ── Dark theme tweaks ──────────────────────────────────────────────── */
+[data-theme="dark"] .dpg-modal-overlay {
+  background: rgba(0, 0, 0, 0.6);
+}
+
+[data-theme="dark"] .dpg-modal,
+[data-theme="dark"] .dpg-feedback {
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme="dark"] .dpg-feedback--success .dpg-feedback-icon {
+  background: rgba(102, 187, 106, 0.18);
+  color: #81c784;
+}
+
+[data-theme="dark"] .dpg-feedback--error .dpg-feedback-icon {
+  background: rgba(239, 83, 80, 0.18);
+  color: #ef5350;
+}
+
+/* ── Mobile ─────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .dpg-modal-foot {
+    flex-direction: column-reverse;
+  }
+  .dpg-modal-foot .pd-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* Respect reduced-motion preferences. */
+@media (prefers-reduced-motion: reduce) {
+  .dpg-modal-overlay,
+  .dpg-modal,
+  .dpg-feedback {
+    animation: none;
+  }
+}

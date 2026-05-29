@@ -176,16 +176,19 @@ const SIDEBAR_GROUPS = [
   {
     label: 'إدارة المرافق',
     items: [
-      { id: 'hospitals',    labelAr: 'المستشفيات', Icon: Hospital },
-      { id: 'pharmacies',   labelAr: 'الصيدليات',  Icon: Pill },
-      { id: 'laboratories', labelAr: 'المختبرات',  Icon: Microscope },
+      { id: 'hospitals',         labelAr: 'المستشفيات',     Icon: Hospital },
+      { id: 'pharmacies',        labelAr: 'الصيدليات',      Icon: Pill },
+      { id: 'laboratories',      labelAr: 'المختبرات',      Icon: Microscope },
+      { id: 'facility-requests', labelAr: 'طلبات المنشآت', Icon: ClipboardList, badge: 'pendingFacilityRequests' },
     ],
   },
   {
     label: 'المراقبة',
     items: [
       { id: 'emergency',       labelAr: 'تقارير الطوارئ', Icon: Siren, badge: 'activeEmergencies' },
-      { id: 'reviews',         labelAr: 'التقييمات',       Icon: Star },
+      // Reviews moderation hidden for now (feature deferred). Re-enable by
+      // uncommenting this line — the section render + loader are still intact.
+      // { id: 'reviews',         labelAr: 'التقييمات',       Icon: Star },
       { id: 'audit',           labelAr: 'سجل النظام',     Icon: Scroll },
       { id: 'accountActivity', labelAr: 'نشاط الحسابات',  Icon: Activity },
     ],
@@ -785,12 +788,406 @@ const StarRating = ({ rating, size = 14 }) => {
 
 
 /* ═══════════════════════════════════════════════════════════════════════
+   v2.2 — REUSABLE EDITOR COMPONENTS for multi-value form fields
+   ─────────────────────────────────────────────────────────────────────
+   Used inside hospital / pharmacy / laboratory create-edit modals.
+   Self-contained with inline styles — they don't depend on any new CSS.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * Days of the week — Sunday-first to match Syrian weekly calendar
+ * (Friday is the off-day, not Saturday).
+ */
+const WEEK_DAYS = [
+  { id: 'Sunday',    nameAr: 'الأحد'    },
+  { id: 'Monday',    nameAr: 'الإثنين'  },
+  { id: 'Tuesday',   nameAr: 'الثلاثاء' },
+  { id: 'Wednesday', nameAr: 'الأربعاء' },
+  { id: 'Thursday',  nameAr: 'الخميس'   },
+  { id: 'Friday',    nameAr: 'الجمعة'   },
+  { id: 'Saturday',  nameAr: 'السبت'    },
+];
+
+/**
+ * OperatingHoursEditor — 7-day table.
+ * Value shape: [{ day, openTime, closeTime, is24Hours, closed? }, ...]
+ *
+ * Behaviour:
+ *   • Each day shows: open checkbox / 24-hour checkbox / open-time / close-time.
+ *   • When a day is unchecked, it's marked as closed (no value emitted for that day).
+ *   • Times are HH:MM strings — saved exactly as the schema expects.
+ */
+const OperatingHoursEditor = ({ value = [], onChange }) => {
+  // Build a Map for O(1) lookup of existing data per day
+  const byDay = new Map((value || []).map((row) => [row.day, row]));
+
+  const updateDay = (dayId, patch) => {
+    const next = WEEK_DAYS.map((d) => {
+      const existing = byDay.get(d.id) || {};
+      if (d.id === dayId) return { day: d.id, ...existing, ...patch };
+      // Keep other days as-is (only include if there's data)
+      return existing.openTime || existing.closeTime || existing.is24Hours
+        ? { day: d.id, ...existing }
+        : null;
+    }).filter(Boolean);
+    onChange(next);
+  };
+
+  const toggleClosed = (dayId, isOpen) => {
+    if (isOpen) {
+      // Default to 08:00 — 17:00 when opening
+      updateDay(dayId, { openTime: '08:00', closeTime: '17:00', is24Hours: false });
+    } else {
+      // Remove the day from the array entirely
+      onChange((value || []).filter((row) => row.day !== dayId));
+    }
+  };
+
+  const toggle24Hours = (dayId, is24) => {
+    if (is24) {
+      updateDay(dayId, { is24Hours: true, openTime: '00:00', closeTime: '23:59' });
+    } else {
+      updateDay(dayId, { is24Hours: false, openTime: '08:00', closeTime: '17:00' });
+    }
+  };
+
+  return (
+    <div style={{
+      border: '1px solid var(--tm-border, #E0F2F1)',
+      borderRadius: 8,
+      overflow: 'hidden',
+      backgroundColor: 'var(--tm-bg, #F5FAFA)',
+    }}>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '1fr 90px 100px 100px 100px',
+        gap: 0,
+        padding: '8px 12px',
+        backgroundColor: 'var(--tm-surface, #E0F2F1)',
+        fontWeight: 600,
+        fontSize: '0.85rem',
+        color: 'var(--tm-text, #0D3B3E)',
+      }}>
+        <div>اليوم</div>
+        <div style={{ textAlign: 'center' }}>مفتوح</div>
+        <div style={{ textAlign: 'center' }}>24 ساعة</div>
+        <div style={{ textAlign: 'center' }}>من</div>
+        <div style={{ textAlign: 'center' }}>إلى</div>
+      </div>
+      {WEEK_DAYS.map((day) => {
+        const row = byDay.get(day.id);
+        const isOpen = !!row;
+        const is24 = row?.is24Hours;
+        return (
+          <div key={day.id} style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 90px 100px 100px 100px',
+            gap: 0,
+            padding: '10px 12px',
+            borderTop: '1px solid var(--tm-border, #E0F2F1)',
+            alignItems: 'center',
+            backgroundColor: isOpen ? 'transparent' : 'rgba(0,0,0,0.02)',
+          }}>
+            <div style={{ fontWeight: 500, fontSize: '0.9rem' }}>{day.nameAr}</div>
+            <div style={{ textAlign: 'center' }}>
+              <input
+                type="checkbox"
+                checked={isOpen}
+                onChange={(e) => toggleClosed(day.id, e.target.checked)}
+                style={{ cursor: 'pointer', transform: 'scale(1.15)' }}
+              />
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <input
+                type="checkbox"
+                checked={!!is24}
+                disabled={!isOpen}
+                onChange={(e) => toggle24Hours(day.id, e.target.checked)}
+                style={{ cursor: isOpen ? 'pointer' : 'not-allowed', transform: 'scale(1.15)', opacity: isOpen ? 1 : 0.4 }}
+              />
+            </div>
+            <div>
+              <input
+                type="time"
+                disabled={!isOpen || is24}
+                value={row?.openTime || ''}
+                onChange={(e) => updateDay(day.id, { openTime: e.target.value })}
+                className="ad-input"
+                style={{ padding: '4px 8px', fontSize: '0.85rem', direction: 'ltr', textAlign: 'center', opacity: (isOpen && !is24) ? 1 : 0.5 }}
+              />
+            </div>
+            <div>
+              <input
+                type="time"
+                disabled={!isOpen || is24}
+                value={row?.closeTime || ''}
+                onChange={(e) => updateDay(day.id, { closeTime: e.target.value })}
+                className="ad-input"
+                style={{ padding: '4px 8px', fontSize: '0.85rem', direction: 'ltr', textAlign: 'center', opacity: (isOpen && !is24) ? 1 : 0.5 }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+/**
+ * MultiValueEditor — list of free-text items with +/- buttons.
+ * Used for hospital.specializations, hospital.servicesOffered, etc.
+ *
+ * Value shape: string[]
+ */
+const MultiValueEditor = ({ value = [], onChange, placeholder = 'أدخل قيمة جديدة...', addLabel = 'إضافة', maxItems = 50 }) => {
+  const [draft, setDraft] = useState('');
+
+  const addItem = () => {
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    if ((value || []).length >= maxItems) return;
+    if ((value || []).includes(trimmed)) return;
+    onChange([...(value || []), trimmed]);
+    setDraft('');
+  };
+
+  const removeItem = (index) => {
+    onChange((value || []).filter((_, i) => i !== index));
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+        <input
+          type="text"
+          className="ad-input"
+          placeholder={placeholder}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              addItem();
+            }
+          }}
+          style={{ flex: 1 }}
+        />
+        <button
+          type="button"
+          className="ad-btn ad-btn-primary"
+          onClick={addItem}
+          disabled={!draft.trim() || (value || []).length >= maxItems}
+          style={{ padding: '8px 16px', whiteSpace: 'nowrap' }}
+        >
+          <Plus size={14} strokeWidth={2.5} style={{ marginInlineEnd: 4 }} />
+          {addLabel}
+        </button>
+      </div>
+      {(value || []).length > 0 ? (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {(value || []).map((item, index) => (
+            <span
+              key={`${item}-${index}`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 10px 6px 6px',
+                backgroundColor: 'var(--tm-surface, #E0F2F1)',
+                color: 'var(--tm-text, #0D3B3E)',
+                borderRadius: 6,
+                fontSize: '0.85rem',
+                fontWeight: 500,
+                border: '1px solid var(--tm-accent, #4DB6AC)',
+              }}
+            >
+              {item}
+              <button
+                type="button"
+                onClick={() => removeItem(index)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 2,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  color: 'var(--tm-text-muted, #607D8B)',
+                  borderRadius: 4,
+                }}
+                aria-label="حذف"
+              >
+                <X size={14} strokeWidth={2.5} />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p style={{ color: 'var(--tm-text-muted, #607D8B)', fontSize: '0.85rem', margin: '4px 0 0' }}>
+          لا توجد عناصر — اكتب أعلاه واضغط "{addLabel}" أو Enter للإضافة
+        </p>
+      )}
+    </div>
+  );
+};
+
+/**
+ * TestCatalogEditor — for laboratories. Each test row has:
+ *   { testCode, testName, arabicName?, category, price, turnaroundTime, isAvailable }
+ */
+const LAB_TEST_CATEGORIES = [
+  { id: 'blood',        nameAr: 'تحاليل دم'   },
+  { id: 'urine',        nameAr: 'تحاليل بول'  },
+  { id: 'stool',        nameAr: 'تحاليل براز' },
+  { id: 'imaging',      nameAr: 'تصوير طبي'  },
+  { id: 'microbiology', nameAr: 'أحياء دقيقة' },
+  { id: 'molecular',    nameAr: 'بيولوجيا جزيئية' },
+  { id: 'biopsy',       nameAr: 'خزعة'      },
+  { id: 'other',        nameAr: 'أخرى'      },
+];
+
+const TestCatalogEditor = ({ value = [], onChange }) => {
+  const addTest = () => {
+    onChange([
+      ...(value || []),
+      {
+        testCode: '',
+        testName: '',
+        arabicName: '',
+        category: 'blood',
+        price: 0,
+        turnaroundTime: '24 ساعة',
+        isAvailable: true,
+      },
+    ]);
+  };
+
+  const updateTest = (index, patch) => {
+    onChange((value || []).map((t, i) => (i === index ? { ...t, ...patch } : t)));
+  };
+
+  const removeTest = (index) => {
+    onChange((value || []).filter((_, i) => i !== index));
+  };
+
+  return (
+    <div>
+      {(value || []).length === 0 ? (
+        <p style={{ color: 'var(--tm-text-muted, #607D8B)', fontSize: '0.9rem', margin: '0 0 12px' }}>
+          لا توجد فحوصات في الكاتالوج بعد. اضغط الزر أدناه لإضافة فحص جديد.
+        </p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12 }}>
+          {(value || []).map((test, index) => (
+            <div
+              key={index}
+              style={{
+                border: '1px solid var(--tm-border, #E0F2F1)',
+                borderRadius: 8,
+                padding: 12,
+                backgroundColor: 'var(--tm-bg, #F5FAFA)',
+                display: 'grid',
+                gridTemplateColumns: '120px 1fr 1fr 130px 100px 110px 40px',
+                gap: 8,
+                alignItems: 'center',
+              }}
+            >
+              <input
+                type="text"
+                className="ad-input"
+                placeholder="الرمز (CBC)"
+                value={test.testCode || ''}
+                onChange={(e) => updateTest(index, { testCode: e.target.value.toUpperCase() })}
+                style={{ padding: '6px 10px', fontSize: '0.85rem', direction: 'ltr', textAlign: 'left', fontFamily: 'Inter, sans-serif', fontWeight: 600 }}
+              />
+              <input
+                type="text"
+                className="ad-input"
+                placeholder="Test name (English)"
+                value={test.testName || ''}
+                onChange={(e) => updateTest(index, { testName: e.target.value })}
+                style={{ padding: '6px 10px', fontSize: '0.85rem', direction: 'ltr', textAlign: 'left' }}
+              />
+              <input
+                type="text"
+                className="ad-input"
+                placeholder="الاسم بالعربية"
+                value={test.arabicName || ''}
+                onChange={(e) => updateTest(index, { arabicName: e.target.value })}
+                style={{ padding: '6px 10px', fontSize: '0.85rem' }}
+              />
+              <select
+                className="ad-input"
+                value={test.category || 'blood'}
+                onChange={(e) => updateTest(index, { category: e.target.value })}
+                style={{ padding: '6px 10px', fontSize: '0.85rem' }}
+              >
+                {LAB_TEST_CATEGORIES.map((c) => (
+                  <option key={c.id} value={c.id}>{c.nameAr}</option>
+                ))}
+              </select>
+              <input
+                type="number"
+                min="0"
+                step="500"
+                className="ad-input"
+                placeholder="السعر"
+                value={test.price ?? ''}
+                onChange={(e) => updateTest(index, { price: parseFloat(e.target.value) || 0 })}
+                style={{ padding: '6px 10px', fontSize: '0.85rem', direction: 'ltr', textAlign: 'right' }}
+              />
+              <input
+                type="text"
+                className="ad-input"
+                placeholder="مدة الإنجاز"
+                value={test.turnaroundTime || ''}
+                onChange={(e) => updateTest(index, { turnaroundTime: e.target.value })}
+                style={{ padding: '6px 10px', fontSize: '0.85rem' }}
+              />
+              <button
+                type="button"
+                onClick={() => removeTest(index)}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid var(--tm-error, #D32F2F)',
+                  cursor: 'pointer',
+                  padding: 6,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--tm-error, #D32F2F)',
+                  borderRadius: 6,
+                }}
+                aria-label="حذف الفحص"
+                title="حذف الفحص"
+              >
+                <Trash2 size={14} strokeWidth={2.2} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      <button
+        type="button"
+        className="ad-btn ad-btn-secondary"
+        onClick={addTest}
+        style={{ padding: '8px 16px' }}
+      >
+        <Plus size={14} strokeWidth={2.5} style={{ marginInlineEnd: 4 }} />
+        إضافة فحص جديد
+      </button>
+    </div>
+  );
+};
+
+
+/* ═══════════════════════════════════════════════════════════════════════
    MAIN COMPONENT — AdminDashboard
    ═══════════════════════════════════════════════════════════════════════ */
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
-  const { theme } = useTheme();
+  const { theme, toggleTheme } = useTheme();
   const searchInputRef = useRef(null);
 
   /* ─────────────────────────────────────────────────────────────────
@@ -801,6 +1198,10 @@ const AdminDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState('home');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Settings — change password form
+  const [pwForm, setPwForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [pwLoading, setPwLoading] = useState(false);
 
   // Modal
   const [modal, setModal] = useState({
@@ -834,6 +1235,7 @@ const AdminDashboard = () => {
     totalVisits: 0,
     visitsThisMonth: 0,
     pendingRequests: 0,
+    pendingFacilityRequests: 0, // v2.2 — for sidebar badge
     activeEmergencies: 0,
     criticalAlerts: 0,
     pendingReviews: 0,
@@ -860,6 +1262,7 @@ const AdminDashboard = () => {
   const [requestTypeFilter, setRequestTypeFilter] = useState('all');
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [showRequestDetails, setShowRequestDetails] = useState(false);
+
   const [showAcceptConfirm, setShowAcceptConfirm] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
@@ -975,37 +1378,63 @@ const AdminDashboard = () => {
      ───────────────────────────────────────────────────────────────── */
 
   const [hospitalForm, setHospitalForm] = useState({
-    name: '', arabicName: '', registrationNumber: '', hospitalType: 'government',
+    name: '', arabicName: '', registrationNumber: '', hospitalLicense: '',
+    hospitalType: 'government',
     phoneNumber: '', emergencyPhoneNumber: '', email: '', website: '',
     governorate: '', city: '', district: '', address: '',
-    numberOfBeds: '', hasEmergency: false, hasICU: false,
+    numberOfBeds: '', numberOfOperatingRooms: '',
+    hasEmergency: false, hasICU: false,
     hasLaboratory: false, hasPharmacy: false, hasRadiology: false,
+    // v2.2 — multi-value arrays
+    specializations: [],
+    operatingHours: [],
+    servicesOffered: [],
+    accreditations: [],
   });
   const [hospitalSaving, setHospitalSaving] = useState(false);
 
   /* ─────────────────────────────────────────────────────────────────
-     STATE — Add/Edit Pharmacy form (with GeoJSON location)
+     STATE — Add/Edit Pharmacy form (v2.1 — GPS removed)
      ───────────────────────────────────────────────────────────────── */
 
   const [pharmacyForm, setPharmacyForm] = useState({
     name: '', arabicName: '', registrationNumber: '', pharmacyLicense: '',
     pharmacyType: 'community', phoneNumber: '', email: '',
     governorate: '', city: '', district: '', address: '',
-    longitude: '', latitude: '',
+    // v2.2 — operating hours
+    operatingHours: [],
   });
   const [pharmacySaving, setPharmacySaving] = useState(false);
 
   /* ─────────────────────────────────────────────────────────────────
-     STATE — Add/Edit Laboratory form
+     STATE — Add/Edit Laboratory form (v2.1 — GPS removed)
      ───────────────────────────────────────────────────────────────── */
 
   const [labForm, setLabForm] = useState({
     name: '', arabicName: '', registrationNumber: '', labLicense: '',
     labType: 'independent', phoneNumber: '', email: '',
     governorate: '', city: '', district: '', address: '',
-    longitude: '', latitude: '',
+    // v2.2 — operating hours + test catalog
+    operatingHours: [],
+    testCatalog: [],
   });
   const [labSaving, setLabSaving] = useState(false);
+
+  /* ─────────────────────────────────────────────────────────────────
+     STATE — Facility Requests (v2.2)
+     ───────────────────────────────────────────────────────────────── */
+
+  const [facilityRequests, setFacilityRequests] = useState([]);
+  const [facilityRequestsLoading, setFacilityRequestsLoading] = useState(false);
+  const [facilityRequestsTypeFilter, setFacilityRequestsTypeFilter] = useState('all');
+  const [facilityRequestsStatusFilter, setFacilityRequestsStatusFilter] = useState('pending');
+  const [facilityRequestSearch, setFacilityRequestSearch] = useState('');
+  const [selectedFacilityRequest, setSelectedFacilityRequest] = useState(null);
+  const [showFacilityRequestDetail, setShowFacilityRequestDetail] = useState(false);
+  const [facilityRequestActionLoading, setFacilityRequestActionLoading] = useState(false);
+  const [showRejectFacilityRequestModal, setShowRejectFacilityRequestModal] = useState(false);
+  const [rejectFacilityRequestReason, setRejectFacilityRequestReason] = useState('invalid_info');
+  const [rejectFacilityRequestDetails, setRejectFacilityRequestDetails] = useState('');
 
   /* ─────────────────────────────────────────────────────────────────
      STATE — Deactivation
@@ -1295,10 +1724,14 @@ const AdminDashboard = () => {
 
         // Fetch dashboard data in parallel — graceful failure
         try {
-          const [statsRes, healthRes, notifRes] = await Promise.allSettled([
+          const [statsRes, healthRes, notifRes, facilityReqRes] = await Promise.allSettled([
             adminAPI.getDashboardStatistics(),
             adminAPI.getSystemHealth(),
             adminAPI.getMyNotifications(),
+            // v2.2 — fetch facility requests count for sidebar badge
+            adminAPI.getFacilityRequests
+              ? adminAPI.getFacilityRequests()
+              : adminAPI.request('/admin/facility-requests', { method: 'GET' }),
           ]);
 
           if (statsRes.status === 'fulfilled' && statsRes.value) {
@@ -1310,6 +1743,12 @@ const AdminDashboard = () => {
           if (notifRes.status === 'fulfilled' && notifRes.value?.notifications) {
             setNotifications(notifRes.value.notifications);
             setUnreadCount(notifRes.value.notifications.filter((n) => n.status !== 'read').length);
+          }
+          // v2.2 — facility requests for sidebar badge
+          if (facilityReqRes.status === 'fulfilled' && facilityReqRes.value?.requests) {
+            setFacilityRequests(facilityReqRes.value.requests);
+            const pendingCount = facilityReqRes.value.requests.filter((r) => r.status === 'pending').length;
+            setStatistics((prev) => ({ ...prev, pendingFacilityRequests: pendingCount }));
           }
         } catch (err) {
           console.warn('[AdminDashboard] Some endpoints unavailable:', err);
@@ -1359,6 +1798,7 @@ const AdminDashboard = () => {
     else if (sectionId === 'hospitals' && hospitals.length === 0) loadHospitals();
     else if (sectionId === 'pharmacies' && pharmacies.length === 0) loadPharmacies();
     else if (sectionId === 'laboratories' && laboratories.length === 0) loadLaboratories();
+    else if (sectionId === 'facility-requests' && facilityRequests.length === 0) loadFacilityRequests();
     else if (sectionId === 'emergency' && emergencyReports.length === 0) loadEmergencyReports();
     else if (sectionId === 'reviews' && reviews.length === 0) loadReviews();
     else if (sectionId === 'audit' && auditLogs.length === 0) loadAuditLogs();
@@ -1366,7 +1806,7 @@ const AdminDashboard = () => {
     else if (sectionId === 'accountActivity' && auditLogs.length === 0) loadAuditLogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doctorRequests.length, doctors.length, patients.length, children.length,
-      hospitals.length, pharmacies.length, laboratories.length,
+      hospitals.length, pharmacies.length, laboratories.length, facilityRequests.length,
       emergencyReports.length, reviews.length, auditLogs.length]);
 
   /* ─────────────────────────────────────────────────────────────────
@@ -1465,6 +1905,83 @@ const AdminDashboard = () => {
       setLabsLoading(false);
     }
   }, []);
+
+  // v2.2 — Facility Requests loaders + actions
+  const loadFacilityRequests = useCallback(async () => {
+    setFacilityRequestsLoading(true);
+    try {
+      const data = await adminAPI.getFacilityRequests
+        ? await adminAPI.getFacilityRequests()
+        : await adminAPI.request('/admin/facility-requests', { method: 'GET' });
+      if (data?.requests) {
+        setFacilityRequests(data.requests);
+        // Update sidebar badge count
+        const pendingCount = data.requests.filter((r) => r.status === 'pending').length;
+        setStatistics((prev) => ({ ...prev, pendingFacilityRequests: pendingCount }));
+      }
+    } catch (err) {
+      console.error('[AdminDashboard] Facility requests load error:', err);
+    } finally {
+      setFacilityRequestsLoading(false);
+    }
+  }, []);
+
+  const handleApproveFacilityRequest = useCallback(async (request) => {
+    if (!request?._id) return;
+    setFacilityRequestActionLoading(true);
+    try {
+      const data = adminAPI.approveFacilityRequest
+        ? await adminAPI.approveFacilityRequest(request._id)
+        : await adminAPI.request(`/admin/facility-requests/${request._id}/approve`, { method: 'POST', body: {} });
+      if (data?.success) {
+        openModal('success', 'تم القبول',
+          `تم إنشاء ${request.facilityType === 'pharmacy' ? 'الصيدلية' : 'المختبر'} بنجاح: ${data.createdFacility?.name || request.name}`);
+        setShowFacilityRequestDetail(false);
+        setSelectedFacilityRequest(null);
+        loadFacilityRequests();
+        // Also refresh the corresponding facility list
+        if (request.facilityType === 'pharmacy') loadPharmacies();
+        else if (request.facilityType === 'laboratory') loadLaboratories();
+        loadStatistics();
+      } else {
+        openModal('error', 'فشل القبول', data?.message || 'حدث خطأ');
+      }
+    } catch (err) {
+      openModal('error', 'فشل القبول', err.message || 'حدث خطأ في الاتصال بالخادم');
+    } finally {
+      setFacilityRequestActionLoading(false);
+    }
+  }, [openModal, loadFacilityRequests, loadPharmacies, loadLaboratories, loadStatistics]);
+
+  const handleRejectFacilityRequestSubmit = useCallback(async () => {
+    if (!selectedFacilityRequest?._id) return;
+    setFacilityRequestActionLoading(true);
+    try {
+      const body = {
+        rejectionReason: rejectFacilityRequestReason,
+        rejectionDetails: rejectFacilityRequestDetails.trim(),
+      };
+      const data = adminAPI.rejectFacilityRequest
+        ? await adminAPI.rejectFacilityRequest(selectedFacilityRequest._id, body)
+        : await adminAPI.request(`/admin/facility-requests/${selectedFacilityRequest._id}/reject`, { method: 'POST', body });
+      if (data?.success) {
+        openModal('success', 'تم الرفض', 'تم رفض الطلب بنجاح');
+        setShowRejectFacilityRequestModal(false);
+        setShowFacilityRequestDetail(false);
+        setSelectedFacilityRequest(null);
+        setRejectFacilityRequestReason('invalid_info');
+        setRejectFacilityRequestDetails('');
+        loadFacilityRequests();
+      } else {
+        openModal('error', 'فشل الرفض', data?.message || 'حدث خطأ');
+      }
+    } catch (err) {
+      openModal('error', 'فشل الرفض', err.message || 'حدث خطأ في الاتصال بالخادم');
+    } finally {
+      setFacilityRequestActionLoading(false);
+    }
+  }, [selectedFacilityRequest, rejectFacilityRequestReason, rejectFacilityRequestDetails,
+      openModal, loadFacilityRequests]);
 
   const loadEmergencyReports = useCallback(async () => {
     setEmergencyLoading(true);
@@ -1718,6 +2235,43 @@ const AdminDashboard = () => {
     });
   }, [openModal, navigate]);
 
+  // ── Settings: change password ──────────────────────────────────────────
+  const handleChangePassword = useCallback(async () => {
+    const { currentPassword, newPassword, confirmPassword } = pwForm;
+
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      openModal('error', 'حقول مطلوبة', 'الرجاء تعبئة جميع الحقول');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      openModal('error', 'عدم تطابق', 'كلمة المرور الجديدة وتأكيدها غير متطابقين');
+      return;
+    }
+    const strongEnough = newPassword.length >= 8
+      && /[a-z]/.test(newPassword)
+      && /[A-Z]/.test(newPassword)
+      && /\d/.test(newPassword);
+    if (!strongEnough) {
+      openModal('error', 'كلمة مرور ضعيفة', 'كلمة المرور يجب أن تكون 8 أحرف على الأقل وتحتوي على حرف كبير وصغير ورقم');
+      return;
+    }
+    if (currentPassword === newPassword) {
+      openModal('error', 'كلمة مرور مكرّرة', 'كلمة المرور الجديدة يجب أن تختلف عن الحالية');
+      return;
+    }
+
+    setPwLoading(true);
+    try {
+      await authAPI.changePassword({ currentPassword, newPassword });
+      setPwForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      openModal('success', 'تم بنجاح', 'تم تغيير كلمة المرور بنجاح');
+    } catch (err) {
+      openModal('error', 'تعذّر التغيير', err?.message || 'حدث خطأ أثناء تغيير كلمة المرور');
+    } finally {
+      setPwLoading(false);
+    }
+  }, [pwForm, openModal]);
+
   /* ─────────────────────────────────────────────────────────────────
      DOCTOR REQUEST HANDLERS
      ───────────────────────────────────────────────────────────────── */
@@ -1943,6 +2497,7 @@ const AdminDashboard = () => {
         name: hospital.name || '',
         arabicName: hospital.arabicName || '',
         registrationNumber: hospital.registrationNumber || '',
+        hospitalLicense: hospital.hospitalLicense || '',
         hospitalType: hospital.hospitalType || 'government',
         phoneNumber: hospital.phoneNumber || '',
         emergencyPhoneNumber: hospital.emergencyPhoneNumber || '',
@@ -1953,20 +2508,28 @@ const AdminDashboard = () => {
         district: hospital.district || '',
         address: hospital.address || '',
         numberOfBeds: hospital.numberOfBeds || '',
+        numberOfOperatingRooms: hospital.numberOfOperatingRooms || '',
         hasEmergency: hospital.hasEmergency || false,
         hasICU: hospital.hasICU || false,
         hasLaboratory: hospital.hasLaboratory || false,
         hasPharmacy: hospital.hasPharmacy || false,
         hasRadiology: hospital.hasRadiology || false,
+        specializations: Array.isArray(hospital.specializations) ? hospital.specializations : [],
+        operatingHours: Array.isArray(hospital.operatingHours) ? hospital.operatingHours : [],
+        servicesOffered: Array.isArray(hospital.servicesOffered) ? hospital.servicesOffered : [],
+        accreditations: Array.isArray(hospital.accreditations) ? hospital.accreditations : [],
       });
     } else {
       setEditingHospital(null);
       setHospitalForm({
-        name: '', arabicName: '', registrationNumber: '', hospitalType: 'government',
+        name: '', arabicName: '', registrationNumber: '', hospitalLicense: '',
+        hospitalType: 'government',
         phoneNumber: '', emergencyPhoneNumber: '', email: '', website: '',
         governorate: '', city: '', district: '', address: '',
-        numberOfBeds: '', hasEmergency: false, hasICU: false,
+        numberOfBeds: '', numberOfOperatingRooms: '',
+        hasEmergency: false, hasICU: false,
         hasLaboratory: false, hasPharmacy: false, hasRadiology: false,
+        specializations: [], operatingHours: [], servicesOffered: [], accreditations: [],
       });
     }
     setShowHospitalForm(true);
@@ -1982,6 +2545,7 @@ const AdminDashboard = () => {
       const payload = {
         ...hospitalForm,
         numberOfBeds: parseInt(hospitalForm.numberOfBeds, 10) || 0,
+        numberOfOperatingRooms: parseInt(hospitalForm.numberOfOperatingRooms, 10) || 0,
       };
       const data = editingHospital
         ? await adminAPI.updateHospital(editingHospital._id, payload)
@@ -2016,8 +2580,7 @@ const AdminDashboard = () => {
         city: pharmacy.city || '',
         district: pharmacy.district || '',
         address: pharmacy.address || '',
-        longitude: pharmacy.location?.coordinates?.[0] || '',
-        latitude: pharmacy.location?.coordinates?.[1] || '',
+        operatingHours: Array.isArray(pharmacy.operatingHours) ? pharmacy.operatingHours : [],
       });
     } else {
       setEditingPharmacy(null);
@@ -2025,28 +2588,20 @@ const AdminDashboard = () => {
         name: '', arabicName: '', registrationNumber: '', pharmacyLicense: '',
         pharmacyType: 'community', phoneNumber: '', email: '',
         governorate: '', city: '', district: '', address: '',
-        longitude: '', latitude: '',
+        operatingHours: [],
       });
     }
     setShowPharmacyForm(true);
   }, []);
 
   const handleSavePharmacy = useCallback(async () => {
-    if (!pharmacyForm.name.trim() || !pharmacyForm.registrationNumber.trim() || !pharmacyForm.pharmacyLicense.trim() || !pharmacyForm.governorate || !pharmacyForm.city || !pharmacyForm.address.trim() || !pharmacyForm.phoneNumber.trim() || !pharmacyForm.longitude || !pharmacyForm.latitude) {
-      openModal('error', 'حقول مطلوبة', 'الرجاء إكمال جميع الحقول الإلزامية بما في ذلك الموقع الجغرافي (خطوط الطول والعرض)');
+    if (!pharmacyForm.name.trim() || !pharmacyForm.registrationNumber.trim() || !pharmacyForm.pharmacyLicense.trim() || !pharmacyForm.governorate || !pharmacyForm.city || !pharmacyForm.address.trim() || !pharmacyForm.phoneNumber.trim()) {
+      openModal('error', 'حقول مطلوبة', 'الرجاء إكمال جميع الحقول الإلزامية');
       return;
     }
     setPharmacySaving(true);
     try {
-      const payload = {
-        ...pharmacyForm,
-        location: {
-          type: 'Point',
-          coordinates: [parseFloat(pharmacyForm.longitude), parseFloat(pharmacyForm.latitude)],
-        },
-      };
-      delete payload.longitude;
-      delete payload.latitude;
+      const payload = { ...pharmacyForm };
 
       const data = editingPharmacy
         ? await adminAPI.updatePharmacy(editingPharmacy._id, payload)
@@ -2081,8 +2636,8 @@ const AdminDashboard = () => {
         city: lab.city || '',
         district: lab.district || '',
         address: lab.address || '',
-        longitude: lab.location?.coordinates?.[0] || '',
-        latitude: lab.location?.coordinates?.[1] || '',
+        operatingHours: Array.isArray(lab.operatingHours) ? lab.operatingHours : [],
+        testCatalog: Array.isArray(lab.testCatalog) ? lab.testCatalog : [],
       });
     } else {
       setEditingLab(null);
@@ -2090,28 +2645,21 @@ const AdminDashboard = () => {
         name: '', arabicName: '', registrationNumber: '', labLicense: '',
         labType: 'independent', phoneNumber: '', email: '',
         governorate: '', city: '', district: '', address: '',
-        longitude: '', latitude: '',
+        operatingHours: [],
+        testCatalog: [],
       });
     }
     setShowLabForm(true);
   }, []);
 
   const handleSaveLab = useCallback(async () => {
-    if (!labForm.name.trim() || !labForm.registrationNumber.trim() || !labForm.governorate || !labForm.city || !labForm.address.trim() || !labForm.phoneNumber.trim() || !labForm.longitude || !labForm.latitude) {
-      openModal('error', 'حقول مطلوبة', 'الرجاء إكمال جميع الحقول الإلزامية بما في ذلك الموقع الجغرافي');
+    if (!labForm.name.trim() || !labForm.registrationNumber.trim() || !labForm.governorate || !labForm.city || !labForm.address.trim() || !labForm.phoneNumber.trim()) {
+      openModal('error', 'حقول مطلوبة', 'الرجاء إكمال جميع الحقول الإلزامية');
       return;
     }
     setLabSaving(true);
     try {
-      const payload = {
-        ...labForm,
-        location: {
-          type: 'Point',
-          coordinates: [parseFloat(labForm.longitude), parseFloat(labForm.latitude)],
-        },
-      };
-      delete payload.longitude;
-      delete payload.latitude;
+      const payload = { ...labForm };
 
       const data = editingLab
         ? await adminAPI.updateLaboratory(editingLab._id, payload)
@@ -2385,7 +2933,11 @@ const AdminDashboard = () => {
               <span className="ad-sidebar-link-label">الإشعارات</span>
               {unreadCount > 0 && <span className="ad-sidebar-badge">{unreadCount}</span>}
             </button>
-            <button type="button" className="ad-sidebar-link" onClick={() => navigate('/profile')}>
+            <button
+              type="button"
+              className={`ad-sidebar-link${activeSection === 'settings' ? ' is-active' : ''}`}
+              onClick={() => handleSectionChange('settings')}
+            >
               <Settings size={20} strokeWidth={2} />
               <span className="ad-sidebar-link-label">الإعدادات</span>
             </button>
@@ -2618,9 +3170,14 @@ const AdminDashboard = () => {
                 </div>
               </section>
 
-              {/* Two-column home grid: chart + activity */}
-              <section className="ad-home-grid">
-                {/* Doctors by specialization chart */}
+              {/* Two-column home grid: chart + activity.
+                  The specialization chart is currently hidden, so this renders
+                  as a single full-width column (inline style overrides the
+                  2-column grid template). */}
+              <section className="ad-home-grid" style={{ gridTemplateColumns: '1fr' }}>
+                {/* Doctors-by-specialization chart hidden (feature deferred).
+                    Re-enable by uncommenting this block. */}
+                {false && (
                 <div className="ad-card">
                   <div className="ad-card-header">
                     <h3 className="ad-card-title">
@@ -2685,6 +3242,7 @@ const AdminDashboard = () => {
                     </div>
                   )}
                 </div>
+                )}
 
                 {/* Recent activity */}
                 <div className="ad-card">
@@ -4328,7 +4886,6 @@ const AdminDashboard = () => {
                         <th>رقم الترخيص</th>
                         <th>المحافظة / المدينة</th>
                         <th>التواصل</th>
-                        <th>الموقع GPS</th>
                         <th>قبول الطلبات</th>
                         <th>التقييم</th>
                         <th>الإجراءات</th>
@@ -4337,7 +4894,6 @@ const AdminDashboard = () => {
                     <tbody>
                       {filteredPharmacies.map((pharmacy) => {
                         const typeInfo = PHARMACY_TYPES.find((t) => t.id === pharmacy.pharmacyType);
-                        const hasLocation = pharmacy.location?.coordinates?.length === 2;
                         return (
                           <tr key={pharmacy._id || pharmacy.id}>
                             <td>
@@ -4376,16 +4932,6 @@ const AdminDashboard = () => {
                                   <span className="ad-cell-contact-line ltr muted">{pharmacy.email}</span>
                                 )}
                               </div>
-                            </td>
-                            <td>
-                              {hasLocation ? (
-                                <span className="ad-pill success" title={`${pharmacy.location.coordinates[1]}, ${pharmacy.location.coordinates[0]}`}>
-                                  <MapPin size={11} strokeWidth={2.5} />
-                                  محدد
-                                </span>
-                              ) : (
-                                <span className="ad-pill muted">غير محدد</span>
-                              )}
                             </td>
                             <td>
                               {pharmacy.isAcceptingOrders !== false ? (
@@ -4552,7 +5098,6 @@ const AdminDashboard = () => {
                         <th>رقم الترخيص</th>
                         <th>المحافظة / المدينة</th>
                         <th>التواصل</th>
-                        <th>الموقع GPS</th>
                         <th>الخدمات</th>
                         <th>التقييم</th>
                         <th>الإجراءات</th>
@@ -4562,7 +5107,6 @@ const AdminDashboard = () => {
                       {filteredLabs.map((lab) => {
                         const labKind = lab.laboratoryType || lab.labType;
                         const typeInfo = LAB_TYPES.find((t) => t.id === labKind);
-                        const hasLocation = lab.location?.coordinates?.length === 2;
                         return (
                           <tr key={lab._id || lab.id}>
                             <td>
@@ -4601,16 +5145,6 @@ const AdminDashboard = () => {
                                   <span className="ad-cell-contact-line ltr muted">{lab.email}</span>
                                 )}
                               </div>
-                            </td>
-                            <td>
-                              {hasLocation ? (
-                                <span className="ad-pill success" title={`${lab.location.coordinates[1]}, ${lab.location.coordinates[0]}`}>
-                                  <MapPin size={11} strokeWidth={2.5} />
-                                  محدد
-                                </span>
-                              ) : (
-                                <span className="ad-pill muted">غير محدد</span>
-                              )}
                             </td>
                             <td>
                               <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -4654,6 +5188,349 @@ const AdminDashboard = () => {
                   </table>
                 </div>
               )}
+            </>
+          )}
+
+          {/* ═══════════════════════════════════════════════════════
+              SECTION: FACILITY REQUESTS (v2.2)
+              ═══════════════════════════════════════════════════════ */}
+          {activeSection === 'facility-requests' && (
+            <>
+              <div className="ad-page-header">
+                <div className="ad-page-title">
+                  <button
+                    type="button"
+                    className="ad-btn ad-btn-icon ad-mobile-toggle"
+                    onClick={() => setSidebarOpen(true)}
+                    aria-label="فتح القائمة"
+                  >
+                    <Menu size={20} strokeWidth={2.2} />
+                  </button>
+                  <div className="ad-page-title-icon">
+                    <Building2 size={24} strokeWidth={2} />
+                  </div>
+                  <div>
+                    <h1>طلبات تسجيل المنشآت</h1>
+                    <p>طلبات تسجيل الصيدليات والمختبرات والمستشفيات المُقدَّمة من قِبل المالكين</p>
+                  </div>
+                </div>
+                <div className="ad-page-actions">
+                  <button
+                    type="button"
+                    className="ad-btn ad-btn-secondary"
+                    onClick={loadFacilityRequests}
+                    disabled={facilityRequestsLoading}
+                  >
+                    <RotateCcw size={16} strokeWidth={2.2} className={facilityRequestsLoading ? 'ad-spin' : ''} />
+                    تحديث
+                  </button>
+                </div>
+              </div>
+
+              {/* Type tabs — All / Pharmacy / Laboratory / Hospital */}
+              <div className="ad-type-tabs">
+                <button
+                  type="button"
+                  className={`ad-type-tab ${facilityRequestsTypeFilter === 'all' ? 'active' : ''}`}
+                  onClick={() => setFacilityRequestsTypeFilter('all')}
+                >
+                  <ClipboardList size={16} strokeWidth={2} />
+                  الكل
+                  <span className="ad-type-tab-count">{facilityRequests.length}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`ad-type-tab ${facilityRequestsTypeFilter === 'pharmacy' ? 'active' : ''}`}
+                  onClick={() => setFacilityRequestsTypeFilter('pharmacy')}
+                >
+                  <Pill size={16} strokeWidth={2} />
+                  صيدليات
+                  <span className="ad-type-tab-count">
+                    {facilityRequests.filter((r) => r.facilityType === 'pharmacy').length}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`ad-type-tab ${facilityRequestsTypeFilter === 'laboratory' ? 'active' : ''}`}
+                  onClick={() => setFacilityRequestsTypeFilter('laboratory')}
+                >
+                  <Microscope size={16} strokeWidth={2} />
+                  مختبرات
+                  <span className="ad-type-tab-count">
+                    {facilityRequests.filter((r) => r.facilityType === 'laboratory').length}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`ad-type-tab ${facilityRequestsTypeFilter === 'hospital' ? 'active' : ''}`}
+                  onClick={() => setFacilityRequestsTypeFilter('hospital')}
+                >
+                  <Hospital size={16} strokeWidth={2} />
+                  مستشفيات
+                  <span className="ad-type-tab-count">
+                    {facilityRequests.filter((r) => r.facilityType === 'hospital').length}
+                  </span>
+                </button>
+              </div>
+
+              {/* Search + status filter chips */}
+              <div className="ad-toolbar">
+                <div className="ad-search-box">
+                  <Search size={18} strokeWidth={2} />
+                  <input
+                    type="text"
+                    className="ad-search-input"
+                    placeholder="ابحث برقم الطلب، اسم المنشأة، أو بريد المُقدِّم..."
+                    value={facilityRequestSearch}
+                    onChange={(e) => setFacilityRequestSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') e.currentTarget.blur();
+                    }}
+                  />
+                  {facilityRequestSearch && (
+                    <button
+                      type="button"
+                      className="ad-search-clear"
+                      onClick={() => setFacilityRequestSearch('')}
+                      aria-label="مسح البحث"
+                    >
+                      <XCircle size={16} strokeWidth={2.2} />
+                    </button>
+                  )}
+                </div>
+                <div className="ad-filter-chips">
+                  {(() => {
+                    // Get facility requests filtered by type only (for accurate chip counts)
+                    const byType = facilityRequestsTypeFilter === 'all'
+                      ? facilityRequests
+                      : facilityRequests.filter((r) => r.facilityType === facilityRequestsTypeFilter);
+                    return (
+                      <>
+                        <button
+                          type="button"
+                          className={`ad-chip ${facilityRequestsStatusFilter === 'all' ? 'active' : ''}`}
+                          onClick={() => setFacilityRequestsStatusFilter('all')}
+                        >
+                          الكل
+                          <span className="ad-chip-count">{byType.length}</span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`ad-chip pending ${facilityRequestsStatusFilter === 'pending' ? 'active' : ''}`}
+                          onClick={() => setFacilityRequestsStatusFilter('pending')}
+                        >
+                          <Clock size={13} strokeWidth={2.5} />
+                          قيد المراجعة
+                          <span className="ad-chip-count">
+                            {byType.filter((r) => r.status === 'pending').length}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`ad-chip approved ${facilityRequestsStatusFilter === 'approved' ? 'active' : ''}`}
+                          onClick={() => setFacilityRequestsStatusFilter('approved')}
+                        >
+                          <CheckCircle2 size={13} strokeWidth={2.5} />
+                          مقبولة
+                          <span className="ad-chip-count">
+                            {byType.filter((r) => r.status === 'approved').length}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          className={`ad-chip rejected ${facilityRequestsStatusFilter === 'rejected' ? 'active' : ''}`}
+                          onClick={() => setFacilityRequestsStatusFilter('rejected')}
+                        >
+                          <XCircle size={13} strokeWidth={2.5} />
+                          مرفوضة
+                          <span className="ad-chip-count">
+                            {byType.filter((r) => r.status === 'rejected').length}
+                          </span>
+                        </button>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* Table */}
+              {facilityRequestsLoading ? (
+                <div className="ad-section-loading">
+                  <Loader2 size={36} className="ad-spin" color="var(--tm-action)" />
+                  <p>جاري تحميل الطلبات...</p>
+                </div>
+              ) : (() => {
+                const search = facilityRequestSearch.trim().toLowerCase();
+                const filtered = facilityRequests.filter((r) => {
+                  if (facilityRequestsTypeFilter !== 'all' && r.facilityType !== facilityRequestsTypeFilter) return false;
+                  if (facilityRequestsStatusFilter !== 'all' && r.status !== facilityRequestsStatusFilter) return false;
+                  if (search) {
+                    const hay = [
+                      r.requestNumber, r.name, r.arabicName, r.submittedByEmail,
+                      r.submittedByName, r.city, r.governorate,
+                    ].filter(Boolean).map((s) => String(s).toLowerCase()).join(' ');
+                    if (!hay.includes(search)) return false;
+                  }
+                  return true;
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="ad-card">
+                      <div className="ad-empty">
+                        <div className="ad-empty-icon">
+                          <Building2 size={32} strokeWidth={1.8} />
+                        </div>
+                        <h3>لا توجد طلبات</h3>
+                        <p>
+                          {facilityRequestsStatusFilter === 'pending'
+                            ? 'لا توجد طلبات قيد المراجعة حالياً'
+                            : 'لا توجد طلبات تطابق المعايير المحددة'}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                }
+
+                // Type badge config (same pattern as doctor requests)
+                const facilityTypeConfig = {
+                  pharmacy:   { label: 'صيدلية',  color: 'success', Icon: Pill },
+                  laboratory: { label: 'مختبر',   color: 'warning', Icon: Microscope },
+                  hospital:   { label: 'مستشفى', color: 'info',    Icon: Hospital },
+                };
+
+                return (
+                  <div className="ad-table-wrap">
+                    <table className="ad-table">
+                      <thead>
+                        <tr>
+                          <th>رقم الطلب</th>
+                          <th>اسم المنشأة</th>
+                          <th>النوع</th>
+                          <th>المحافظة</th>
+                          <th>المُقدِّم</th>
+                          <th>تاريخ الطلب</th>
+                          <th>الحالة</th>
+                          <th>الإجراءات</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.map((req) => {
+                          const typeInfo = facilityTypeConfig[req.facilityType] || facilityTypeConfig.pharmacy;
+                          const TypeIcon = typeInfo.Icon;
+                          const governorateAr = SYRIAN_GOVERNORATES.find((g) => g.id === req.governorate)?.nameAr || req.governorate;
+
+                          return (
+                            <tr key={req._id}>
+                              <td>
+                                <span className="ad-cell-id">
+                                  {req.requestNumber || req._id?.slice(-8)?.toUpperCase()}
+                                </span>
+                              </td>
+                              <td>
+                                <div className="ad-cell-name">
+                                  <strong>{req.name}</strong>
+                                  {req.arabicName && req.arabicName !== req.name && (
+                                    <small>{req.arabicName}</small>
+                                  )}
+                                </div>
+                              </td>
+                              <td>
+                                <span className={`ad-pill ${typeInfo.color}`}>
+                                  <TypeIcon size={11} strokeWidth={2.5} />
+                                  {typeInfo.label}
+                                </span>
+                              </td>
+                              <td>
+                                <div className="ad-cell-name">
+                                  <strong>{governorateAr}</strong>
+                                  {req.city && <small>{req.city}</small>}
+                                </div>
+                              </td>
+                              <td>
+                                <div className="ad-cell-name">
+                                  <strong>{req.submittedByName || '—'}</strong>
+                                  <small style={{ direction: 'ltr', textAlign: 'right', fontFamily: 'Inter, sans-serif' }}>
+                                    {req.submittedByEmail}
+                                  </small>
+                                </div>
+                              </td>
+                              <td>
+                                <span style={{ fontSize: '0.78rem', color: 'var(--tm-text-muted)' }}>
+                                  {formatArabicDate(req.createdAt)}
+                                </span>
+                              </td>
+                              <td>
+                                {req.status === 'pending' && (
+                                  <span className="ad-pill warning">
+                                    <Clock size={11} strokeWidth={2.5} />
+                                    قيد المراجعة
+                                  </span>
+                                )}
+                                {req.status === 'approved' && (
+                                  <span className="ad-pill success">
+                                    <CheckCircle2 size={11} strokeWidth={2.5} />
+                                    مقبولة
+                                  </span>
+                                )}
+                                {req.status === 'rejected' && (
+                                  <span className="ad-pill error">
+                                    <XCircle size={11} strokeWidth={2.5} />
+                                    مرفوضة
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                <div className="ad-cell-actions">
+                                  <button
+                                    type="button"
+                                    className="ad-action-btn view"
+                                    onClick={() => {
+                                      setSelectedFacilityRequest(req);
+                                      setShowFacilityRequestDetail(true);
+                                    }}
+                                    title="عرض التفاصيل"
+                                    aria-label="عرض التفاصيل"
+                                  >
+                                    <Eye size={16} strokeWidth={2.2} />
+                                  </button>
+                                  {req.status === 'pending' && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="ad-action-btn accept"
+                                        onClick={() => handleApproveFacilityRequest(req)}
+                                        disabled={facilityRequestActionLoading}
+                                        title="قبول الطلب"
+                                        aria-label="قبول الطلب"
+                                      >
+                                        <Check size={16} strokeWidth={2.5} />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="ad-action-btn reject"
+                                        onClick={() => {
+                                          setSelectedFacilityRequest(req);
+                                          setShowRejectFacilityRequestModal(true);
+                                        }}
+                                        disabled={facilityRequestActionLoading}
+                                        title="رفض الطلب"
+                                        aria-label="رفض الطلب"
+                                      >
+                                        <X size={16} strokeWidth={2.5} />
+                                      </button>
+                                    </>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
             </>
           )}
 
@@ -5631,6 +6508,164 @@ const AdminDashboard = () => {
             </>
           )}
 
+          {/* ═══════════════════════════════════════════════════════════
+              SETTINGS SECTION — account info + change password + theme
+              ═══════════════════════════════════════════════════════════ */}
+          {activeSection === 'settings' && (
+            <>
+              <div className="ad-page-header">
+                <div className="ad-page-title">
+                  <button
+                    type="button"
+                    className="ad-btn ad-btn-icon ad-mobile-toggle"
+                    onClick={() => setSidebarOpen(true)}
+                    aria-label="فتح القائمة"
+                  >
+                    <Menu size={20} strokeWidth={2.2} />
+                  </button>
+                  <div className="ad-page-title-icon">
+                    <Settings size={24} strokeWidth={2} />
+                  </div>
+                  <div>
+                    <h1>الإعدادات</h1>
+                    <p>إدارة معلومات حسابك وتفضيلاتك</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="ad-settings-grid">
+                {/* ── Account info card ───────────────────────────────── */}
+                <div className="ad-card">
+                  <div className="ad-card-header">
+                    <h3 className="ad-card-title">
+                      <span className="ad-card-title-icon">
+                        <User size={18} strokeWidth={2} />
+                      </span>
+                      معلومات الحساب
+                    </h3>
+                  </div>
+                  <div className="ad-settings-info">
+                    <div className="ad-settings-info-row">
+                      <span className="ad-settings-info-label">
+                        <User size={15} strokeWidth={2} /> الاسم
+                      </span>
+                      <span className="ad-settings-info-value">
+                        {`${admin?.firstName || ''} ${admin?.lastName || ''}`.trim() || 'المسؤول'}
+                      </span>
+                    </div>
+                    <div className="ad-settings-info-row">
+                      <span className="ad-settings-info-label">
+                        <Mail size={15} strokeWidth={2} /> البريد الإلكتروني
+                      </span>
+                      <span className="ad-settings-info-value">{admin?.email || '—'}</span>
+                    </div>
+                    <div className="ad-settings-info-row">
+                      <span className="ad-settings-info-label">
+                        <Shield size={15} strokeWidth={2} /> الدور
+                      </span>
+                      <span className="ad-settings-info-value">
+                        <span className="ad-badge ad-badge-success">مسؤول النظام</span>
+                      </span>
+                    </div>
+                    {admin?.phoneNumber && (
+                      <div className="ad-settings-info-row">
+                        <span className="ad-settings-info-label">رقم الهاتف</span>
+                        <span className="ad-settings-info-value">{admin.phoneNumber}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── Change password card ────────────────────────────── */}
+                <div className="ad-card">
+                  <div className="ad-card-header">
+                    <h3 className="ad-card-title">
+                      <span className="ad-card-title-icon">
+                        <Lock size={18} strokeWidth={2} />
+                      </span>
+                      تغيير كلمة المرور
+                    </h3>
+                  </div>
+                  <div className="ad-settings-form">
+                    <div className="ad-form-group">
+                      <label className="ad-form-label" htmlFor="ad-pw-current">كلمة المرور الحالية</label>
+                      <input
+                        id="ad-pw-current"
+                        type="password"
+                        className="ad-input"
+                        value={pwForm.currentPassword}
+                        onChange={(e) => setPwForm((f) => ({ ...f, currentPassword: e.target.value }))}
+                        placeholder="••••••••"
+                        autoComplete="current-password"
+                      />
+                    </div>
+                    <div className="ad-form-group">
+                      <label className="ad-form-label" htmlFor="ad-pw-new">كلمة المرور الجديدة</label>
+                      <input
+                        id="ad-pw-new"
+                        type="password"
+                        className="ad-input"
+                        value={pwForm.newPassword}
+                        onChange={(e) => setPwForm((f) => ({ ...f, newPassword: e.target.value }))}
+                        placeholder="8 أحرف على الأقل، حرف كبير وصغير ورقم"
+                        autoComplete="new-password"
+                      />
+                    </div>
+                    <div className="ad-form-group">
+                      <label className="ad-form-label" htmlFor="ad-pw-confirm">تأكيد كلمة المرور الجديدة</label>
+                      <input
+                        id="ad-pw-confirm"
+                        type="password"
+                        className="ad-input"
+                        value={pwForm.confirmPassword}
+                        onChange={(e) => setPwForm((f) => ({ ...f, confirmPassword: e.target.value }))}
+                        placeholder="••••••••"
+                        autoComplete="new-password"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="ad-btn ad-btn-primary"
+                      onClick={handleChangePassword}
+                      disabled={pwLoading}
+                    >
+                      <Lock size={16} strokeWidth={2} />
+                      {pwLoading ? 'جاري الحفظ...' : 'تغيير كلمة المرور'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* ── Preferences card (theme) ────────────────────────── */}
+                <div className="ad-card">
+                  <div className="ad-card-header">
+                    <h3 className="ad-card-title">
+                      <span className="ad-card-title-icon">
+                        <Settings size={18} strokeWidth={2} />
+                      </span>
+                      التفضيلات
+                    </h3>
+                  </div>
+                  <div className="ad-settings-pref-row">
+                    <div className="ad-settings-pref-text">
+                      <span className="ad-settings-pref-title">الوضع الليلي</span>
+                      <span className="ad-settings-pref-desc">
+                        {theme === 'dark' ? 'مُفعّل حالياً' : 'غير مُفعّل'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className={`ad-toggle${theme === 'dark' ? ' is-on' : ''}`}
+                      onClick={toggleTheme}
+                      aria-label="تبديل الوضع الليلي"
+                    >
+                      <span className="ad-toggle-knob" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+
         </main>
       </div>
 
@@ -5898,42 +6933,10 @@ const AdminDashboard = () => {
               </div>
             </div>
 
-            {/* Documents row */}
-            {(selectedRequest.licenseDocumentUrl || selectedRequest.medicalCertificateUrl || selectedRequest.profilePhotoUrl) && (
-              <div style={{ padding: '0 32px 20px' }}>
-                <div className="ad-detail-section">
-                  <div className="ad-detail-section-header">
-                    <div className="ad-detail-section-icon">
-                      <Paperclip size={16} strokeWidth={2.2} />
-                    </div>
-                    <h4 className="ad-detail-section-title">المستندات المرفقة</h4>
-                  </div>
-                  <div className="ad-docs-row">
-                    {selectedRequest.licenseDocumentUrl && (
-                      <a href={selectedRequest.licenseDocumentUrl} target="_blank" rel="noopener noreferrer" className="ad-doc-chip">
-                        <FileText size={14} strokeWidth={2.2} />
-                        وثيقة الترخيص
-                        <ExternalLink size={12} strokeWidth={2.2} />
-                      </a>
-                    )}
-                    {selectedRequest.medicalCertificateUrl && (
-                      <a href={selectedRequest.medicalCertificateUrl} target="_blank" rel="noopener noreferrer" className="ad-doc-chip">
-                        <Award size={14} strokeWidth={2.2} />
-                        الشهادة الطبية
-                        <ExternalLink size={12} strokeWidth={2.2} />
-                      </a>
-                    )}
-                    {selectedRequest.profilePhotoUrl && (
-                      <a href={selectedRequest.profilePhotoUrl} target="_blank" rel="noopener noreferrer" className="ad-doc-chip">
-                        <User size={14} strokeWidth={2.2} />
-                        الصورة الشخصية
-                        <ExternalLink size={12} strokeWidth={2.2} />
-                      </a>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
+            {/* Documents section removed.
+                Uploaded files are organized on disk under:
+                  backend/uploads/doctor-requests/<nationalId>/<fieldName>/
+                Admin opens that folder directly in File Explorer to review. */}
 
             {/* Action footer for pending requests */}
             {selectedRequest.status === 'pending' && (
@@ -6733,6 +7736,60 @@ const AdminDashboard = () => {
                   ))}
                 </div>
               </div>
+
+              {/* v2.2 — Specializations */}
+              <div className="ad-form-section">
+                <h4 className="ad-form-section-title">
+                  <Stethoscope size={18} strokeWidth={2.2} />
+                  التخصصات الطبية
+                </h4>
+                <MultiValueEditor
+                  value={hospitalForm.specializations}
+                  onChange={(arr) => setHospitalForm((p) => ({ ...p, specializations: arr }))}
+                  placeholder="مثل: جراحة القلب، أمراض الأطفال..."
+                  addLabel="إضافة تخصص"
+                />
+              </div>
+
+              {/* v2.2 — Services Offered */}
+              <div className="ad-form-section">
+                <h4 className="ad-form-section-title">
+                  <Activity size={18} strokeWidth={2.2} />
+                  الخدمات المُقدَّمة
+                </h4>
+                <MultiValueEditor
+                  value={hospitalForm.servicesOffered}
+                  onChange={(arr) => setHospitalForm((p) => ({ ...p, servicesOffered: arr }))}
+                  placeholder="مثل: زراعة الأعضاء، التصوير بالرنين..."
+                  addLabel="إضافة خدمة"
+                />
+              </div>
+
+              {/* v2.2 — Accreditations */}
+              <div className="ad-form-section">
+                <h4 className="ad-form-section-title">
+                  <CheckCircle2 size={18} strokeWidth={2.2} />
+                  الشهادات والاعتمادات
+                </h4>
+                <MultiValueEditor
+                  value={hospitalForm.accreditations}
+                  onChange={(arr) => setHospitalForm((p) => ({ ...p, accreditations: arr }))}
+                  placeholder="مثل: ISO 9001، JCI..."
+                  addLabel="إضافة شهادة"
+                />
+              </div>
+
+              {/* v2.2 — Operating Hours */}
+              <div className="ad-form-section">
+                <h4 className="ad-form-section-title">
+                  <Clock size={18} strokeWidth={2.2} />
+                  ساعات الدوام
+                </h4>
+                <OperatingHoursEditor
+                  value={hospitalForm.operatingHours}
+                  onChange={(hours) => setHospitalForm((p) => ({ ...p, operatingHours: hours }))}
+                />
+              </div>
             </div>
 
             <div className="ad-modal-footer">
@@ -6846,21 +7903,19 @@ const AdminDashboard = () => {
                     <input type="text" className="ad-input" value={pharmacyForm.address}
                       onChange={(e) => setPharmacyForm((p) => ({ ...p, address: e.target.value }))} />
                   </div>
-                  <div className="ad-form-group">
-                    <label className="ad-form-label">خط العرض (Latitude) <span className="ad-form-label-required">*</span></label>
-                    <input type="number" step="any" className="ad-input" value={pharmacyForm.latitude}
-                      onChange={(e) => setPharmacyForm((p) => ({ ...p, latitude: e.target.value }))}
-                      placeholder="33.5138"
-                      style={{ direction: 'ltr', textAlign: 'right', fontFamily: 'Inter, sans-serif' }} />
-                  </div>
-                  <div className="ad-form-group">
-                    <label className="ad-form-label">خط الطول (Longitude) <span className="ad-form-label-required">*</span></label>
-                    <input type="number" step="any" className="ad-input" value={pharmacyForm.longitude}
-                      onChange={(e) => setPharmacyForm((p) => ({ ...p, longitude: e.target.value }))}
-                      placeholder="36.2765"
-                      style={{ direction: 'ltr', textAlign: 'right', fontFamily: 'Inter, sans-serif' }} />
-                  </div>
                 </div>
+              </div>
+
+              {/* v2.2 — Operating Hours */}
+              <div className="ad-form-section">
+                <h4 className="ad-form-section-title">
+                  <Clock size={18} strokeWidth={2.2} />
+                  ساعات الدوام
+                </h4>
+                <OperatingHoursEditor
+                  value={pharmacyForm.operatingHours}
+                  onChange={(hours) => setPharmacyForm((p) => ({ ...p, operatingHours: hours }))}
+                />
               </div>
             </div>
 
@@ -6975,21 +8030,31 @@ const AdminDashboard = () => {
                     <input type="text" className="ad-input" value={labForm.address}
                       onChange={(e) => setLabForm((p) => ({ ...p, address: e.target.value }))} />
                   </div>
-                  <div className="ad-form-group">
-                    <label className="ad-form-label">خط العرض (Latitude) <span className="ad-form-label-required">*</span></label>
-                    <input type="number" step="any" className="ad-input" value={labForm.latitude}
-                      onChange={(e) => setLabForm((p) => ({ ...p, latitude: e.target.value }))}
-                      placeholder="33.5138"
-                      style={{ direction: 'ltr', textAlign: 'right', fontFamily: 'Inter, sans-serif' }} />
-                  </div>
-                  <div className="ad-form-group">
-                    <label className="ad-form-label">خط الطول (Longitude) <span className="ad-form-label-required">*</span></label>
-                    <input type="number" step="any" className="ad-input" value={labForm.longitude}
-                      onChange={(e) => setLabForm((p) => ({ ...p, longitude: e.target.value }))}
-                      placeholder="36.2765"
-                      style={{ direction: 'ltr', textAlign: 'right', fontFamily: 'Inter, sans-serif' }} />
-                  </div>
                 </div>
+              </div>
+
+              {/* v2.2 — Operating Hours */}
+              <div className="ad-form-section">
+                <h4 className="ad-form-section-title">
+                  <Clock size={18} strokeWidth={2.2} />
+                  ساعات الدوام
+                </h4>
+                <OperatingHoursEditor
+                  value={labForm.operatingHours}
+                  onChange={(hours) => setLabForm((p) => ({ ...p, operatingHours: hours }))}
+                />
+              </div>
+
+              {/* v2.2 — Test Catalog */}
+              <div className="ad-form-section">
+                <h4 className="ad-form-section-title">
+                  <FileText size={18} strokeWidth={2.2} />
+                  كاتالوج الفحوصات
+                </h4>
+                <TestCatalogEditor
+                  value={labForm.testCatalog}
+                  onChange={(tests) => setLabForm((p) => ({ ...p, testCatalog: tests }))}
+                />
               </div>
             </div>
 
@@ -7002,6 +8067,425 @@ const AdminDashboard = () => {
                   <><Loader2 size={16} className="ad-spin" />جاري الحفظ...</>
                 ) : (
                   <><Save size={16} strokeWidth={2.2} />{editingLab ? 'حفظ التعديلات' : 'إضافة المختبر'}</>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────
+          FACILITY REQUEST DETAIL MODAL (v2.2)
+          ─────────────────────────────────────────────────────────── */}
+      {showFacilityRequestDetail && selectedFacilityRequest && (
+        <div
+          className="ad-modal-overlay"
+          onClick={() => !facilityRequestActionLoading && setShowFacilityRequestDetail(false)}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="ad-modal large" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              className="ad-modal-close"
+              onClick={() => setShowFacilityRequestDetail(false)}
+              disabled={facilityRequestActionLoading}
+              aria-label="إغلاق"
+            >
+              <X size={18} strokeWidth={2.5} />
+            </button>
+
+            <div className="ad-modal-header">
+              <h2 style={{ textAlign: 'center' }}>
+                تفاصيل طلب تسجيل {
+                  selectedFacilityRequest.facilityType === 'pharmacy' ? 'صيدلية'
+                  : selectedFacilityRequest.facilityType === 'laboratory' ? 'مختبر'
+                  : selectedFacilityRequest.facilityType === 'hospital' ? 'مستشفى'
+                  : 'منشأة'
+                }
+              </h2>
+              <p className="ad-modal-subtitle">
+                رقم الطلب: <span style={{ fontFamily: 'Inter, sans-serif', direction: 'ltr', display: 'inline-block' }}>
+                  {selectedFacilityRequest.requestNumber || selectedFacilityRequest._id}
+                </span>
+              </p>
+            </div>
+
+            <div className="ad-request-details">
+              {/* ─── Facility info ───────────────────────────────── */}
+              <div className="ad-detail-section">
+                <div className="ad-detail-section-header">
+                  <div className="ad-detail-section-icon">
+                    <Building2 size={16} strokeWidth={2.2} />
+                  </div>
+                  <h4 className="ad-detail-section-title">معلومات المنشأة</h4>
+                </div>
+
+                <div className="ad-detail-row">
+                  <span className="ad-detail-label">نوع المنشأة</span>
+                  <span className="ad-detail-value">
+                    {(() => {
+                      const typeMap = {
+                        pharmacy:   { label: 'صيدلية',   color: 'success', Icon: Pill },
+                        laboratory: { label: 'مختبر',    color: 'warning', Icon: Microscope },
+                        hospital:   { label: 'مستشفى',  color: 'info',    Icon: Hospital },
+                      };
+                      const t = typeMap[selectedFacilityRequest.facilityType] || typeMap.pharmacy;
+                      const TypeIcon = t.Icon;
+                      return (
+                        <span className={`ad-pill ${t.color}`}>
+                          <TypeIcon size={11} strokeWidth={2.5} />
+                          {t.label}
+                        </span>
+                      );
+                    })()}
+                  </span>
+                </div>
+
+                <div className="ad-detail-row">
+                  <span className="ad-detail-label">الاسم</span>
+                  <span className="ad-detail-value">{selectedFacilityRequest.name || '—'}</span>
+                </div>
+
+                {selectedFacilityRequest.arabicName && selectedFacilityRequest.arabicName !== selectedFacilityRequest.name && (
+                  <div className="ad-detail-row">
+                    <span className="ad-detail-label">الاسم العربي</span>
+                    <span className="ad-detail-value">{selectedFacilityRequest.arabicName}</span>
+                  </div>
+                )}
+
+                {selectedFacilityRequest.license && (
+                  <div className="ad-detail-row">
+                    <span className="ad-detail-label">رقم الترخيص</span>
+                    <span className="ad-detail-value ltr">{selectedFacilityRequest.license}</span>
+                  </div>
+                )}
+
+                {selectedFacilityRequest.specificType && (
+                  <div className="ad-detail-row">
+                    <span className="ad-detail-label">النوع الفرعي</span>
+                    <span className="ad-detail-value">
+                      {(() => {
+                        const subTypeMap = {
+                          // Pharmacy
+                          community: 'صيدلية حي',
+                          hospital:  selectedFacilityRequest.facilityType === 'pharmacy' ? 'صيدلية مستشفى' : 'حكومي',
+                          clinic:    'صيدلية عيادة',
+                          online:    'صيدلية إلكترونية',
+                          // Laboratory
+                          independent:    'مختبر مستقل',
+                          hospital_based: 'تابع لمستشفى',
+                          clinic_based:   'تابع لعيادة',
+                          specialized:    'متخصص',
+                          // Hospital
+                          government: 'حكومي',
+                          private:    'خاص',
+                          military:   'عسكري',
+                          university: 'جامعي',
+                        };
+                        return subTypeMap[selectedFacilityRequest.specificType] || selectedFacilityRequest.specificType;
+                      })()}
+                    </span>
+                  </div>
+                )}
+
+                {selectedFacilityRequest.phoneNumber && (
+                  <div className="ad-detail-row">
+                    <span className="ad-detail-label">هاتف المنشأة</span>
+                    <span className="ad-detail-value ltr">{selectedFacilityRequest.phoneNumber}</span>
+                  </div>
+                )}
+
+                {selectedFacilityRequest.email && (
+                  <div className="ad-detail-row">
+                    <span className="ad-detail-label">إيميل المنشأة</span>
+                    <span className="ad-detail-value ltr">{selectedFacilityRequest.email}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* ─── Location ────────────────────────────────────── */}
+              <div className="ad-detail-section">
+                <div className="ad-detail-section-header">
+                  <div className="ad-detail-section-icon">
+                    <MapPin size={16} strokeWidth={2.2} />
+                  </div>
+                  <h4 className="ad-detail-section-title">الموقع</h4>
+                </div>
+
+                <div className="ad-detail-row">
+                  <span className="ad-detail-label">المحافظة</span>
+                  <span className="ad-detail-value">
+                    {SYRIAN_GOVERNORATES.find((g) => g.id === selectedFacilityRequest.governorate)?.nameAr
+                      || selectedFacilityRequest.governorate
+                      || '—'}
+                  </span>
+                </div>
+
+                <div className="ad-detail-row">
+                  <span className="ad-detail-label">المدينة</span>
+                  <span className="ad-detail-value">{selectedFacilityRequest.city || '—'}</span>
+                </div>
+
+                {selectedFacilityRequest.district && (
+                  <div className="ad-detail-row">
+                    <span className="ad-detail-label">المنطقة / الحي</span>
+                    <span className="ad-detail-value">{selectedFacilityRequest.district}</span>
+                  </div>
+                )}
+
+                <div className="ad-detail-row">
+                  <span className="ad-detail-label">العنوان التفصيلي</span>
+                  <span className="ad-detail-value">{selectedFacilityRequest.address || '—'}</span>
+                </div>
+              </div>
+
+              {/* ─── Submitter ───────────────────────────────────── */}
+              <div className="ad-detail-section">
+                <div className="ad-detail-section-header">
+                  <div className="ad-detail-section-icon">
+                    <User size={16} strokeWidth={2.2} />
+                  </div>
+                  <h4 className="ad-detail-section-title">معلومات مقدّم الطلب</h4>
+                </div>
+
+                {selectedFacilityRequest.submittedByName && (
+                  <div className="ad-detail-row">
+                    <span className="ad-detail-label">الاسم الكامل</span>
+                    <span className="ad-detail-value">{selectedFacilityRequest.submittedByName}</span>
+                  </div>
+                )}
+
+                <div className="ad-detail-row">
+                  <span className="ad-detail-label">البريد الإلكتروني</span>
+                  <span className="ad-detail-value ltr">{selectedFacilityRequest.submittedByEmail || '—'}</span>
+                </div>
+
+                {selectedFacilityRequest.submittedByPhone && (
+                  <div className="ad-detail-row">
+                    <span className="ad-detail-label">رقم الهاتف</span>
+                    <span className="ad-detail-value ltr">{selectedFacilityRequest.submittedByPhone}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* ─── Status & timestamps ─────────────────────────── */}
+              <div className="ad-detail-section">
+                <div className="ad-detail-section-header">
+                  <div className="ad-detail-section-icon">
+                    <Activity size={16} strokeWidth={2.2} />
+                  </div>
+                  <h4 className="ad-detail-section-title">حالة الطلب</h4>
+                </div>
+
+                <div className="ad-detail-row">
+                  <span className="ad-detail-label">الحالة</span>
+                  <span className="ad-detail-value">
+                    {selectedFacilityRequest.status === 'pending' && (
+                      <span className="ad-pill warning">
+                        <Clock size={11} strokeWidth={2.5} />
+                        قيد المراجعة
+                      </span>
+                    )}
+                    {selectedFacilityRequest.status === 'approved' && (
+                      <span className="ad-pill success">
+                        <CheckCircle2 size={11} strokeWidth={2.5} />
+                        مقبولة
+                      </span>
+                    )}
+                    {selectedFacilityRequest.status === 'rejected' && (
+                      <span className="ad-pill error">
+                        <XCircle size={11} strokeWidth={2.5} />
+                        مرفوضة
+                      </span>
+                    )}
+                  </span>
+                </div>
+
+                <div className="ad-detail-row">
+                  <span className="ad-detail-label">تاريخ التقديم</span>
+                  <span className="ad-detail-value">
+                    {formatArabicDate(selectedFacilityRequest.createdAt)}
+                  </span>
+                </div>
+
+                {selectedFacilityRequest.reviewedAt && (
+                  <div className="ad-detail-row">
+                    <span className="ad-detail-label">تاريخ المراجعة</span>
+                    <span className="ad-detail-value">
+                      {formatArabicDate(selectedFacilityRequest.reviewedAt)}
+                    </span>
+                  </div>
+                )}
+
+                {selectedFacilityRequest.status === 'rejected' && selectedFacilityRequest.rejectionDetails && (
+                  <div className="ad-detail-row">
+                    <span className="ad-detail-label">سبب الرفض</span>
+                    <span className="ad-detail-value" style={{ color: 'var(--tm-error)' }}>
+                      {selectedFacilityRequest.rejectionDetails}
+                    </span>
+                  </div>
+                )}
+
+                {selectedFacilityRequest.notes && (
+                  <div className="ad-detail-row">
+                    <span className="ad-detail-label">ملاحظات إضافية</span>
+                    <span className="ad-detail-value">{selectedFacilityRequest.notes}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="ad-modal-footer">
+              <button
+                type="button"
+                className="ad-btn ad-btn-secondary"
+                onClick={() => setShowFacilityRequestDetail(false)}
+                disabled={facilityRequestActionLoading}
+              >
+                إغلاق
+              </button>
+              {selectedFacilityRequest.status === 'pending' && (
+                <>
+                  <button
+                    type="button"
+                    className="ad-btn ad-btn-danger"
+                    onClick={() => setShowRejectFacilityRequestModal(true)}
+                    disabled={facilityRequestActionLoading}
+                  >
+                    <XCircle size={16} strokeWidth={2.2} />
+                    رفض الطلب
+                  </button>
+                  <button
+                    type="button"
+                    className="ad-btn ad-btn-success"
+                    onClick={() => handleApproveFacilityRequest(selectedFacilityRequest)}
+                    disabled={facilityRequestActionLoading}
+                  >
+                    {facilityRequestActionLoading ? (
+                      <>
+                        <Loader2 size={16} className="ad-spin" />
+                        جاري المعالجة...
+                      </>
+                    ) : (
+                      <>
+                        <Check size={16} strokeWidth={2.5} />
+                        قبول وإنشاء المنشأة
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────
+          REJECT FACILITY REQUEST MODAL (v2.2)
+          ─────────────────────────────────────────────────────────── */}
+      {showRejectFacilityRequestModal && selectedFacilityRequest && (
+        <div
+          className="ad-modal-overlay"
+          onClick={() => !facilityRequestActionLoading && setShowRejectFacilityRequestModal(false)}
+          role="dialog"
+          aria-modal="true"
+          style={{ zIndex: 1010 }}
+        >
+          <div className="ad-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 500 }}>
+            <button
+              type="button"
+              className="ad-modal-close"
+              onClick={() => setShowRejectFacilityRequestModal(false)}
+              disabled={facilityRequestActionLoading}
+            >
+              <X size={18} strokeWidth={2.5} />
+            </button>
+            <div className="ad-modal-header center">
+              <div className="ad-modal-icon-wrapper">
+                <div className="ad-modal-icon error">
+                  <XCircle size={36} strokeWidth={2} />
+                </div>
+              </div>
+              <h2>رفض طلب تسجيل المنشأة</h2>
+              <p style={{ marginTop: 4, color: 'var(--tm-text-muted, #607D8B)', fontSize: '0.9rem' }}>
+                {selectedFacilityRequest.requestNumber} — {selectedFacilityRequest.name}
+              </p>
+            </div>
+            <div className="ad-modal-body" style={{ padding: '0 24px 16px' }}>
+              <div className="ad-form-group" style={{ marginBottom: 16 }}>
+                <label className="ad-form-label">
+                  سبب الرفض <span className="ad-form-label-required">*</span>
+                </label>
+                <select
+                  className="ad-select"
+                  value={rejectFacilityRequestReason}
+                  onChange={(e) => setRejectFacilityRequestReason(e.target.value)}
+                  disabled={facilityRequestActionLoading}
+                >
+                  <option value="duplicate">طلب مكرر</option>
+                  <option value="invalid_info">معلومات غير صحيحة</option>
+                  <option value="unverifiable">يتعذر التحقق</option>
+                  <option value="incomplete">معلومات ناقصة</option>
+                  <option value="other">أخرى</option>
+                </select>
+              </div>
+              <div className="ad-form-group">
+                <label className="ad-form-label">تفاصيل السبب</label>
+                <textarea
+                  className="ad-input"
+                  rows={4}
+                  placeholder="اكتب تفاصيل واضحة سيتم إرسالها للمُقدِّم..."
+                  value={rejectFacilityRequestDetails}
+                  onChange={(e) => setRejectFacilityRequestDetails(e.target.value)}
+                  disabled={facilityRequestActionLoading}
+                  style={{ resize: 'vertical', fontFamily: 'inherit' }}
+                  maxLength={1000}
+                />
+                <span style={{
+                  display: 'block',
+                  marginTop: 4,
+                  fontSize: '0.75rem',
+                  color: 'var(--tm-text-muted, #607D8B)',
+                  textAlign: 'end',
+                }}>
+                  {rejectFacilityRequestDetails.length} / 1000
+                </span>
+              </div>
+              {selectedFacilityRequest.linkedDoctorRequestId && (
+                <div style={{
+                  marginTop: 12,
+                  padding: 12,
+                  backgroundColor: 'rgba(245, 124, 0, 0.08)',
+                  border: '1px solid var(--tm-warning, #F57C00)',
+                  borderRadius: 6,
+                  fontSize: '0.85rem',
+                  color: 'var(--tm-text, #0D3B3E)',
+                }}>
+                  <AlertTriangle size={14} strokeWidth={2.2} style={{ verticalAlign: 'middle', marginInlineEnd: 4 }} />
+                  <strong>ملاحظة:</strong> هذا الطلب مرتبط بطلب طبيب — سيتم رفضه تلقائياً أيضاً.
+                </div>
+              )}
+            </div>
+            <div className="ad-modal-footer">
+              <button
+                type="button"
+                className="ad-btn ad-btn-secondary"
+                onClick={() => setShowRejectFacilityRequestModal(false)}
+                disabled={facilityRequestActionLoading}
+              >
+                إلغاء
+              </button>
+              <button
+                type="button"
+                className="ad-btn ad-btn-danger"
+                onClick={handleRejectFacilityRequestSubmit}
+                disabled={facilityRequestActionLoading}
+              >
+                {facilityRequestActionLoading ? (
+                  <><Loader2 size={16} className="ad-spin" />جاري الرفض...</>
+                ) : (
+                  <><XCircle size={16} strokeWidth={2.2} />تأكيد الرفض</>
                 )}
               </button>
             </div>

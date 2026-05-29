@@ -40,6 +40,8 @@ import {
   Plus, Check, CheckCircle2, XCircle, AlertTriangle, AlertCircle, AlertOctagon, Info,
   Download, ExternalLink, Eye, Clock, RotateCcw, Filter, Search, Trash2,
   MapPinned, Siren,
+  // Booking filter icons
+  SlidersHorizontal, Wallet, Smile,
   // Medication card fields
   Syringe, Repeat, Hash, Navigation,
   // Theme toggle
@@ -156,7 +158,9 @@ const SIDEBAR_GROUPS = [
   {
     label: 'حسابي',
     items: [
-      SECTION_META.reviews,
+      // Reviews hidden for now (feature deferred). Re-enable by uncommenting —
+      // the section render + modal are still intact.
+      // SECTION_META.reviews,
       SECTION_META.notifications,
       SECTION_META.profile,
     ],
@@ -233,6 +237,76 @@ function buildFullName(identity) {
     .filter(Boolean)
     .join(' ');
 }
+
+
+// ══════════════════════════════════════════════════════════════════════
+// Booking filter constants (specializations + governorates)
+// ──────────────────────────────────────────────────────────────────────
+// Values mirror patient360_db_final.js exactly. Medical specializations are
+// snake_case; dental specializations are Title Case (the backend uses the
+// value's shape to decide which collection to search). The Arabic labels
+// match detailHelpers.SPECIALIZATION_LABELS for medical specialties.
+// ══════════════════════════════════════════════════════════════════════
+
+const MEDICAL_SPECIALIZATIONS = [
+  { value: 'cardiology',         label: 'أمراض القلب' },
+  { value: 'dermatology',        label: 'الجلدية' },
+  { value: 'endocrinology',      label: 'الغدد الصماء' },
+  { value: 'gastroenterology',   label: 'الجهاز الهضمي' },
+  { value: 'general_practice',   label: 'طب عام' },
+  { value: 'gynecology',         label: 'النسائية' },
+  { value: 'hematology',         label: 'أمراض الدم' },
+  { value: 'internal_medicine',  label: 'الطب الباطني' },
+  { value: 'nephrology',         label: 'الكلى' },
+  { value: 'neurology',          label: 'الأعصاب' },
+  { value: 'oncology',           label: 'الأورام' },
+  { value: 'ophthalmology',      label: 'العيون' },
+  { value: 'orthopedics',        label: 'العظمية' },
+  { value: 'otolaryngology',     label: 'الأنف والأذن والحنجرة' },
+  { value: 'pediatrics',         label: 'الأطفال' },
+  { value: 'psychiatry',         label: 'الطب النفسي' },
+  { value: 'pulmonology',        label: 'الصدرية' },
+  { value: 'radiology',          label: 'الأشعة' },
+  { value: 'rheumatology',       label: 'الروماتيزم' },
+  { value: 'surgery',            label: 'الجراحة' },
+  { value: 'urology',            label: 'المسالك البولية' },
+  { value: 'vascular_surgery',   label: 'جراحة الأوعية الدموية' },
+  { value: 'emergency_medicine', label: 'طب الطوارئ' },
+  { value: 'anesthesiology',     label: 'التخدير' },
+];
+
+const DENTAL_SPECIALIZATIONS = [
+  { value: 'General Dentistry',   label: 'طب الأسنان العام' },
+  { value: 'Orthodontics',        label: 'تقويم الأسنان' },
+  { value: 'Endodontics',         label: 'علاج جذور الأسنان' },
+  { value: 'Periodontics',        label: 'أمراض اللثة' },
+  { value: 'Prosthodontics',      label: 'التركيبات السنية' },
+  { value: 'Oral Surgery',        label: 'جراحة الفم' },
+  { value: 'Pediatric Dentistry', label: 'طب أسنان الأطفال' },
+  { value: 'Cosmetic Dentistry',  label: 'تجميل الأسنان' },
+  { value: 'Implantology',        label: 'زراعة الأسنان' },
+];
+
+// Quick lookup for turning a stored enum back into its Arabic label.
+const SPECIALIZATION_LABEL_MAP = [...MEDICAL_SPECIALIZATIONS, ...DENTAL_SPECIALIZATIONS]
+  .reduce((acc, s) => { acc[s.value] = s.label; return acc; }, {});
+
+const BOOKING_GOVERNORATES = [
+  { value: 'damascus',    label: 'دمشق' },
+  { value: 'rif_dimashq', label: 'ريف دمشق' },
+  { value: 'aleppo',      label: 'حلب' },
+  { value: 'homs',        label: 'حمص' },
+  { value: 'hama',        label: 'حماة' },
+  { value: 'latakia',     label: 'اللاذقية' },
+  { value: 'tartus',      label: 'طرطوس' },
+  { value: 'idlib',       label: 'إدلب' },
+  { value: 'deir_ez_zor', label: 'دير الزور' },
+  { value: 'raqqa',       label: 'الرقة' },
+  { value: 'hasakah',     label: 'الحسكة' },
+  { value: 'daraa',       label: 'درعا' },
+  { value: 'as_suwayda',  label: 'السويداء' },
+  { value: 'quneitra',    label: 'القنيطرة' },
+];
 
 
 // ══════════════════════════════════════════════════════════════════════
@@ -476,9 +550,17 @@ function AppointmentCancelForm({ appointment, onCancel, onConfirm, submitting })
 
 function AppointmentBookingFlow({ openAlert, onSuccess, onClose }) {
   const [step, setStep] = useState('search');
+
+  // ── Filter state (all combinable) ──────────────────────────────────────
   const [specialization, setSpecialization] = useState('');
+  const [governorate, setGovernorate] = useState('');
+  const [minFee, setMinFee] = useState('');
+  const [maxFee, setMaxFee] = useState('');
+  const [availableOn, setAvailableOn] = useState('');
+
   const [doctors, setDoctors] = useState([]);
   const [doctorsLoading, setDoctorsLoading] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
   const [selectedDoctor, setSelectedDoctor] = useState(null);
   const [slots, setSlots] = useState([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
@@ -487,13 +569,39 @@ function AppointmentBookingFlow({ openAlert, onSuccess, onClose }) {
   const [priority, setPriority] = useState('routine');
   const [submitting, setSubmitting] = useState(false);
 
+  // Price slider bounds (SYP). Tweak if your fee range differs.
+  const FEE_MIN = 0;
+  const FEE_MAX = 500000;
+  const FEE_STEP = 5000;
+
+  // Today's date as the calendar's lower bound.
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  const hasAnyFilter =
+    specialization || governorate || minFee || maxFee || availableOn;
+
+  const handleResetFilters = () => {
+    setSpecialization('');
+    setGovernorate('');
+    setMinFee('');
+    setMaxFee('');
+    setAvailableOn('');
+  };
+
   const handleSearch = async (e) => {
     e?.preventDefault();
     setDoctorsLoading(true);
+    setHasSearched(true);
     try {
-      const res = await patientAPI.searchDoctors(
-        specialization ? { specialization } : {}
-      );
+      // Build the filter payload — only non-empty values are sent.
+      const filters = {};
+      if (specialization) filters.specialization = specialization;
+      if (governorate)    filters.governorate = governorate;
+      if (minFee !== '')  filters.minFee = minFee;
+      if (maxFee !== '')  filters.maxFee = maxFee;
+      if (availableOn)    filters.availableOn = availableOn;
+
+      const res = await patientAPI.searchDoctors(filters);
       if (res?.success) {
         setDoctors(Array.isArray(res.doctors) ? res.doctors : []);
       }
@@ -509,7 +617,13 @@ function AppointmentBookingFlow({ openAlert, onSuccess, onClose }) {
     setSlotsLoading(true);
     setStep('slots');
     try {
-      const res = await patientAPI.getDoctorSlots(doctor._id);
+      // Pass providerType so the backend queries the right owner field
+      // (doctorId vs dentistId) and the right slot collection.
+      const res = await patientAPI.getDoctorSlots(
+        doctor._id,
+        availableOn || undefined,
+        doctor.providerType || 'doctor',
+      );
       if (res?.success) {
         setSlots(
           Array.isArray(res.slots) ? res.slots.filter((s) => !s.isBooked) : []
@@ -528,7 +642,9 @@ function AppointmentBookingFlow({ openAlert, onSuccess, onClose }) {
     try {
       const res = await patientAPI.bookAppointment({
         slotId: selectedSlot._id,
-        appointmentType: 'doctor',
+        // Provider type drives appointmentType so the appointment is created
+        // as 'dentist' for dental bookings (matches the Appointment schema).
+        appointmentType: selectedDoctor?.providerType === 'dentist' ? 'dentist' : 'doctor',
         reasonForVisit: reasonForVisit.trim(),
         priority,
       });
@@ -568,38 +684,191 @@ function AppointmentBookingFlow({ openAlert, onSuccess, onClose }) {
 
         {step === 'search' && (
           <form className="pd-booking-search" onSubmit={handleSearch}>
-            <div className="pd-form-group">
-              <label htmlFor="pd-booking-spec" className="pd-form-label">التخصص</label>
-              <input
-                id="pd-booking-spec"
-                type="text"
-                className="pd-form-input"
-                value={specialization}
-                onChange={(e) => setSpecialization(e.target.value)}
-                placeholder="قلبية، عصبية، جلدية..."
-                dir="auto"
-              />
+            <div className="pd-filter-panel">
+              <div className="pd-filter-panel-head">
+                <SlidersHorizontal size={16} aria-hidden="true" />
+                <span>تصفية البحث</span>
+                {hasAnyFilter && (
+                  <button
+                    type="button"
+                    className="pd-filter-reset"
+                    onClick={handleResetFilters}
+                  >
+                    <RotateCcw size={13} aria-hidden="true" />
+                    <span>إعادة تعيين</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="pd-filter-grid">
+                {/* Specialization — grouped dropdown (medical + dental) */}
+                <div className="pd-form-group">
+                  <label htmlFor="pd-booking-spec" className="pd-form-label">
+                    <Stethoscope size={14} aria-hidden="true" />
+                    <span>التخصص</span>
+                  </label>
+                  <select
+                    id="pd-booking-spec"
+                    className="pd-form-input"
+                    value={specialization}
+                    onChange={(e) => setSpecialization(e.target.value)}
+                  >
+                    <option value="">كل التخصصات</option>
+                    <optgroup label="تخصصات طبية">
+                      {MEDICAL_SPECIALIZATIONS.map((s) => (
+                        <option key={s.value} value={s.value}>{s.label}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="تخصصات أسنان">
+                      {DENTAL_SPECIALIZATIONS.map((s) => (
+                        <option key={s.value} value={s.value}>{s.label}</option>
+                      ))}
+                    </optgroup>
+                  </select>
+                </div>
+
+                {/* Governorate */}
+                <div className="pd-form-group">
+                  <label htmlFor="pd-booking-gov" className="pd-form-label">
+                    <MapPin size={14} aria-hidden="true" />
+                    <span>المنطقة</span>
+                  </label>
+                  <select
+                    id="pd-booking-gov"
+                    className="pd-form-input"
+                    value={governorate}
+                    onChange={(e) => setGovernorate(e.target.value)}
+                  >
+                    <option value="">كل المناطق</option>
+                    {BOOKING_GOVERNORATES.map((g) => (
+                      <option key={g.value} value={g.value}>{g.label}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Available-on date */}
+                <div className="pd-form-group">
+                  <label htmlFor="pd-booking-date" className="pd-form-label">
+                    <Calendar size={14} aria-hidden="true" />
+                    <span>اليوم المتاح</span>
+                  </label>
+                  <input
+                    id="pd-booking-date"
+                    type="date"
+                    className="pd-form-input"
+                    value={availableOn}
+                    min={todayStr}
+                    onChange={(e) => setAvailableOn(e.target.value)}
+                  />
+                </div>
+
+                {/* Price range — dual slider */}
+                <div className="pd-form-group pd-filter-price">
+                  <label className="pd-form-label">
+                    <Wallet size={14} aria-hidden="true" />
+                    <span>نطاق السعر (ل.س)</span>
+                  </label>
+                  <div className="pd-price-values" dir="ltr">
+                    <span>{minFee !== '' ? Number(minFee).toLocaleString('en-US') : FEE_MIN.toLocaleString('en-US')}</span>
+                    <span>—</span>
+                    <span>{maxFee !== '' ? Number(maxFee).toLocaleString('en-US') : FEE_MAX.toLocaleString('en-US')}+</span>
+                  </div>
+                  <div className="pd-price-sliders">
+                    <input
+                      type="range"
+                      className="pd-price-slider pd-price-slider--min"
+                      min={FEE_MIN}
+                      max={FEE_MAX}
+                      step={FEE_STEP}
+                      value={minFee !== '' ? minFee : FEE_MIN}
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        const cap = maxFee !== '' ? Number(maxFee) : FEE_MAX;
+                        setMinFee(String(Math.min(v, cap)));
+                      }}
+                      aria-label="الحد الأدنى للسعر"
+                    />
+                    <input
+                      type="range"
+                      className="pd-price-slider pd-price-slider--max"
+                      min={FEE_MIN}
+                      max={FEE_MAX}
+                      step={FEE_STEP}
+                      value={maxFee !== '' ? maxFee : FEE_MAX}
+                      onChange={(e) => {
+                        const v = Number(e.target.value);
+                        const floor = minFee !== '' ? Number(minFee) : FEE_MIN;
+                        setMaxFee(String(Math.max(v, floor)));
+                      }}
+                      aria-label="الحد الأقصى للسعر"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <button type="submit" className="pd-btn pd-btn--primary pd-filter-search-btn" disabled={doctorsLoading}>
+                <Search size={16} aria-hidden="true" />
+                <span>{doctorsLoading ? 'جاري البحث...' : 'بحث'}</span>
+              </button>
             </div>
-            <button type="submit" className="pd-btn pd-btn--primary" disabled={doctorsLoading}>
-              <Search size={16} aria-hidden="true" />
-              <span>{doctorsLoading ? '...' : 'بحث'}</span>
-            </button>
-            {!doctorsLoading && doctors.length > 0 && (
+
+            {/* Results */}
+            {doctorsLoading ? (
+              <LoadingSpinner message="جاري البحث عن الأطباء..." />
+            ) : hasSearched && doctors.length === 0 ? (
+              <EmptyState
+                icon={Search}
+                title="لا يوجد أطباء مطابقون"
+                subtitle="جرّب توسيع نطاق البحث أو تغيير الفلاتر."
+              />
+            ) : doctors.length > 0 ? (
               <ul className="pd-booking-doctors">
-                {doctors.map((d) => (
-                  <li key={d._id}>
-                    <button type="button" className="pd-booking-doctor" onClick={() => handlePickDoctor(d)}>
-                      <Stethoscope size={18} aria-hidden="true" />
-                      <div>
-                        <strong dir="auto">{d.firstName} {d.lastName}</strong>
-                        <span dir="auto">{d.specialization}</span>
-                      </div>
-                      <ChevronLeft size={16} aria-hidden="true" />
-                    </button>
-                  </li>
-                ))}
+                {doctors.map((d) => {
+                  const specLabel = SPECIALIZATION_LABEL_MAP[d.specialization] || d.specialization;
+                  const govLabel = d.governorate
+                    ? (BOOKING_GOVERNORATES.find((g) => g.value === d.governorate)?.label || d.governorate)
+                    : null;
+                  const ProviderIcon = d.providerType === 'dentist' ? Smile : Stethoscope;
+                  return (
+                    <li key={`${d.providerType}-${d._id}`}>
+                      <button type="button" className="pd-booking-doctor" onClick={() => handlePickDoctor(d)}>
+                        <span className="pd-booking-doctor-avatar" aria-hidden="true">
+                          <ProviderIcon size={20} />
+                        </span>
+                        <div className="pd-booking-doctor-info">
+                          <strong dir="auto">
+                            {d.providerType === 'dentist' ? 'د. أسنان ' : 'د. '}
+                            {d.fullName || `${d.firstName || ''} ${d.lastName || ''}`}
+                          </strong>
+                          <span className="pd-booking-doctor-spec" dir="auto">{specLabel}</span>
+                          <div className="pd-booking-doctor-meta">
+                            {typeof d.consultationFee === 'number' && (
+                              <span className="pd-booking-doctor-tag">
+                                <Wallet size={12} aria-hidden="true" />
+                                <span dir="ltr">{d.consultationFee.toLocaleString('en-US')} {d.currency || 'ل.س'}</span>
+                              </span>
+                            )}
+                            {govLabel && (
+                              <span className="pd-booking-doctor-tag">
+                                <MapPin size={12} aria-hidden="true" />
+                                <span>{govLabel}</span>
+                              </span>
+                            )}
+                            {typeof d.averageRating === 'number' && d.averageRating > 0 && (
+                              <span className="pd-booking-doctor-tag pd-booking-doctor-tag--rating">
+                                <Star size={12} aria-hidden="true" />
+                                <span dir="ltr">{d.averageRating.toFixed(1)}</span>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <ChevronLeft size={18} aria-hidden="true" />
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
-            )}
+            ) : null}
           </form>
         )}
 

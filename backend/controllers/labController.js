@@ -400,11 +400,18 @@ exports.searchPatientByNationalId = async (req, res) => {
   try {
     const labTech = await resolveLabTech(req.account);
     const { nationalId } = req.params;
+    const rawInput = String(nationalId || '').trim();
 
-    if (!/^\d{11}$/.test(nationalId)) {
+    // v2.3 (Muath's spec) — Accept two formats:
+    //   1. Adult:  11-digit national ID  (e.g. 01222333444)
+    //   2. Child:  {parentNationalId}-NN (e.g. 01222333444-01)
+    const isAdultId = /^\d{11}$/.test(rawInput);
+    const isChildId = /^\d{11}-\d{2}$/.test(rawInput);
+
+    if (!isAdultId && !isChildId) {
       return res.status(400).json({
         success: false,
-        message: 'الرقم الوطني يجب أن يكون 11 رقماً'
+        message: 'الصيغة غير صحيحة. أدخل 11 رقم للبالغ أو رقم الأب-XX للطفل (مثل: 01222333444-01)'
       });
     }
 
@@ -414,18 +421,33 @@ exports.searchPatientByNationalId = async (req, res) => {
     let refField;  // 'patientPersonId' OR 'patientChildId'
     let refValue;
 
-    const person = await Person.findOne({ nationalId, isActive: { $ne: false } })
-      .lean();
-
-    if (person) {
-      patientProfile = person;
-      refField = 'patientPersonId';
-      refValue = person._id;
-    } else {
-      // ── 2) Fall back to children collection ──
-      //    Children may have nationalId set after age 14 (pre-migration phase)
-      const child = await Children.findOne({ nationalId, isActive: { $ne: false } })
+    if (isAdultId) {
+      const person = await Person.findOne({ nationalId: rawInput, isActive: { $ne: false } })
         .lean();
+
+      if (person) {
+        patientProfile = person;
+        refField = 'patientPersonId';
+        refValue = person._id;
+      } else {
+        // ── 1b) Fall back to children collection — child may have nationalId
+        //        set after age 14 (pre-migration phase, still in children coll)
+        const child = await Children.findOne({ nationalId: rawInput, isActive: { $ne: false } })
+          .lean();
+        if (child) {
+          patientProfile = child;
+          isChild = true;
+          refField = 'patientChildId';
+          refValue = child._id;
+        }
+      }
+    } else {
+      // ── 2) Child ID format ({parentNationalId}-NN) → look up by childRegistrationNumber
+      const child = await Children.findOne({
+        childRegistrationNumber: rawInput,
+        isActive: { $ne: false }
+      }).lean();
+
       if (child) {
         patientProfile = child;
         isChild = true;
@@ -437,7 +459,7 @@ exports.searchPatientByNationalId = async (req, res) => {
     if (!patientProfile) {
       return res.status(404).json({
         success: false,
-        message: 'لم يتم العثور على مريض بهذا الرقم الوطني'
+        message: 'لم يتم العثور على مريض بهذا الرقم'
       });
     }
 

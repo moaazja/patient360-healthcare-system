@@ -35,7 +35,7 @@
  */
 
 const {
-  LabTest, Laboratory, LabTechnician, Doctor, Visit,
+  LabTest, Laboratory, LabTechnician, Doctor, Dentist, Visit,
   Person, Children, Patient, AuditLog
 } = require('../models');
 
@@ -83,6 +83,26 @@ async function getLabTechFromAccount(account) {
     throw new Error('لم يتم العثور على ملف فني المختبر');
   }
   return labTech;
+}
+
+/**
+ * Resolve the ordering provider (Doctor or Dentist) from the logged-in
+ * account. Lab tests can be ordered by either role, so we look up Doctor
+ * first, then fall back to Dentist.
+ *
+ * @param {object} account - req.account (must have personId)
+ * @returns {Promise<{ provider: object, model: 'Doctor'|'Dentist' } | null>}
+ */
+async function resolveOrderingProvider(account) {
+  if (!account?.personId) return null;
+
+  const doctor = await Doctor.findOne({ personId: account.personId });
+  if (doctor) return { provider: doctor, model: 'Doctor' };
+
+  const dentist = await Dentist.findOne({ personId: account.personId });
+  if (dentist) return { provider: dentist, model: 'Dentist' };
+
+  return null;
 }
 
 // ============================================================================
@@ -139,14 +159,15 @@ exports.createLabTest = async (req, res) => {
       });
     }
 
-    // ── 3. RESOLVE ORDERING DOCTOR (from logged-in account) ───────────────
-    const doctor = await Doctor.findOne({ personId: req.account.personId });
-    if (!doctor) {
+    // ── 3. RESOLVE ORDERING PROVIDER (doctor OR dentist) ──────────────────
+    const ordering = await resolveOrderingProvider(req.account);
+    if (!ordering) {
       return res.status(403).json({
         success: false,
-        message: 'الحساب غير مرتبط بطبيب'
+        message: 'الحساب غير مرتبط بطبيب أو طبيب أسنان'
       });
     }
+    const { provider, model: orderedByModel } = ordering;
 
 // ── 4. VERIFY LABORATORY (IF SPECIFIED) ───────────────────────────────
     // laboratoryId is optional. If provided, verify it exists.
@@ -162,7 +183,8 @@ exports.createLabTest = async (req, res) => {
 
 const labTest = await LabTest.create({
       ...patientRef,
-      orderedBy: doctor._id,
+      orderedBy: provider._id,
+      orderedByModel,
       visitId: visitId || undefined,
       laboratoryId: laboratoryId || undefined,
       orderDate: new Date(),
@@ -252,7 +274,7 @@ exports.getLabTestById = async (req, res) => {
     const { id } = req.params;
 
     const labTest = await LabTest.findById(id)
-      .populate('orderedBy', 'specialization medicalLicenseNumber')
+      .populate('orderedBy', 'specialization medicalLicenseNumber dentalLicenseNumber')
       .populate('laboratoryId', 'name arabicName phoneNumber address')
       .populate('patientPersonId', 'firstName lastName nationalId phoneNumber')
       .populate('patientChildId', 'firstName lastName childRegistrationNumber phoneNumber')
@@ -312,12 +334,12 @@ exports.cancelLabTest = async (req, res) => {
       });
     }
 
-    // Ownership check
+    // Ownership check — the ordering provider may be a doctor or a dentist.
     const isAdmin = req.user.roles?.includes('admin');
     let isOwner = false;
     if (req.user.personId) {
-      const doctor = await Doctor.findOne({ personId: req.user.personId }).lean();
-      isOwner = doctor && String(labTest.orderedBy) === String(doctor._id);
+      const ordering = await resolveOrderingProvider(req.account || req.user);
+      isOwner = ordering && String(labTest.orderedBy) === String(ordering.provider._id);
     }
 
     if (!isAdmin && !isOwner) {
@@ -688,7 +710,11 @@ exports.uploadResultPDF = async (req, res) => {
       });
     }
 
-    labTest.resultPdfUrl = `/uploads/lab-results/${req.file.filename}`;
+    // URL includes the per-patient subfolder resolved by the upload
+    // middleware (nationalId or CRN), falling back to the flat path.
+    labTest.resultPdfUrl = req.uploadPatientFolder
+      ? `/uploads/lab-results/${req.uploadPatientFolder}/${req.file.filename}`
+      : `/uploads/lab-results/${req.file.filename}`;
     labTest.resultPdfUploadedAt = new Date();
     labTest.resultPdfUploadedBy = labTech._id;
     await labTest.save();
@@ -1031,7 +1057,7 @@ exports.getPendingByPatient = async (req, res) => {
       ...patientRef,
       status: { $in: ['ordered', 'scheduled'] }
     })
-      .populate('orderedBy', 'specialization medicalLicenseNumber')
+      .populate('orderedBy', 'specialization medicalLicenseNumber dentalLicenseNumber')
       .populate('visitId', 'visitDate chiefComplaint diagnosis')
       .sort({ orderDate: -1 })
       .lean();

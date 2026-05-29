@@ -84,8 +84,12 @@ router.post(
 );
 
 // ── Application status checks ──────────────────────────────────────────────
-router.get('/check-doctor-status',       authController.checkDoctorStatus);
-router.get('/check-professional-status', authController.checkProfessionalStatus);
+// POST (not GET) so the email travels in the request body rather than the URL
+// query string — keeps the email out of server/proxy access logs. The
+// frontend (authAPI.checkDoctorStatus / checkProfessionalStatus) sends POST
+// with { email } in the body, so the controller reads from req.body.
+router.post('/check-doctor-status',       authController.checkDoctorStatus);
+router.post('/check-professional-status', authController.checkProfessionalStatus);
 
 // ── Login — RATE LIMITED to prevent brute-force ────────────────────────────
 // loginLimiter: 5 attempts per 15 minutes per IP
@@ -105,6 +109,9 @@ router.get('/verify', protect, authController.verify);
 
 // ── Update last login timestamp + register FCM device token ────────────────
 router.post('/update-last-login', protect, authController.updateLastLogin);
+
+// ── Change password (logged-in user changes their own) ─────────────────────
+router.post('/change-password', protect, authController.changePassword);
 
 // ── Logout — invalidates FCM token + audit logs the event ──────────────────
 // NEW in v2.0: was completely missing before

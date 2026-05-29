@@ -3,34 +3,48 @@
  *  Admin Routes — Patient 360°
  *  ─────────────────────────────────────────────────────────────────────────
  *  📁 Path: backend/routes/admin.js
- *  🔧 Version: 2.0 — adds 4 new sections + Account Activity report
+ *  🔧 Version: 2.2 — added facility-requests endpoints (2026-05-27)
  *
  *  Mount point: /api/admin
  *  Auth: All routes require valid JWT + admin role.
  *  Audit: All mutations are auditLog-wrapped.
  *
- *  Sections (v2.0 changes marked 🆕):
+ *  ┌──── v2.2 CHANGES (2026-05-27) ─────────────────────────────────────┐
+ *  │ ➕ ADDED: GET    /facility-requests                                │
+ *  │ ➕ ADDED: GET    /facility-requests/:id                            │
+ *  │ ➕ ADDED: POST   /facility-requests/:id/approve                    │
+ *  │ ➕ ADDED: POST   /facility-requests/:id/reject                     │
+ *  └────────────────────────────────────────────────────────────────────┘
+ *
+ *  ┌──── v2.1 CHANGES (2026-05-27) ─────────────────────────────────────┐
+ *  │ ✗ REMOVED: GET /pharmacies/nearby   (used 2dsphere index)          │
+ *  │ ✗ REMOVED: GET /laboratories/nearby (used 2dsphere index)          │
+ *  └────────────────────────────────────────────────────────────────────┘
+ *
+ *  Sections:
  *    Statistics
  *    Doctor Requests Management
  *    Doctors Management
  *    Patients Management
  *    Audit Logs
- *    🆕 User Activity Report (Account Activity feature)
- *    🆕 Children Management
- *    🆕 Hospitals Management
- *    🆕 Pharmacies Management
- *    🆕 Laboratories Management
+ *    User Activity Report
+ *    Children Management
+ *    Hospitals Management
+ *    Pharmacies Management
+ *    Laboratories Management
+ *    🆕 Facility Requests Management (v2.2)
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
 const express = require('express');
 const router  = express.Router();
 
-const adminController         = require('../controllers/adminController');
-const childAdminController    = require('../controllers/childAdminController');
-const hospitalAdminController = require('../controllers/hospitalAdminController');
-const pharmacyAdminController = require('../controllers/pharmacyAdminController');
-const labAdminController      = require('../controllers/laboratoryAdminController');
+const adminController          = require('../controllers/adminController');
+const childAdminController     = require('../controllers/childAdminController');
+const hospitalAdminController  = require('../controllers/hospitalAdminController');
+const pharmacyAdminController  = require('../controllers/pharmacyAdminController');
+const labAdminController       = require('../controllers/laboratoryAdminController');
+const facilityRequestController = require('../controllers/facilityRequestController');
 
 const { protect, authorize } = require('../middleware/auth');
 const { auditLog }           = require('../middleware/auditLog');
@@ -49,6 +63,13 @@ router.get(
   auditLog('VIEW_STATISTICS'),
   adminController.getStatistics,
 );
+
+// ════════════════════════════════════════════════════════════════════════════
+// EMERGENCY REPORTS (monitoring — mobile AI emergency feature)
+// ════════════════════════════════════════════════════════════════════════════
+router.get('/emergency-reports',
+  auditLog('VIEW_EMERGENCY_REPORTS'),
+  adminController.getEmergencyReports);
 
 // ════════════════════════════════════════════════════════════════════════════
 // DOCTOR REQUESTS MANAGEMENT
@@ -146,13 +167,12 @@ router.get('/audit-logs/user/:userId',
   auditLog('VIEW_USER_AUDIT_LOGS'),
   adminController.getUserAuditLogs);
 
-// 🆕 User Activity Report — Account Activity feature (NEW in v2.0)
 router.get('/audit-logs/user-activity',
   auditLog('VIEW_USER_ACTIVITY_REPORT'),
   adminController.getUserActivityReport);
 
 // ════════════════════════════════════════════════════════════════════════════
-// 🆕 CHILDREN MANAGEMENT (NEW in v2.0)
+// CHILDREN MANAGEMENT
 // ════════════════════════════════════════════════════════════════════════════
 router.get('/children',
   auditLog('VIEW_CHILDREN'),
@@ -175,7 +195,7 @@ router.delete('/children/:id',
   childAdminController.deleteChild);
 
 // ════════════════════════════════════════════════════════════════════════════
-// 🆕 HOSPITALS MANAGEMENT (NEW in v2.0)
+// HOSPITALS MANAGEMENT
 // ════════════════════════════════════════════════════════════════════════════
 router.get('/hospitals',
   auditLog('VIEW_HOSPITALS'),
@@ -202,15 +222,12 @@ router.patch('/hospitals/:id/deactivate',
   hospitalAdminController.deactivateHospital);
 
 // ════════════════════════════════════════════════════════════════════════════
-// 🆕 PHARMACIES MANAGEMENT (NEW in v2.0)
+// PHARMACIES MANAGEMENT
+//   v2.1: removed GET /pharmacies/nearby (GPS-based)
 // ════════════════════════════════════════════════════════════════════════════
 router.get('/pharmacies',
   auditLog('VIEW_PHARMACIES'),
   pharmacyAdminController.getAllPharmacies);
-
-router.get('/pharmacies/nearby',
-  auditLog('SEARCH_NEARBY_PHARMACIES'),
-  pharmacyAdminController.findNearbyPharmacies);
 
 router.get('/pharmacies/:id',
   auditLog('VIEW_PHARMACY_DETAILS'),
@@ -233,15 +250,12 @@ router.patch('/pharmacies/:id/deactivate',
   pharmacyAdminController.deactivatePharmacy);
 
 // ════════════════════════════════════════════════════════════════════════════
-// 🆕 LABORATORIES MANAGEMENT (NEW in v2.0)
+// LABORATORIES MANAGEMENT
+//   v2.1: removed GET /laboratories/nearby (GPS-based)
 // ════════════════════════════════════════════════════════════════════════════
 router.get('/laboratories',
   auditLog('VIEW_LABORATORIES'),
   labAdminController.getAllLaboratories);
-
-router.get('/laboratories/nearby',
-  auditLog('SEARCH_NEARBY_LABORATORIES'),
-  labAdminController.findNearbyLaboratories);
 
 router.get('/laboratories/:id',
   auditLog('VIEW_LABORATORY_DETAILS'),
@@ -262,5 +276,26 @@ router.patch('/laboratories/:id/activate',
 router.patch('/laboratories/:id/deactivate',
   auditLog('DEACTIVATE_LABORATORY'),
   labAdminController.deactivateLaboratory);
+
+// ════════════════════════════════════════════════════════════════════════════
+// 🆕 FACILITY REQUESTS MANAGEMENT (v2.2)
+//   Admin reviews pharmacy/laboratory registration requests submitted by
+//   pharmacists or lab technicians during signup.
+// ════════════════════════════════════════════════════════════════════════════
+router.get('/facility-requests',
+  auditLog('VIEW_FACILITY_REQUESTS'),
+  facilityRequestController.getAllFacilityRequests);
+
+router.get('/facility-requests/:id',
+  auditLog('VIEW_FACILITY_REQUEST_DETAILS'),
+  facilityRequestController.getFacilityRequestById);
+
+router.post('/facility-requests/:id/approve',
+  auditLog('APPROVE_FACILITY_REQUEST'),
+  facilityRequestController.approveFacilityRequest);
+
+router.post('/facility-requests/:id/reject',
+  auditLog('REJECT_FACILITY_REQUEST'),
+  facilityRequestController.rejectFacilityRequest);
 
 module.exports = router;

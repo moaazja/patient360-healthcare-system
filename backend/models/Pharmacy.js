@@ -3,34 +3,32 @@
  *  Pharmacy Model — Patient 360°
  *  ─────────────────────────────────────────────────────────────────────────
  *  Collection: pharmacies
- *  Source of truth: patient360_db_final.js (collection 11)
+ *  Source of truth: patient360_db_final_v2.js (collection 11)
  *
  *  Pharmacy registry. Referenced by:
- *    • pharmacists.pharmacyId       — which pharmacy each pharmacist works at
+ *    • pharmacists.pharmacyId         — which pharmacy each pharmacist works at
  *    • pharmacy_dispensing.pharmacyId — where each dispense happened
  *    • pharmacy_inventory.pharmacyId  — stock levels per pharmacy
  *
- *  ───────────────────────────────────────────────────────────────────────
- *  ⚠️  GeoJSON convention reminder:
- *
- *  MongoDB stores geographic coordinates in GeoJSON Point format:
- *      { type: "Point", coordinates: [longitude, latitude] }
- *
- *  Note the order: LONGITUDE FIRST, latitude second. This trips up most
- *  developers because every other API (Google Maps, Apple Maps, web GPS)
- *  uses [latitude, longitude]. The reason MongoDB chose this order is
- *  consistency with the GeoJSON spec (RFC 7946), which uses [x, y] = [lng, lat].
- *
- *  Syrian coordinate ranges to validate against:
- *    longitude: 35.5 → 42.5  (west to east)
- *    latitude:  32.0 → 37.5  (south to north)
- *
- *  Example — Damascus city center:
- *    coordinates: [36.2765, 33.5138]
- *
- *  The 2dsphere index on `location` enables $near, $geoWithin, $geoIntersects
- *  queries for the "nearest pharmacy" feature.
- *  ───────────────────────────────────────────────────────────────────────
+ *  ┌──── v2 SCHEMA CHANGE (2026-05-27) ─────────────────────────────────┐
+ *  │ ✗ REMOVED: GeoJSONPointSchema sub-schema (GPS coordinates)         │
+ *  │ ✗ REMOVED: `location` field on the main schema                     │
+ *  │ ✗ REMOVED: `location: 2dsphere` index                              │
+ *  │ ✗ REMOVED: virtual `coordinates`                                   │
+ *  │ ✗ REMOVED: static method `findNearby()`                            │
+ *  │                                                                    │
+ *  │ Reason: Team decision — GPS-based nearest-pharmacy queries are     │
+ *  │   out of MVP scope. Text address fields (governorate, city,        │
+ *  │   district, address) provide sufficient location for end users.    │
+ *  │   Removing GPS simplifies the SignUp and Admin workflows.          │
+ *  │                                                                    │
+ *  │ All other fields and methods are preserved:                        │
+ *  │   ✓ Identity, contact, type, address (text only)                  │
+ *  │   ✓ operatingHours[] for "is open now" calculations                │
+ *  │   ✓ isOpenNow() instance method                                    │
+ *  │   ✓ refreshRating() instance method                                │
+ *  │   ✓ Ratings, status flags, timestamps                              │
+ *  └────────────────────────────────────────────────────────────────────┘
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -53,12 +51,6 @@ const WEEKDAYS = [
   'Thursday', 'Friday', 'Saturday',
 ];
 
-// Syrian geographic bounding box (used by the GeoJSON validator).
-const SYRIA_LNG_MIN = 35.5;
-const SYRIA_LNG_MAX = 42.5;
-const SYRIA_LAT_MIN = 32.0;
-const SYRIA_LAT_MAX = 37.5;
-
 // ── Sub-schemas ─────────────────────────────────────────────────────────────
 
 const OperatingHoursSchema = new Schema(
@@ -67,39 +59,6 @@ const OperatingHoursSchema = new Schema(
     openTime: { type: String, trim: true }, // HH:MM (24h)
     closeTime: { type: String, trim: true },
     is24Hours: { type: Boolean, default: false },
-  },
-  { _id: false },
-);
-
-/**
- * GeoJSON Point sub-schema. The `coordinates` field MUST be in
- * [longitude, latitude] order per the GeoJSON spec.
- */
-const GeoJSONPointSchema = new Schema(
-  {
-    type: {
-      type: String,
-      enum: ['Point'],
-      required: true,
-      default: 'Point',
-    },
-    coordinates: {
-      type: [Number], // [longitude, latitude]
-      required: true,
-      validate: {
-        validator(coords) {
-          if (!Array.isArray(coords) || coords.length !== 2) return false;
-          const [lng, lat] = coords;
-          if (typeof lng !== 'number' || typeof lat !== 'number') return false;
-          // Validate coordinates fall within Syria
-          return (
-            lng >= SYRIA_LNG_MIN && lng <= SYRIA_LNG_MAX
-            && lat >= SYRIA_LAT_MIN && lat <= SYRIA_LAT_MAX
-          );
-        },
-        message: 'الإحداثيات يجب أن تكون [خط الطول، خط العرض] داخل سوريا',
-      },
-    },
   },
   { _id: false },
 );
@@ -144,7 +103,7 @@ const PharmacySchema = new Schema(
     // ── Type ──────────────────────────────────────────────────────────────
     pharmacyType: { type: String, enum: PHARMACY_TYPES, default: 'community' },
 
-    // ── Location (text) ───────────────────────────────────────────────────
+    // ── Location (text only — v2: GeoJSON removed) ────────────────────────
     governorate: {
       type: String,
       enum: GOVERNORATES,
@@ -160,12 +119,6 @@ const PharmacySchema = new Schema(
       type: String,
       required: [true, 'العنوان مطلوب'],
       trim: true,
-    },
-
-    // ── Location (GeoJSON — REQUIRED for nearest-pharmacy queries) ────────
-    location: {
-      type: GeoJSONPointSchema,
-      required: [true, 'إحداثيات GPS للصيدلية مطلوبة'],
     },
 
     // ── Operating hours ───────────────────────────────────────────────────
@@ -187,7 +140,7 @@ const PharmacySchema = new Schema(
   },
 );
 
-// ── Indexes ─────────────────────────────────────────────────────────────────
+// ── Indexes (v2: 2dsphere index removed) ────────────────────────────────────
 
 PharmacySchema.index({ governorate: 1, city: 1 }, { name: 'idx_location_text' });
 PharmacySchema.index(
@@ -195,41 +148,6 @@ PharmacySchema.index(
   { name: 'idx_status' },
 );
 PharmacySchema.index({ averageRating: -1 }, { name: 'idx_rating_desc' });
-
-// 2dsphere index — REQUIRED for $near geospatial queries
-PharmacySchema.index({ location: '2dsphere' }, { name: 'idx_location_geo' });
-
-// ── Virtuals ────────────────────────────────────────────────────────────────
-
-/**
- * Convenience accessor: returns [longitude, latitude] or null.
- */
-PharmacySchema.virtual('coordinates').get(function () {
-  return this.location?.coordinates || null;
-});
-
-// ── Static methods ──────────────────────────────────────────────────────────
-
-/**
- * Find pharmacies near a given GPS coordinate, ordered by distance.
- *
- * @param {number} longitude
- * @param {number} latitude
- * @param {number} [maxDistanceMeters=5000] - default 5km radius
- * @returns {mongoose.Query}
- */
-PharmacySchema.statics.findNearby = function findNearby(longitude, latitude, maxDistanceMeters = 5000) {
-  return this.find({
-    location: {
-      $near: {
-        $geometry: { type: 'Point', coordinates: [longitude, latitude] },
-        $maxDistance: maxDistanceMeters,
-      },
-    },
-    isActive: true,
-    isAcceptingOrders: true,
-  });
-};
 
 // ── Instance methods ────────────────────────────────────────────────────────
 
@@ -240,7 +158,7 @@ PharmacySchema.statics.findNearby = function findNearby(longitude, latitude, max
  * @returns {boolean}
  */
 PharmacySchema.methods.isOpenNow = function isOpenNow() {
-  // Get current time in Damascus regardless of server timezone
+  // Get current time in Damascus regardless of server timezone.
   const now = new Date();
   const damascusFormatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Damascus',

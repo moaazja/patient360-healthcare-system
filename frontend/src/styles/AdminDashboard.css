@@ -3235,3 +3235,394 @@
 [data-theme="dark"] .ad-suspicious-card .ad-detail-section-title {
   color: #ff8a80;
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   DOCUMENT VIEWER MODAL
+   ───────────────────────────────────────────────────────────────────
+   In-page viewer for license PDFs, profile photos, and other uploaded
+   files. Replaces the old target="_blank" anchors that took the admin
+   out of the dashboard.
+   ════════════════════════════════════════════════════════════════════ */
+
+.ad-doc-viewer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.72);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: ad-doc-viewer-fade-in 0.18s ease-out;
+}
+
+@keyframes ad-doc-viewer-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.ad-doc-viewer-panel {
+  width: 100%;
+  max-width: 980px;
+  height: 100%;
+  max-height: calc(100vh - 48px);
+  background: #ffffff;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow:
+    0 25px 70px -10px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
+  animation: ad-doc-viewer-pop-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes ad-doc-viewer-pop-in {
+  from { transform: translateY(12px) scale(0.98); opacity: 0; }
+  to   { transform: translateY(0) scale(1);       opacity: 1; }
+}
+
+.ad-doc-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+
+.ad-doc-viewer-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'Cairo', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #0f172a;
+  min-width: 0;
+}
+
+.ad-doc-viewer-title svg {
+  color: #00897b;
+  flex-shrink: 0;
+}
+
+.ad-doc-viewer-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ad-doc-viewer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.ad-doc-viewer-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  font-family: 'Cairo', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #0f172a;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.ad-doc-viewer-action:hover {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+}
+
+.ad-doc-viewer-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  background: #ffffff;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.ad-doc-viewer-close:hover {
+  background: #fef2f2;
+  color: #dc2626;
+  border-color: #fca5a5;
+}
+
+.ad-doc-viewer-body {
+  flex: 1;
+  min-height: 0;
+  background: #f1f5f9;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  overflow: hidden;
+}
+
+.ad-doc-viewer-iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #ffffff;
+}
+
+.ad-doc-viewer-image-wrap {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overflow: auto;
+}
+
+.ad-doc-viewer-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.ad-doc-viewer-unsupported {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 40px 20px;
+  font-family: 'Cairo', sans-serif;
+  color: #475569;
+  text-align: center;
+}
+
+.ad-doc-viewer-unsupported p {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+/* ── Dark mode overrides ─────────────────────────────────────── */
+
+[data-theme="dark"] .ad-doc-viewer-backdrop {
+  background: rgba(0, 0, 0, 0.82);
+}
+
+[data-theme="dark"] .ad-doc-viewer-panel {
+  background: #1e293b;
+}
+
+[data-theme="dark"] .ad-doc-viewer-header {
+  background: #0f172a;
+  border-bottom-color: #334155;
+}
+
+[data-theme="dark"] .ad-doc-viewer-title {
+  color: #f1f5f9;
+}
+
+[data-theme="dark"] .ad-doc-viewer-action,
+[data-theme="dark"] .ad-doc-viewer-close {
+  background: #1e293b;
+  color: #f1f5f9;
+  border-color: #475569;
+}
+
+[data-theme="dark"] .ad-doc-viewer-action:hover {
+  background: #334155;
+}
+
+[data-theme="dark"] .ad-doc-viewer-close:hover {
+  background: #450a0a;
+  color: #fca5a5;
+  border-color: #b91c1c;
+}
+
+[data-theme="dark"] .ad-doc-viewer-body {
+  background: #0f172a;
+}
+
+[data-theme="dark"] .ad-doc-viewer-iframe {
+  background: #1e293b;
+}
+
+[data-theme="dark"] .ad-doc-viewer-image {
+  background: #1e293b;
+}
+
+[data-theme="dark"] .ad-doc-viewer-unsupported {
+  color: #cbd5e1;
+}
+
+/* ── Responsive ─────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  .ad-doc-viewer-backdrop { padding: 12px; }
+  .ad-doc-viewer-panel { border-radius: 12px; }
+  .ad-doc-viewer-header { padding: 12px 14px; }
+  .ad-doc-viewer-title { font-size: 0.88rem; }
+  .ad-doc-viewer-action span { display: none; }
+  .ad-doc-viewer-action {
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    justify-content: center;
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   SETTINGS SECTION — account info + change password + preferences
+   ════════════════════════════════════════════════════════════════════════ */
+
+.ad-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+  align-items: start;
+}
+
+/* ── Account info rows ───────────────────────────────────────────────── */
+.ad-settings-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 4px;
+}
+
+.ad-settings-info-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 8px;
+  border-bottom: 1px solid var(--ad-border, #E0F2F1);
+}
+
+.ad-settings-info-row:last-child {
+  border-bottom: none;
+}
+
+.ad-settings-info-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--ad-text-muted, #5A8A8C);
+  font-weight: 500;
+}
+
+.ad-settings-info-value {
+  font-size: 0.95rem;
+  color: var(--ad-text, #0D3B3E);
+  font-weight: 600;
+  text-align: left;
+}
+
+/* ── Badge (role) ────────────────────────────────────────────────────── */
+.ad-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  background: var(--ad-surface, #E0F2F1);
+  color: var(--ad-primary, #0D3B3E);
+}
+
+.ad-badge-success {
+  background: rgba(0, 137, 123, 0.12);
+  color: var(--ad-action, #00897B);
+}
+
+/* ── Change-password form ────────────────────────────────────────────── */
+.ad-settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 4px;
+}
+
+.ad-settings-form .ad-btn-primary {
+  align-self: flex-start;
+  margin-top: 4px;
+  gap: 8px;
+}
+
+/* ── Preferences (theme toggle) ──────────────────────────────────────── */
+.ad-settings-pref-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 8px;
+}
+
+.ad-settings-pref-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ad-settings-pref-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ad-text, #0D3B3E);
+}
+
+.ad-settings-pref-desc {
+  font-size: 0.82rem;
+  color: var(--ad-text-muted, #5A8A8C);
+}
+
+/* ── Toggle switch ───────────────────────────────────────────────────── */
+.ad-toggle {
+  position: relative;
+  width: 48px;
+  height: 26px;
+  border-radius: 999px;
+  border: none;
+  background: var(--ad-border, #C5DEDD);
+  cursor: pointer;
+  transition: background 0.22s ease;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.ad-toggle.is-on {
+  background: var(--ad-action, #00897B);
+}
+
+.ad-toggle-knob {
+  position: absolute;
+  top: 3px;
+  inset-inline-start: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: inset-inline-start 0.22s ease;
+}
+
+.ad-toggle.is-on .ad-toggle-knob {
+  inset-inline-start: 25px;
+}

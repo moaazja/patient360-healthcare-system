@@ -17,12 +17,19 @@
  *
  *  Two public endpoints:
  *    POST /api/drug-risk/check                (patient self-inquiry)
- *    POST /api/drug-risk/check-for-patient    (doctor screening a drug)
+ *    POST /api/drug-risk/check-for-patient    (doctor or dentist screening)
  *
  *  Plus auxiliary endpoints:
  *    GET  /api/drug-risk/my-history           (patient's own history)
- *    POST /api/drug-risk/:id/acknowledge      (doctor confirms an override)
+ *    POST /api/drug-risk/:id/acknowledge      (prescriber confirms an override)
  *    GET  /api/drug-risk/health               (FastAPI reachability probe)
+ *
+ *  Note on "doctor" vs "dentist":
+ *    The DoctorDashboard is shared between both roles. The DrugRiskCheck
+ *    schema keeps a single `doctorId` field which may reference EITHER a
+ *    Doctor or a Dentist document (they're parallel collections with the
+ *    same structural role: clinical prescriber). The helper
+ *    `resolvePractitioner` below handles both transparently.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -33,6 +40,7 @@ const {
   Children,
   Patient,
   Doctor,
+  Dentist,
   DrugRiskCheck,
 } = require('../../models');
 
@@ -98,6 +106,38 @@ async function resolvePatientByIdentifier(identifier) {
       ref: { childId: child._id },
       kind: 'child',
     };
+  }
+
+  return null;
+}
+
+/**
+ * Resolve the prescriber's profile (Doctor or Dentist) given the
+ * authenticated user. Returns null if no profile is found in either
+ * collection.
+ *
+ * Why a unified helper:
+ *   The DoctorDashboard is used by both doctors and dentists. Their
+ *   profile documents live in separate collections (`doctors` and
+ *   `dentists`), but they play the same structural role: prescriber.
+ *   Rather than duplicate the lookup in every endpoint, we resolve once.
+ *
+ * Lookup strategy:
+ *   We check the user's roles array and query only the relevant
+ *   collection. If neither role is present (shouldn't happen since the
+ *   route's authorize() already filters), we return null.
+ */
+async function resolvePractitioner(user) {
+  const roles = Array.isArray(user.roles) ? user.roles : [];
+
+  if (roles.includes('doctor')) {
+    const doctor = await Doctor.findOne({ personId: user.personId }).lean();
+    if (doctor) return { profile: doctor, kind: 'doctor' };
+  }
+
+  if (roles.includes('dentist')) {
+    const dentist = await Dentist.findOne({ personId: user.personId }).lean();
+    if (dentist) return { profile: dentist, kind: 'dentist' };
   }
 
   return null;
@@ -246,7 +286,8 @@ exports.checkForSelf = async (req, res) => {
   }
 };
 
-// ── Endpoint: POST /api/drug-risk/check-for-patient  (doctor screening) ─
+// ── Endpoint: POST /api/drug-risk/check-for-patient  (prescriber screening) ─
+// Used by both doctors and dentists from the shared DoctorDashboard.
 
 exports.checkForPatient = async (req, res) => {
   try {
@@ -266,12 +307,12 @@ exports.checkForPatient = async (req, res) => {
     }
     const inputText = text.trim().slice(0, MAX_INPUT_TEXT_LENGTH);
 
-    // Locate the doctor's profile (so we can link doctorId)
-    const doctor = await Doctor.findOne({ personId: req.user.personId }).lean();
-    if (!doctor) {
+    // Locate the prescriber's profile (Doctor or Dentist)
+    const practitioner = await resolvePractitioner(req.user);
+    if (!practitioner) {
       return res.status(403).json({
         success: false,
-        message: 'حساب الطبيب غير موجود',
+        message: 'لم نعثر على حسابك الطبي',
       });
     }
 
@@ -306,8 +347,10 @@ exports.checkForPatient = async (req, res) => {
 
     const record = buildCheckRecord({
       ref,
-      initiatedBy: 'doctor',
-      doctorId: doctor._id,
+      initiatedBy: 'doctor', // we keep this enum value for both prescribers
+                             // (doctor + dentist) to avoid breaking the
+                             // DrugRiskCheck.initiatedBy enum.
+      doctorId: practitioner.profile._id,  // stores Doctor._id OR Dentist._id
       inputText,
       profile,
       fastApiResult,
@@ -373,7 +416,8 @@ exports.myHistory = async (req, res) => {
   }
 };
 
-// ── Endpoint: POST /api/drug-risk/:id/acknowledge  (doctor override) ───
+// ── Endpoint: POST /api/drug-risk/:id/acknowledge  (prescriber override) ───
+// Used by both doctors and dentists.
 
 exports.acknowledgeOverride = async (req, res) => {
   try {
@@ -385,14 +429,15 @@ exports.acknowledgeOverride = async (req, res) => {
     const { justification } = req.body || {};
     const trimmed = typeof justification === 'string' ? justification.trim().slice(0, 500) : '';
 
-    // Only the originating doctor can acknowledge their own check.
-    const doctor = await Doctor.findOne({ personId: req.user.personId }).lean();
-    if (!doctor) {
-      return res.status(403).json({ success: false, message: 'حساب الطبيب غير موجود' });
+    // Only the originating prescriber can acknowledge their own check.
+    // Resolve their profile (Doctor or Dentist).
+    const practitioner = await resolvePractitioner(req.user);
+    if (!practitioner) {
+      return res.status(403).json({ success: false, message: 'لم نعثر على حسابك الطبي' });
     }
 
     const updated = await DrugRiskCheck.findOneAndUpdate(
-      { _id: id, doctorId: doctor._id },
+      { _id: id, doctorId: practitioner.profile._id },
       {
         $set: {
           'doctorOverride.acknowledged':   true,

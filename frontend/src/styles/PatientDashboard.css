@@ -1384,6 +1384,234 @@ select.pd-form-input {
 
 
 /* ══════════════════════════════════════════════════════════════════════
+   Booking filter panel (advanced search: spec + governorate + price + day)
+   ══════════════════════════════════════════════════════════════════════ */
+
+.pd-filter-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  background: var(--tm-surface);
+  border: 1px solid var(--tm-border);
+  border-radius: var(--pd-radius-lg);
+}
+
+.pd-filter-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--tm-primary);
+}
+
+.pd-filter-panel-head svg { color: var(--tm-action); }
+
+/* Reset button pushed to the far (logical) end of the header. */
+.pd-filter-reset {
+  margin-inline-start: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  color: var(--tm-text-secondary);
+  background: transparent;
+  border: 1px solid var(--tm-border);
+  border-radius: var(--pd-radius-sm);
+  cursor: pointer;
+  transition: all var(--pd-transition);
+}
+
+.pd-filter-reset:hover {
+  color: var(--tm-error);
+  border-color: var(--tm-error);
+}
+
+/* Two-column responsive grid for the filter fields. */
+.pd-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+
+/* Form labels inside filters get an icon + text row. */
+.pd-filter-grid .pd-form-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pd-filter-grid .pd-form-label svg { color: var(--tm-action); }
+
+/* Price filter spans both columns so the slider has room. */
+.pd-filter-price {
+  grid-column: 1 / -1;
+}
+
+.pd-price-values {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tm-primary);
+}
+
+.pd-price-values span:nth-child(2) { color: var(--tm-text-secondary); }
+
+/* Dual-range slider: stack both inputs in the same track area. */
+.pd-price-sliders {
+  position: relative;
+  height: 30px;
+  display: flex;
+  align-items: center;
+}
+
+.pd-price-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--tm-border);
+  border-radius: 4px;
+  outline: none;
+  position: absolute;
+  inset-inline: 0;
+  pointer-events: none;
+  margin: 0;
+}
+
+/* Thumb (WebKit) */
+.pd-price-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--tm-action);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+/* Thumb (Firefox) */
+.pd-price-slider::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--tm-action);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+/* The max slider sits above so its thumb stays grabbable. */
+.pd-price-slider--max { z-index: 2; }
+.pd-price-slider--min { z-index: 3; }
+
+.pd-filter-search-btn {
+  justify-content: center;
+  width: 100%;
+}
+
+/* ── Enhanced doctor result cards ───────────────────────────────────── */
+.pd-booking-doctor-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: var(--tm-surface);
+  color: var(--tm-action);
+  flex-shrink: 0;
+}
+
+.pd-booking-doctor:hover .pd-booking-doctor-avatar {
+  background: var(--tm-action);
+  color: #fff;
+}
+
+.pd-booking-doctor-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pd-booking-doctor-info strong {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--tm-primary);
+}
+
+.pd-booking-doctor-spec {
+  font-size: 12.5px;
+  color: var(--tm-text-secondary);
+}
+
+.pd-booking-doctor-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.pd-booking-doctor-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--tm-text-secondary);
+  background: var(--tm-surface);
+  border: 1px solid var(--tm-border);
+  border-radius: 999px;
+}
+
+.pd-booking-doctor-tag svg { color: var(--tm-action); flex-shrink: 0; }
+
+.pd-booking-doctor-tag--rating {
+  color: #b8860b;
+}
+
+.pd-booking-doctor-tag--rating svg {
+  color: #f5b301;
+  fill: #f5b301;
+}
+
+[data-theme="dark"] .pd-filter-panel {
+  background: var(--tm-card-bg);
+}
+
+[data-theme="dark"] .pd-booking-doctor-tag,
+[data-theme="dark"] .pd-booking-doctor-avatar {
+  background: var(--tm-background);
+}
+
+[data-theme="dark"] .pd-booking-doctor-tag--rating {
+  color: #ffd54f;
+}
+
+/* Mobile: single-column filters. */
+@media (max-width: 560px) {
+  .pd-filter-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════
    Visits section
    ══════════════════════════════════════════════════════════════════════ */
 

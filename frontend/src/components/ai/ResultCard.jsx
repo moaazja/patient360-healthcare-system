@@ -600,7 +600,7 @@ function ResultCardTriage({ result }) {
           </div>
         )}
 
-        {voiceTranscript && (inputType === 'voice' || !inputType) && (
+        {voiceTranscript && inputType === 'voice' && (
           <VoiceTranscriptionBlock transcript={voiceTranscript} />
         )}
 
@@ -628,7 +628,7 @@ function ResultCardTriage({ result }) {
         confidence={confidence}
       />
 
-      {voiceTranscript && (
+      {voiceTranscript && inputType === 'voice' && (
         <VoiceTranscriptionBlock transcript={voiceTranscript} />
       )}
 

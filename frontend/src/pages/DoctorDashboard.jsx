@@ -1012,7 +1012,6 @@ const DoctorDashboard = () => {
 
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [patientHistory, setPatientHistory] = useState([]);
-  const [recentPatients, setRecentPatients] = useState([]);
   const [patientTab, setPatientTab] = useState('overview'); // overview | history | newVisit
 
   /* ─────────────────────────────────────────────────────────────────
@@ -1040,6 +1039,10 @@ const DoctorDashboard = () => {
   const [diagnosis, setDiagnosis] = useState('');
   const [doctorNotes, setDoctorNotes] = useState('');
   const [followUpDate, setFollowUpDate] = useState('');
+  // Follow-up time (HH:MM, 24-hour). Required when followUpDate is set so
+  // each doctor's follow-ups land at a chosen hour instead of every one
+  // piling up at the old 09:00 default. Empty means "no time chosen yet".
+  const [followUpTime, setFollowUpTime] = useState('');
   const [followUpNotes, setFollowUpNotes] = useState('');
 
   // Vital signs — 9 fields matching visits.vitalSigns schema
@@ -1374,12 +1377,14 @@ const DoctorDashboard = () => {
         }
         setUser(parsedUser);
 
-        // Load recent patients from localStorage
+        // Privacy: any legacy "recent patients" cached in localStorage from
+        // earlier builds must be purged. localStorage is shared across all
+        // users of the same browser, so a previous doctor's patient names
+        // could leak to whoever logs in next on the same machine.
         try {
-          const recents = JSON.parse(localStorage.getItem('dd_recent_patients') || '[]');
-          setRecentPatients(recents.slice(0, 8));
+          localStorage.removeItem('dd_recent_patients');
         } catch (e) {
-          setRecentPatients([]);
+          // Silent — localStorage may be disabled in some browsers.
         }
 
         // Fetch dashboard data in parallel — silently continue if backend not ready yet
@@ -1487,14 +1492,14 @@ const DoctorDashboard = () => {
       return;
     }
 
-    // Accept BOTH formats:
-    //   ‣ 11-digit national ID  (adult, e.g. 01122334455)
-    //   ‣ CRN-YYYYMMDD-XXXXX    (child under 14, e.g. CRN-20260424-00001)
-    const isAdultId  = /^\d{11}$/.test(id);
-    const isChildCRN = /^CRN-\d{8}-\d{4,5}$/.test(id);
+    // v2.3 (Muath's spec) — Accept BOTH formats:
+    //   ‣ Adult:  11-digit national ID         (e.g. 01122334455)
+    //   ‣ Child:  {parentNationalId}-NN        (e.g. 01122334455-01)
+    const isAdultId = /^\d{11}$/.test(id);
+    const isChildId = /^\d{11}-\d{2}$/.test(id);
 
-    if (!isAdultId && !isChildCRN) {
-      setSearchError('الصيغة غير صحيحة. أدخل 11 رقم وطني للبالغين، أو CRN-YYYYMMDD-XXXXX للأطفال');
+    if (!isAdultId && !isChildId) {
+      setSearchError('الصيغة غير صحيحة. أدخل 11 رقم للبالغ، أو رقم الأب-XX للطفل (مثل: 01122334455-01)');
       return;
     }
 
@@ -1544,29 +1549,6 @@ const DoctorDashboard = () => {
       setPatientHistory([]);
     }
 
-    // Cache to recent patients (deduped, capped at 8)
-    try {
-      const existing = JSON.parse(localStorage.getItem('dd_recent_patients') || '[]');
-      const filtered = existing.filter(
-        (p) => (p.nationalId || p.childRegistrationNumber) !== (patient.nationalId || patient.childRegistrationNumber)
-      );
-      const updated = [
-        {
-          firstName: patient.firstName,
-          lastName: patient.lastName,
-          nationalId: patient.nationalId,
-          childRegistrationNumber: patient.childRegistrationNumber,
-          gender: patient.gender,
-          isChild: !!patient.childRegistrationNumber,
-          cachedAt: new Date().toISOString(),
-        },
-        ...filtered,
-      ].slice(0, 8);
-      localStorage.setItem('dd_recent_patients', JSON.stringify(updated));
-      setRecentPatients(updated);
-    } catch (e) {
-      // Silent fail
-    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1590,6 +1572,7 @@ const DoctorDashboard = () => {
     setDiagnosis('');
     setDoctorNotes('');
     setFollowUpDate('');
+    setFollowUpTime('');
     setFollowUpNotes('');
     setVitalSigns({
       bloodPressureSystolic: '',
@@ -1999,6 +1982,18 @@ const DoctorDashboard = () => {
       openModal('error', 'حقل مطلوب', 'الرجاء إدخال الشكوى الرئيسية');
       return;
     }
+    // Follow-up: if the doctor set a date, they must also pick a time.
+    // We surface this client-side so the doctor sees an Arabic error
+    // immediately instead of round-tripping to the backend for the same
+    // check.
+    if (followUpDate && !followUpTime) {
+      openModal(
+        'error',
+        'حقل مطلوب',
+        'الرجاء تحديد وقت موعد المتابعة'
+      );
+      return;
+    }
 
     setSaving(true);
     try {
@@ -2016,6 +2011,7 @@ const DoctorDashboard = () => {
 
       if (followUpDate) {
         formData.append('followUpDate', followUpDate);
+        formData.append('followUpTime', followUpTime);
         formData.append('followUpNotes', followUpNotes);
       }
       if (visitPhoto) {
@@ -2079,6 +2075,22 @@ const DoctorDashboard = () => {
         successMessage += `\n\nلكن فشل إرسال طلب التحاليل: ${labOrderError}`;
       }
 
+      // Surface follow-up creation failures. The backend now returns
+      // `followUpError` when the visit saved but the follow-up appointment
+      // failed (e.g. due to validation issues). Previously this was silently
+      // dropped and the doctor would never know the follow-up wasn't on the
+      // calendar.
+      if (followUpDate && visitResponse?.followUpError) {
+        successTitle = 'تم الحفظ مع تحذير';
+        successMessage += `\n\nلكن لم يتم حفظ موعد المتابعة: ${visitResponse.followUpError}`;
+      } else if (visitResponse?.followUpAppointment) {
+        const dt = visitResponse.followUpAppointment.appointmentDate;
+        if (dt) {
+          const dateStr = new Date(dt).toLocaleDateString('ar-EG');
+          successMessage += `\n\nتم تحديد موعد متابعة بتاريخ ${dateStr} الساعة ${visitResponse.followUpAppointment.appointmentTime}.`;
+        }
+      }
+
       openModal('success', successTitle, successMessage, () => {
         closeModal();
         Promise.all([
@@ -2101,7 +2113,7 @@ const DoctorDashboard = () => {
     }
   }, [
     selectedPatient, chiefComplaint, diagnosis, doctorNotes, visitType,
-    vitalSigns, medications, followUpDate, followUpNotes, visitPhoto,
+    vitalSigns, medications, followUpDate, followUpTime, followUpNotes, visitPhoto,
     ecgResult, xrayResult, xrayModel, isCardiologist, isOrthopedist,
     labTests,
     openModal, closeModal, resetVisitForm,
@@ -2178,48 +2190,58 @@ const DoctorDashboard = () => {
   const handleCancelAppt = useCallback(async () => {
     if (!selectedAppointment?._id) return;
 
-    const confirmed = window.confirm(
-      'هل أنت متأكد من إلغاء هذا الموعد؟ سيتم إشعار المريض وتحرير الموعد.'
-    );
-    if (!confirmed) return;
+    // Replace native window.confirm() with the dashboard's custom modal
+    // so the confirmation dialog matches the Teal Medica design system
+    // and renders in Arabic with proper RTL layout instead of the browser's
+    // English-default native prompt.
+    openModal(
+      'confirm',
+      'تأكيد الإلغاء',
+      'هل أنت متأكد من إلغاء هذا الموعد؟ سيتم إشعار المريض وتحرير الموعد.',
+      async () => {
+        // The closeModal call happens up front so the spinner is visible
+        // and there is no overlay competing with the action.
+        closeModal();
 
-    try {
-      setCancelingAppt(true);
+        try {
+          setCancelingAppt(true);
 
-      const token = localStorage.getItem('token');
-      const resp = await fetch(
-        `http://localhost:5000/api/doctor/appointments/${selectedAppointment._id}/cancel`,
-        {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
-          },
-          body: JSON.stringify({ reason: 'doctor_unavailable' })
+          const token = localStorage.getItem('token');
+          const resp = await fetch(
+            `http://localhost:5000/api/doctor/appointments/${selectedAppointment._id}/cancel`,
+            {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`
+              },
+              body: JSON.stringify({ reason: 'doctor_unavailable' })
+            }
+          );
+
+          const payload = await resp.json().catch(() => ({}));
+          if (!resp.ok || payload.success === false) {
+            throw new Error(payload.message || 'فشل إلغاء الموعد');
+          }
+
+          // Refresh both appointments and slots so the calendar updates
+          const [apptsRefreshed, slotsRefreshed] = await Promise.all([
+            doctorAPI.getMyAppointments().catch(() => null),
+            doctorAPI.getMyAvailabilitySlots().catch(() => null)
+          ]);
+          if (apptsRefreshed?.appointments) setAppointments(apptsRefreshed.appointments);
+          if (slotsRefreshed?.slots) setAvailabilitySlots(slotsRefreshed.slots);
+
+          closeApptDetails();
+          openModal('success', 'تم الإلغاء', 'تم إلغاء الموعد وإشعار المريض.');
+        } catch (error) {
+          openModal('error', 'فشل الإلغاء', error.message || 'تعذّر إلغاء الموعد');
+        } finally {
+          setCancelingAppt(false);
         }
-      );
-
-      const payload = await resp.json().catch(() => ({}));
-      if (!resp.ok || payload.success === false) {
-        throw new Error(payload.message || 'فشل إلغاء الموعد');
       }
-
-      // Refresh both appointments and slots so the calendar updates
-      const [apptsRefreshed, slotsRefreshed] = await Promise.all([
-        doctorAPI.getMyAppointments().catch(() => null),
-        doctorAPI.getMyAvailabilitySlots().catch(() => null)
-      ]);
-      if (apptsRefreshed?.appointments) setAppointments(apptsRefreshed.appointments);
-      if (slotsRefreshed?.slots) setAvailabilitySlots(slotsRefreshed.slots);
-
-      closeApptDetails();
-      openModal('success', 'تم الإلغاء', 'تم إلغاء الموعد وإشعار المريض.');
-    } catch (error) {
-      openModal('error', 'فشل الإلغاء', error.message || 'تعذّر إلغاء الموعد');
-    } finally {
-      setCancelingAppt(false);
-    }
-  }, [selectedAppointment, closeApptDetails, openModal]);
+    );
+  }, [selectedAppointment, closeApptDetails, openModal, closeModal]);
 
   /**
    * openSlotDetails / closeSlotDetails — opens the "available slot" details
@@ -2240,47 +2262,60 @@ const DoctorDashboard = () => {
    * handleDeleteSlot — deletes an unbooked availability slot.
    * Calls DELETE /api/doctor/availability-slots/:id which verifies both
    * ownership and that currentBookings === 0 server-side.
+   *
+   * Uses the dashboard's custom confirm modal instead of native
+   * window.confirm() so the dialog matches the Teal Medica design.
    */
   const handleDeleteSlot = useCallback(async () => {
     if (!selectedSlotDetails?._id) return;
 
-    const confirmed = window.confirm(
-      'هل أنت متأكد من حذف هذا الموعد المتاح؟ لن يتمكن المرضى من حجزه بعد الحذف.'
-    );
-    if (!confirmed) return;
+    // Capture the slot id before we close the details modal (closing clears
+    // selectedSlotDetails). We close the details modal FIRST so the confirm
+    // dialog isn't rendered underneath it — previously both modals shared the
+    // same overlay layer and the confirm box appeared behind the details box.
+    const slotIdToDelete = selectedSlotDetails._id;
+    closeSlotDetails();
 
-    try {
-      setDeletingSlot(true);
+    openModal(
+      'confirm',
+      'تأكيد الحذف',
+      'هل أنت متأكد من حذف هذا الموعد المتاح؟ لن يتمكن المرضى من حجزه بعد الحذف.',
+      async () => {
+        closeModal();
 
-      const token = localStorage.getItem('token');
-      const resp = await fetch(
-        `http://localhost:5000/api/doctor/availability-slots/${selectedSlotDetails._id}`,
-        {
-          method: 'DELETE',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
+        try {
+          setDeletingSlot(true);
+
+          const token = localStorage.getItem('token');
+          const resp = await fetch(
+            `http://localhost:5000/api/doctor/availability-slots/${slotIdToDelete}`,
+            {
+              method: 'DELETE',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`
+              }
+            }
+          );
+
+          const payload = await resp.json().catch(() => ({}));
+          if (!resp.ok || payload.success === false) {
+            throw new Error(payload.message || 'فشل حذف الموعد');
           }
+
+          // Refresh the slot list
+          const refreshed = await doctorAPI.getMyAvailabilitySlots().catch(() => null);
+          if (refreshed?.slots) setAvailabilitySlots(refreshed.slots);
+
+          openModal('success', 'تم الحذف', 'تم حذف الموعد المتاح.');
+        } catch (error) {
+          openModal('error', 'فشل الحذف', error.message || 'تعذّر حذف الموعد');
+        } finally {
+          setDeletingSlot(false);
         }
-      );
-
-      const payload = await resp.json().catch(() => ({}));
-      if (!resp.ok || payload.success === false) {
-        throw new Error(payload.message || 'فشل حذف الموعد');
       }
-
-      // Refresh the slot list
-      const refreshed = await doctorAPI.getMyAvailabilitySlots().catch(() => null);
-      if (refreshed?.slots) setAvailabilitySlots(refreshed.slots);
-
-      closeSlotDetails();
-      openModal('success', 'تم الحذف', 'تم حذف الموعد المتاح.');
-    } catch (error) {
-      openModal('error', 'فشل الحذف', error.message || 'تعذّر حذف الموعد');
-    } finally {
-      setDeletingSlot(false);
-    }
-  }, [selectedSlotDetails, closeSlotDetails, openModal]);
+    );
+  }, [selectedSlotDetails, closeSlotDetails, openModal, closeModal]);
 
   /* ─────────────────────────────────────────────────────────────────
      SCHEDULE TEMPLATE HANDLERS (Calendly-style — v2)
@@ -2398,40 +2433,44 @@ const DoctorDashboard = () => {
    * changing it. Useful for extending the booking window forward
    * after a chunk of time has passed.
    */
-  const handleRegenerateSchedule = useCallback(async () => {
-    const confirmed = window.confirm(
+  const handleRegenerateSchedule = useCallback(() => {
+    openModal(
+      'confirm',
+      'تأكيد إعادة التجديد',
       'سيتم إعادة توليد المواعيد المتاحة من جدول العمل الحالي. ' +
-      'المواعيد المحجوزة لن تتأثّر. هل تريد المتابعة؟'
+      'المواعيد المحجوزة لن تتأثّر. هل تريد المتابعة؟',
+      async () => {
+        closeModal();
+
+        setScheduleRegenerating(true);
+        try {
+          const result = await doctorAPI.regenerateScheduleSlots();
+          setScheduleLastSyncResult(result.slots || null);
+
+          doctorAPI.getMyAvailabilitySlots()
+            .then((refreshed) => {
+              if (refreshed?.slots) setAvailabilitySlots(refreshed.slots);
+            })
+            .catch(() => null);
+
+          openModal(
+            'success',
+            'تم التجديد',
+            result.message || 'تم إعادة توليد المواعيد بنجاح',
+          );
+        } catch (error) {
+          console.error('[DoctorDashboard] Regenerate schedule error:', error);
+          openModal(
+            'error',
+            'فشل التجديد',
+            error.message || 'حدث خطأ في إعادة توليد المواعيد',
+          );
+        } finally {
+          setScheduleRegenerating(false);
+        }
+      }
     );
-    if (!confirmed) return;
-
-    setScheduleRegenerating(true);
-    try {
-      const result = await doctorAPI.regenerateScheduleSlots();
-      setScheduleLastSyncResult(result.slots || null);
-
-      doctorAPI.getMyAvailabilitySlots()
-        .then((refreshed) => {
-          if (refreshed?.slots) setAvailabilitySlots(refreshed.slots);
-        })
-        .catch(() => null);
-
-      openModal(
-        'success',
-        'تم التجديد',
-        result.message || 'تم إعادة توليد المواعيد بنجاح',
-      );
-    } catch (error) {
-      console.error('[DoctorDashboard] Regenerate schedule error:', error);
-      openModal(
-        'error',
-        'فشل التجديد',
-        error.message || 'حدث خطأ في إعادة توليد المواعيد',
-      );
-    } finally {
-      setScheduleRegenerating(false);
-    }
-  }, [openModal]);
+  }, [openModal, closeModal]);
 
   /**
    * Has the doctor edited the template since it was loaded/saved?
@@ -3254,13 +3293,26 @@ const DoctorDashboard = () => {
                           disabled={isPast}
                           aria-label={`${day.toLocaleDateString('ar-EG')} ${hour}:00`}
                         >
-                          {cellAppts.map((appt) => (
+                          {cellAppts.map((appt, apptIdx) => {
+                            // Multiple items in the same hour are laid out
+                            // side-by-side (like Google Calendar) so none is
+                            // hidden behind another. Each takes an equal slice
+                            // of the cell width based on the number of appts
+                            // sharing this hour.
+                            const count = Math.max(cellAppts.length, 1);
+                            const widthPct = 100 / count;
+                            return (
                             <div
                               key={appt._id}
                               role="button"
                               tabIndex={0}
                               className="dd-cal-slot bk"
-                              style={{ top: 4, height: 'calc(100% - 8px)' }}
+                              style={{
+                                top: 4,
+                                height: 'calc(100% - 8px)',
+                                width: `calc(${widthPct}% - 4px)`,
+                                insetInlineStart: `calc(${widthPct * apptIdx}% + 2px)`,
+                              }}
                               onClick={(e) => { e.stopPropagation(); openApptDetails(appt); }}
                               onKeyDown={(e) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
@@ -3281,8 +3333,14 @@ const DoctorDashboard = () => {
                                 {appt.appointmentTime}
                               </span>
                             </div>
-                          ))}
-                          {cellSlots.length > 0 && cellAppts.length === 0 && cellSlots.map((slot) => {
+                            );
+                          })}
+                          {cellSlots.length > 0 && cellAppts.length === 0 && cellSlots.map((slot, slotIdx) => {
+                            // Same side-by-side layout for multiple available
+                            // slots that start within the same hour (e.g. 20-min
+                            // slots: 12:00, 12:20, 12:40).
+                            const count = Math.max(cellSlots.length, 1);
+                            const widthPct = 100 / count;
                             const endT = resolveEndTime(slot);
                             const cls = slot.status === 'blocked' ? 'bl' : (isPast ? 'past' : 'av');
                             return (
@@ -3291,7 +3349,12 @@ const DoctorDashboard = () => {
                                 role="button"
                                 tabIndex={0}
                                 className={`dd-cal-slot ${cls}`}
-                                style={{ top: 4, height: 'calc(100% - 8px)' }}
+                                style={{
+                                  top: 4,
+                                  height: 'calc(100% - 8px)',
+                                  width: `calc(${widthPct}% - 4px)`,
+                                  insetInlineStart: `calc(${widthPct * slotIdx}% + 2px)`,
+                                }}
                                 onClick={(e) => { e.stopPropagation(); openSlotDetails(slot); }}
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter' || e.key === ' ') {
@@ -3886,7 +3949,12 @@ const DoctorDashboard = () => {
                 <h2>ابحث عن المريض برقم الهوية</h2>
                 <p>
                   أدخل الرقم الوطني المكوّن من 11 رقم للبالغين، أو رقم تسجيل الطفل
-                  بصيغة <span dir="ltr" style={{ fontFamily: 'monospace' }}>CRN-YYYYMMDD-XXXXX</span> للأطفال أقل من 14 سنة.
+                  بصيغة <span dir="ltr" style={{ fontFamily: 'monospace' }}>رقم_الأب-XX</span> للأطفال أقل من 14 سنة
+                  <br />
+                  <small style={{ opacity: 0.8 }}>
+                    مثال: <span dir="ltr" style={{ fontFamily: 'monospace' }}>01122334455-01</span> للطفل الأول،
+                    <span dir="ltr" style={{ fontFamily: 'monospace', marginInlineStart: 4 }}>01122334455-02</span> للثاني...
+                  </small>
                 </p>
 
                 <div className="dd-search-form">
@@ -3896,20 +3964,19 @@ const DoctorDashboard = () => {
                       ref={searchInputRef}
                       type="text"
                       className="dd-search-input"
-                      placeholder="11 رقم وطني  أو  CRN-YYYYMMDD-XXXXX"
+                      placeholder="11 رقم وطني  أو  xxxxxxxxxxx-NN"
                       value={searchId}
                       onChange={(e) => {
-                        // Accept digits, uppercase letters (CRN prefix), and dashes.
-                        // Normalize to uppercase so 'crn-...' is auto-fixed.
+                        // v2.3 — Accept digits and dashes only.
+                        // Adult: 11 digits  |  Child: 11digits-NN  (max 14 chars)
                         const cleaned = e.target.value
-                          .toUpperCase()
-                          .replace(/[^0-9A-Z-]/g, '')
-                          .slice(0, 20); // CRN-20260424-00001 = 18 chars; 20 is a safe ceiling
+                          .replace(/[^0-9-]/g, '')
+                          .slice(0, 14);
                         setSearchId(cleaned);
                         setSearchError(null);
                       }}
                       onKeyDown={(e) => e.key === 'Enter' && handleSearchPatient()}
-                      maxLength={20}
+                      maxLength={14}
                       autoComplete="off"
                       dir="ltr"
                       style={{ textAlign: 'center', letterSpacing: '0.5px' }}
@@ -3973,66 +4040,6 @@ const DoctorDashboard = () => {
                   </div>
                 )}
               </section>
-
-              {/* Recent patients */}
-              {recentPatients.length > 0 && (
-                <section className="dd-card">
-                  <div className="dd-card-header">
-                    <h3 className="dd-card-title">
-                      <span className="dd-card-title-icon">
-                        <Clock size={18} strokeWidth={2} />
-                      </span>
-                      المرضى الذين زرتهم مؤخراً
-                    </h3>
-                  </div>
-                  <div className="dd-recent-patients">
-                    {recentPatients.map((p, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        className="dd-recent-patient-card"
-                        onClick={async () => {
-                          const id = p.nationalId || p.childRegistrationNumber || '';
-                          setSearchId(id);
-                          if (!id) return;
-                          // Re-fetch the full patient record from /search so
-                          // medical fields (bloodType, allergies, etc.) are
-                          // included. The localStorage cache only stores a
-                          // lightweight copy (name + nationalId) so clicking
-                          // a recent card must not reuse that stale object.
-                          try {
-                            const data = await doctorAPI.searchPatient(id);
-                            if (data?.patient) {
-                              await selectPatient(data.patient);
-                            } else {
-                              // Fall back to the cached lite object if the
-                              // backend didn't return anything useful.
-                              await selectPatient(p);
-                            }
-                          } catch (err) {
-                            console.error('[DoctorDashboard] Recent patient reload error:', err);
-                            await selectPatient(p);
-                          }
-                        }}
-                      >
-                        <div className="dd-recent-patient-avatar">
-                          {p.isChild
-                            ? <Baby size={20} strokeWidth={2} />
-                            : <User size={20} strokeWidth={2} />}
-                        </div>
-                        <div className="dd-recent-patient-info">
-                          <h4 className="dd-recent-patient-name">
-                            {p.firstName} {p.lastName}
-                          </h4>
-                          <span className="dd-recent-patient-id">
-                            {p.nationalId || p.childRegistrationNumber}
-                          </span>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                </section>
-              )}
 
               {/* Tip card */}
               <section className="dd-card" style={{ background: 'rgba(var(--tm-action-rgb), 0.04)' }}>
@@ -4970,39 +4977,44 @@ const DoctorDashboard = () => {
                     />
                   </section>
 
-                  {/* Vital signs grid */}
-                  <section className="dd-form-section">
-                    <div className="dd-form-section-header">
-                      <div className="dd-form-section-icon">
-                        <Activity size={20} strokeWidth={2} />
+                  {/* Vital signs grid — hidden for dentists since dental
+                      visits don't capture systemic vitals (BP, HR, SpO2,
+                      glucose, etc.) as part of the clinical workflow.
+                      Only medical doctors record these. */}
+                  {!isDentist && (
+                    <section className="dd-form-section">
+                      <div className="dd-form-section-header">
+                        <div className="dd-form-section-icon">
+                          <Activity size={20} strokeWidth={2} />
+                        </div>
+                        <h3 className="dd-form-section-title">العلامات الحيوية</h3>
                       </div>
-                      <h3 className="dd-form-section-title">العلامات الحيوية</h3>
-                    </div>
-                    <div className="dd-vitals-grid">
-                      {VITAL_SIGNS_DEF.map((def) => {
-                        if (def.isBP) {
+                      <div className="dd-vitals-grid">
+                        {VITAL_SIGNS_DEF.map((def) => {
+                          if (def.isBP) {
+                            return (
+                              <VitalSign
+                                key={def.key}
+                                def={def}
+                                value={vitalSigns.bloodPressureSystolic}
+                                value2={vitalSigns.bloodPressureDiastolic}
+                                onChange={(e) => handleVitalChange('bloodPressureSystolic', e.target.value)}
+                                onChange2={(e) => handleVitalChange('bloodPressureDiastolic', e.target.value)}
+                              />
+                            );
+                          }
                           return (
                             <VitalSign
                               key={def.key}
                               def={def}
-                              value={vitalSigns.bloodPressureSystolic}
-                              value2={vitalSigns.bloodPressureDiastolic}
-                              onChange={(e) => handleVitalChange('bloodPressureSystolic', e.target.value)}
-                              onChange2={(e) => handleVitalChange('bloodPressureDiastolic', e.target.value)}
+                              value={vitalSigns[def.key]}
+                              onChange={(e) => handleVitalChange(def.key, e.target.value)}
                             />
                           );
-                        }
-                        return (
-                          <VitalSign
-                            key={def.key}
-                            def={def}
-                            value={vitalSigns[def.key]}
-                            onChange={(e) => handleVitalChange(def.key, e.target.value)}
-                          />
-                        );
-                      })}
-                    </div>
-                  </section>
+                        })}
+                      </div>
+                    </section>
+                  )}
 
                   {/* Diagnosis */}
                   <section className="dd-form-section">
@@ -5358,19 +5370,67 @@ const DoctorDashboard = () => {
                       </div>
                       <h3 className="dd-form-section-title">جدولة المتابعة (اختياري)</h3>
                     </div>
+
+                    {/* Row 1: date + time (paired so the doctor pins down WHEN
+                        the follow-up is, not just WHICH day). The time is
+                        required whenever a date is set — without it the
+                        appointment would default to a shared time slot and
+                        cause calendar pile-ups across providers. */}
                     <div className="dd-field-row">
                       <div className="dd-field">
-                        <label className="dd-field-label">تاريخ المتابعة القادمة</label>
+                        <label className="dd-field-label">
+                          <Calendar size={14} strokeWidth={2.3} aria-hidden="true" />
+                          <span>تاريخ المتابعة القادمة</span>
+                        </label>
                         <input
                           type="date"
                           className="dd-input"
                           value={followUpDate}
-                          onChange={(e) => setFollowUpDate(e.target.value)}
+                          onChange={(e) => {
+                            setFollowUpDate(e.target.value);
+                            // Clear the time when date is cleared so we don't
+                            // submit a stale time without a date.
+                            if (!e.target.value) setFollowUpTime('');
+                          }}
                           min={new Date().toISOString().split('T')[0]}
                         />
                       </div>
                       <div className="dd-field">
-                        <label className="dd-field-label">ملاحظات المتابعة</label>
+                        <label className="dd-field-label">
+                          <Clock size={14} strokeWidth={2.3} aria-hidden="true" />
+                          <span>
+                            وقت المتابعة
+                            {followUpDate && (
+                              <span style={{ color: 'var(--dd-danger, #dc2626)', marginInlineStart: 4 }}>
+                                *
+                              </span>
+                            )}
+                          </span>
+                        </label>
+                        <input
+                          type="time"
+                          className="dd-input"
+                          value={followUpTime}
+                          onChange={(e) => setFollowUpTime(e.target.value)}
+                          disabled={!followUpDate}
+                          required={!!followUpDate}
+                          // step={300} → 5-minute increments. Most clinic
+                          // schedules round to 5 or 15 minutes; 5 minutes
+                          // gives the doctor enough granularity without
+                          // exposing seconds.
+                          step={300}
+                          aria-label="وقت موعد المتابعة"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Row 2: notes (full width, more room for context) */}
+                    <div className="dd-field-row" style={{ marginTop: 12 }}>
+                      <div className="dd-field" style={{ gridColumn: '1 / -1' }}>
+                        <label className="dd-field-label">
+                          <FileText size={14} strokeWidth={2.3} aria-hidden="true" />
+                          <span>ملاحظات المتابعة</span>
+                        </label>
                         <input
                           type="text"
                           className="dd-input"

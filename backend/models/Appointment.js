@@ -199,17 +199,37 @@ AppointmentSchema.pre('validate', function enforceRules(next) {
     return next(new Error('لا يمكن تحديد patientPersonId و patientChildId معاً'));
   }
 
-  // Provider must match appointmentType
-  if (this.appointmentType === 'doctor' || this.appointmentType === 'follow_up') {
-    if (!this.doctorId) {
-      return next(new Error('doctorId مطلوب لمواعيد الأطباء'));
-    }
+  // ── Provider must match appointmentType ─────────────────────────────────
+  // BUG FIX (2026-05-28):
+  //   The previous version required `doctorId` for both 'doctor' and
+  //   'follow_up' appointments. This silently broke dental follow-ups
+  //   because a follow-up created by a DENTIST sets `dentistId` (not
+  //   `doctorId`), causing this validation to fail. The visit controller
+  //   then swallowed the error in a try/catch, so the visit saved
+  //   successfully but the follow-up appointment never reached the DB.
+  //
+  //   New logic:
+  //     - 'doctor'   → must have doctorId
+  //     - 'dentist'  → must have dentistId
+  //     - 'lab_test' → must have laboratoryId
+  //     - 'follow_up' → must have EITHER doctorId OR dentistId
+  //                     (follow-ups apply to both medical and dental visits)
+  //     - 'emergency' → no provider check (emergency may be unassigned)
+  // ────────────────────────────────────────────────────────────────────────
+
+  if (this.appointmentType === 'doctor' && !this.doctorId) {
+    return next(new Error('doctorId مطلوب لمواعيد الأطباء'));
   }
   if (this.appointmentType === 'dentist' && !this.dentistId) {
     return next(new Error('dentistId مطلوب لمواعيد الأسنان'));
   }
   if (this.appointmentType === 'lab_test' && !this.laboratoryId) {
     return next(new Error('laboratoryId مطلوب لمواعيد المختبر'));
+  }
+  if (this.appointmentType === 'follow_up') {
+    if (!this.doctorId && !this.dentistId) {
+      return next(new Error('doctorId أو dentistId مطلوب لمواعيد المتابعة'));
+    }
   }
 
   // appointmentTime must be HH:MM

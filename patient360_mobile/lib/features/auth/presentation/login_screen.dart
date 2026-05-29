@@ -12,8 +12,9 @@ import '../data/auth_repository.dart';
 import '../domain/auth_session.dart';
 import 'providers/auth_provider.dart';
 
-/// Phone-sized replica of the web Login screen: Teal Medica hero gradient
-/// over the top 40% with a white card floating over the bottom 60%.
+/// Patient360 — National Patient Health Platform.
+/// Login screen with a full-width Teal Medica hero (curved bottom)
+/// over the top 38% and an elevated white card floating beneath it.
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
 
@@ -38,7 +39,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (!_formKey.currentState!.validate()) return;
     FocusScope.of(context).unfocus();
 
-    await ref.read(authControllerProvider.notifier).login(
+    await ref
+        .read(authControllerProvider.notifier)
+        .login(
           email: _emailController.text.trim(),
           password: _passwordController.text,
         );
@@ -50,17 +53,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         context: context,
         isScrollControlled: true,
         backgroundColor: Colors.transparent,
-        builder: (BuildContext ctx) => ForgotPasswordSheet(
-          initialEmail: _emailController.text.trim(),
-        ),
+        builder: (BuildContext ctx) =>
+            ForgotPasswordSheet(initialEmail: _emailController.text.trim()),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    ref.listen<AsyncValue<AuthSession?>>(authControllerProvider,
-        (AsyncValue<AuthSession?>? prev, AsyncValue<AuthSession?> next) {
+    ref.listen<AsyncValue<AuthSession?>>(authControllerProvider, (
+      AsyncValue<AuthSession?>? prev,
+      AsyncValue<AuthSession?> next,
+    ) {
       if (next.hasError && prev?.hasError != true) {
         final Object error = next.error!;
         final String message = error is ApiException
@@ -70,8 +74,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       }
     });
 
-    final AsyncValue<AuthSession?> authState =
-        ref.watch(authControllerProvider);
+    final AsyncValue<AuthSession?> authState = ref.watch(
+      authControllerProvider,
+    );
     final bool isLoading = authState.isLoading;
 
     return Scaffold(
@@ -80,28 +85,31 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       body: SafeArea(
         child: LayoutBuilder(
           builder: (BuildContext ctx, BoxConstraints constraints) {
-            final double heroHeight = constraints.maxHeight * 0.40;
+            final double heroHeight = constraints.maxHeight * 0.38;
             return SingleChildScrollView(
               padding: EdgeInsets.zero,
               child: ConstrainedBox(
-                constraints:
-                    BoxConstraints(minHeight: constraints.maxHeight),
+                constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: Stack(
                   children: <Widget>[
+                    // ─── Hero gradient banner with curved bottom ──────────
                     Container(
+                      width: double.infinity,
                       height: heroHeight + 60,
                       decoration: const BoxDecoration(
                         gradient: LinearGradient(
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
-                          colors: <Color>[
-                            AppColors.primary,
-                            AppColors.action,
-                          ],
+                          colors: <Color>[AppColors.primary, AppColors.action],
+                        ),
+                        borderRadius: BorderRadius.only(
+                          bottomLeft: Radius.circular(32),
+                          bottomRight: Radius.circular(32),
                         ),
                       ),
                       child: const _HeroBranding(),
                     ),
+                    // ─── Login card overlapping the hero ──────────────────
                     Padding(
                       padding: EdgeInsets.only(top: heroHeight),
                       child: _LoginCard(
@@ -115,8 +123,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           });
                         },
                         onSubmit: isLoading ? null : _submit,
-                        onForgotPassword:
-                            isLoading ? null : _openForgotPasswordSheet,
+                        onForgotPassword: isLoading
+                            ? null
+                            : _openForgotPasswordSheet,
                         isLoading: isLoading,
                       ),
                     ),
@@ -131,53 +140,122 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Hero branding — centered logo + Patient360 wordmark + Arabic tagline
+// ═══════════════════════════════════════════════════════════════════════════
+
 class _HeroBranding extends StatelessWidget {
   const _HeroBranding();
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 32, 24, 0),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.start,
-        children: <Widget>[
-          Container(
-            width: 72,
-            height: 72,
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              shape: BoxShape.circle,
-            ),
-            alignment: Alignment.center,
-            child: const Icon(
-              LucideIcons.heartPulse,
-              color: AppColors.action,
-              size: 36,
+    return Stack(
+      children: <Widget>[
+        // Subtle decorative circles for texture (low opacity).
+        Positioned(
+          top: -40,
+          right: -30,
+          child: _DecorativeCircle(
+            size: 140,
+            color: Colors.white.withValues(alpha: 0.06),
+          ),
+        ),
+        Positioned(
+          bottom: 20,
+          left: -40,
+          child: _DecorativeCircle(
+            size: 110,
+            color: Colors.white.withValues(alpha: 0.05),
+          ),
+        ),
+        // Branding content — strictly centered.
+        Center(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: <Widget>[
+                // ─── Logo bubble ─────────────────────────────────────────
+                Container(
+                  width: 88,
+                  height: 88,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: <BoxShadow>[
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.12),
+                        blurRadius: 18,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  alignment: Alignment.center,
+                  child: const Icon(
+                    LucideIcons.heartPulse,
+                    color: AppColors.action,
+                    size: 44,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                // ─── App wordmark ────────────────────────────────────────
+                const Text(
+                  'Patient360',
+                  textDirection: TextDirection.ltr,
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    color: Colors.white,
+                    fontSize: 30,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5,
+                    height: 1.0,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                // ─── Tagline ─────────────────────────────────────────────
+                Text(
+                  'صحتك الشاملة بين يديك',
+                  textDirection: TextDirection.rtl,
+                  style: TextStyle(
+                    fontFamily: 'Cairo',
+                    color: Colors.white.withValues(alpha: 0.88),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    letterSpacing: 0.2,
+                    height: 1.2,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 14),
-          const Text(
-            'مريض 360°',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 24,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'لوحة المريض',
-            style: TextStyle(
-              color: Color(0xCCFFFFFF),
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
+
+/// Decorative soft circle used as background texture in the hero.
+class _DecorativeCircle extends StatelessWidget {
+  const _DecorativeCircle({required this.size, required this.color});
+
+  final double size;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Login card — elevated form with email / password / forgot / submit
+// ═══════════════════════════════════════════════════════════════════════════
 
 class _LoginCard extends StatelessWidget {
   const _LoginCard({
@@ -203,16 +281,22 @@ class _LoginCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20),
-      padding: const EdgeInsets.all(24),
-      decoration: const BoxDecoration(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.fromLTRB(24, 28, 24, 24),
+      decoration: BoxDecoration(
         color: AppColors.card,
         borderRadius: AppRadii.radiusXl,
         boxShadow: <BoxShadow>[
           BoxShadow(
-            color: Color(0x1F0D3B3E),
-            offset: Offset(0, 8),
-            blurRadius: 28,
+            color: AppColors.primary.withValues(alpha: 0.10),
+            offset: const Offset(0, 12),
+            blurRadius: 36,
+            spreadRadius: -4,
+          ),
+          BoxShadow(
+            color: AppColors.primary.withValues(alpha: 0.06),
+            offset: const Offset(0, 2),
+            blurRadius: 8,
           ),
         ],
       ),
@@ -223,12 +307,34 @@ class _LoginCard extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            Text(
+            // ─── Card title ──────────────────────────────────────────────
+            const Text(
               'تسجيل الدخول',
-              style: Theme.of(context).textTheme.titleLarge,
+              textDirection: TextDirection.rtl,
               textAlign: TextAlign.center,
+              style: TextStyle(
+                fontFamily: 'Cairo',
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary,
+                height: 1.2,
+              ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 6),
+            Text(
+              'أهلاً بعودتك إلى Patient360',
+              textDirection: TextDirection.rtl,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontFamily: 'Cairo',
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: AppColors.textSecondary.withValues(alpha: 0.85),
+                height: 1.3,
+              ),
+            ),
+            const SizedBox(height: 22),
+            // ─── Email field ─────────────────────────────────────────────
             TextFormField(
               controller: emailController,
               keyboardType: TextInputType.emailAddress,
@@ -246,6 +352,7 @@ class _LoginCard extends StatelessWidget {
               validator: _validateEmail,
             ),
             const SizedBox(height: 16),
+            // ─── Password field ──────────────────────────────────────────
             TextFormField(
               controller: passwordController,
               obscureText: obscurePassword,
@@ -268,28 +375,70 @@ class _LoginCard extends StatelessWidget {
               validator: _validatePassword,
               onFieldSubmitted: (_) => onSubmit?.call(),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
+            // ─── Forgot password ─────────────────────────────────────────
             Align(
               alignment: AlignmentDirectional.centerEnd,
               child: TextButton(
                 onPressed: onForgotPassword,
-                child: const Text('نسيت كلمة المرور؟'),
+                style: TextButton.styleFrom(
+                  foregroundColor: AppColors.action,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text(
+                  'نسيت كلمة المرور؟',
+                  style: TextStyle(
+                    fontFamily: 'Cairo',
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
             ),
-            const SizedBox(height: 8),
-            ElevatedButton(
-              onPressed: onSubmit,
-              child: isLoading
-                  ? const SizedBox(
-                      height: 22,
-                      width: 22,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.4,
-                        valueColor:
-                            AlwaysStoppedAnimation<Color>(Colors.white),
+            const SizedBox(height: 14),
+            // ─── Submit button ───────────────────────────────────────────
+            SizedBox(
+              height: 54,
+              child: ElevatedButton(
+                onPressed: onSubmit,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.action,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: AppColors.action.withValues(
+                    alpha: 0.5,
+                  ),
+                  shape: const RoundedRectangleBorder(
+                    borderRadius: AppRadii.radiusLg,
+                  ),
+                  elevation: 0,
+                  shadowColor: AppColors.action.withValues(alpha: 0.4),
+                ),
+                child: isLoading
+                    ? const SizedBox(
+                        height: 22,
+                        width: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.4,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
+                        ),
+                      )
+                    : const Text(
+                        'تسجيل الدخول',
+                        style: TextStyle(
+                          fontFamily: 'Cairo',
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.3,
+                        ),
                       ),
-                    )
-                  : const Text('تسجيل الدخول'),
+              ),
             ),
           ],
         ),
@@ -299,7 +448,7 @@ class _LoginCard extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Forgot-password bottom sheet (3-step PageView)
+// Forgot-password bottom sheet (3-step PageView) — UNCHANGED
 // ═══════════════════════════════════════════════════════════════════════════
 
 class ForgotPasswordSheet extends ConsumerStatefulWidget {
@@ -347,9 +496,7 @@ class _ForgotPasswordSheetState extends ConsumerState<ForgotPasswordSheet> {
     }
     setState(() => _requestingOtp = true);
     try {
-      await ref
-          .read(authRepositoryProvider)
-          .requestPasswordResetOtp(email);
+      await ref.read(authRepositoryProvider).requestPasswordResetOtp(email);
       if (!mounted) return;
       await _pageController.animateToPage(
         1,
@@ -388,7 +535,9 @@ class _ForgotPasswordSheetState extends ConsumerState<ForgotPasswordSheet> {
     }
     setState(() => _resetting = true);
     try {
-      await ref.read(authRepositoryProvider).verifyPasswordResetOtp(
+      await ref
+          .read(authRepositoryProvider)
+          .verifyPasswordResetOtp(
             email: _emailController.text.trim(),
             otp: _otpController.text.trim(),
             newPassword: newPassword,
@@ -597,15 +746,9 @@ class _EnterOtpStep extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 20),
-        ElevatedButton(
-          onPressed: onSubmit,
-          child: const Text('متابعة'),
-        ),
+        ElevatedButton(onPressed: onSubmit, child: const Text('متابعة')),
         const SizedBox(height: 8),
-        OutlinedButton(
-          onPressed: onBack,
-          child: const Text('رجوع'),
-        ),
+        OutlinedButton(onPressed: onBack, child: const Text('رجوع')),
       ],
     );
   }
@@ -700,7 +843,7 @@ class _SetNewPasswordStep extends StatelessWidget {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Shared helpers
+// Shared helpers — UNCHANGED
 // ═══════════════════════════════════════════════════════════════════════════
 
 String? _validateEmail(String? value) {
@@ -730,10 +873,7 @@ void _showErrorSnack(BuildContext context, String message) {
             const Icon(LucideIcons.circleAlert, color: Colors.white),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                message,
-                style: const TextStyle(color: Colors.white),
-              ),
+              child: Text(message, style: const TextStyle(color: Colors.white)),
             ),
           ],
         ),

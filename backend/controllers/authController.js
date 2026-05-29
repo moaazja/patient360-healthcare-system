@@ -30,6 +30,90 @@ const jwt      = require('jsonwebtoken');
 const bcrypt   = require('bcryptjs');
 const mongoose = require('mongoose');
 
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Convert a multer-produced filesystem path into a public URL that the
+ * Express static middleware serves at /uploads/...
+ *
+ * Why this exists:
+ *   multer's `file.path` can be either:
+ *     - relative: "uploads\\doctor-requests\\pending\\req_xxx\\file.png"
+ *                 (when multer's destination uses a relative path —
+ *                 our `uploadDoctorFiles.js` middleware does this)
+ *     - absolute: "C:\\...\\backend\\uploads\\doctor-requests\\file.png"
+ *
+ *   Storing that in MongoDB and returning it to the frontend doesn't work
+ *   because the browser can't load `C:\...` or `uploads\...` as an image
+ *   source — it needs an HTTP URL.
+ *
+ *   The static mount in index.js is:
+ *     app.use('/uploads', express.static(UPLOADS_ROOT))
+ *   so any file under /backend/uploads/... is served at /uploads/...
+ *
+ *   This helper:
+ *     1. Normalizes Windows backslashes to forward slashes.
+ *     2. Finds the "uploads/" segment in the path (without leading slash,
+ *        so it matches BOTH relative and absolute paths).
+ *     3. Returns a leading-slash URL like "/uploads/doctor-requests/...".
+ *
+ *   That URL can be loaded by the browser as
+ *   http://localhost:5000/uploads/doctor-requests/...
+ *
+ *   Returns null on bad input so callers can use it inside ternary
+ *   spreads safely.
+ */
+function toPublicUrl(filePath) {
+  if (!filePath || typeof filePath !== 'string') return null;
+  const normalized = filePath.replace(/\\/g, '/');
+  // Search for "uploads/" — handles both relative ("uploads/foo")
+  // and absolute ("/abs/path/backend/uploads/foo") paths.
+  const idx = normalized.lastIndexOf('uploads/');
+  if (idx === -1) return null;
+  return '/' + normalized.slice(idx);
+}
+
+/**
+ * Parse JSON-stringified fields back into objects/arrays inside `req.body`.
+ *
+ * Why this exists:
+ *   multipart/form-data can only carry strings and files — it has no concept
+ *   of nested objects or arrays. So the frontend has to JSON.stringify any
+ *   nested value before appending it to FormData, e.g.:
+ *
+ *     formData.append('scheduleTemplate', JSON.stringify(template))
+ *     formData.append('availableDays',    JSON.stringify(['Sunday','Monday']))
+ *
+ *   On the server side, multer parses the multipart body and puts everything
+ *   into `req.body` as raw strings. Mongoose then expects `scheduleTemplate`
+ *   to be an object (it's a Mongoose subdocument), but receives a string and
+ *   throws `ObjectExpectedError`.
+ *
+ *   This helper walks a list of known JSON-stringified fields and parses
+ *   each one back into its real type. It mutates `body` in place so the
+ *   caller can keep using the same reference (e.g. `...req.body` spread).
+ *
+ * Safety:
+ *   - Non-string values are left untouched (already an object — e.g. from
+ *     a JSON-bodied request, not multipart).
+ *   - Invalid JSON is left untouched and Mongoose will produce a clearer
+ *     error than a generic "SyntaxError: Unexpected token".
+ */
+function parseJsonFields(body, fieldNames) {
+  if (!body || typeof body !== 'object') return body;
+  for (const name of fieldNames) {
+    const value = body[name];
+    if (typeof value === 'string' && value.trim()) {
+      try {
+        body[name] = JSON.parse(value);
+      } catch (e) {
+        // Leave as-is — let downstream validation surface the error.
+      }
+    }
+  }
+  return body;
+}
+
 // ── Models ──────────────────────────────────────────────────────────────────
 const {
   Account,
@@ -60,6 +144,42 @@ const {
 const JWT_EXPIRES_IN     = process.env.JWT_EXPIRES_IN || '7d';
 const OTP_VALIDITY_MS    = 10 * 60 * 1000; // 10 minutes
 const ADULT_AGE_THRESHOLD = 14;            // Patient360 dual-patient model
+
+const BCRYPT_SALT_ROUNDS = 12;             // matches Account.js
+
+/**
+ * Prepare professional-request credentials for safe storage.
+ *
+ * SECURITY FIX: previously the four professional register functions spread
+ * `...req.body` straight into DoctorRequest.create(), which stored the raw
+ * password as plaintext in the `doctor_requests` collection — anyone with DB
+ * read access could see every applicant's password.
+ *
+ * This helper returns the credential fields to persist:
+ *   • password      → bcrypt hash (used to create the real Account on approval;
+ *                     Account.js detects an existing hash and won't re-hash it,
+ *                     so login keeps working — no double-hashing).
+ *   • plainPassword → the original plaintext, kept ONLY so the admin approval
+ *                     response can echo it back once. This field is select:false
+ *                     in the DoctorRequest schema and must never be returned to
+ *                     the public status-check endpoint. Ideally dropped entirely
+ *                     once the applicant is told to reuse their own password.
+ *
+ * @param {string} rawPassword
+ * @returns {Promise<{ password: string, plainPassword: string }>}
+ */
+async function prepareRequestCredentials(rawPassword) {
+  if (!rawPassword || typeof rawPassword !== 'string') {
+    // Let downstream validation surface the "password required" message.
+    return { password: rawPassword, plainPassword: rawPassword };
+  }
+  // If somehow already hashed, don't re-hash.
+  const looksHashed = /^\$2[aby]\$\d{2}\$.{53}$/.test(rawPassword);
+  const hashed = looksHashed
+    ? rawPassword
+    : await bcrypt.hash(rawPassword, BCRYPT_SALT_ROUNDS);
+  return { password: hashed, plainPassword: rawPassword };
+}
 
 // ============================================================================
 // HELPER — Generate JWT token
@@ -239,8 +359,22 @@ exports.signup = async (req, res) => {
         });
       }
 
-      // Generate child registration number
-      const childRegistrationNumber = await Children.generateRegistrationNumber();
+      // ── Generate child registration number ──────────────────────────────
+      // v2.3 (Muath's spec) — Format: {parentNationalId}-NN  (2-digit padded)
+      // Examples:
+      //   01222333444-01  → first child of this parent
+      //   01222333444-02  → second child
+      //   01222333444-03  → third child
+      //
+      // The sequence increments per parent — counts existing children under
+      // this parentNationalId (including soft-deleted ones so numbers don't
+      // get reused after a deletion).
+      const existingChildrenCount = await Children.countDocuments({
+        parentNationalId,
+      });
+      const sequenceNumber = String(existingChildrenCount + 1).padStart(2, '0');
+      const childRegistrationNumber = `${parentNationalId}-${sequenceNumber}`;
+      console.log(`📝 Generated child ID: ${childRegistrationNumber} (child #${existingChildrenCount + 1} for parent ${parentNationalId})`);
 
       // Create Child document
       childDoc = await Children.create({
@@ -1027,6 +1161,106 @@ exports.resetPassword = async (req, res) => {
 };
 
 // ============================================================================
+// 6b. CHANGE PASSWORD — Logged-in user changes their own password
+// ============================================================================
+//
+// Requires authentication (protect middleware). The user supplies their
+// CURRENT password plus the new one. We verify the current password before
+// changing, so a stolen/forgotten session can't silently reset it.
+
+exports.changePassword = async (req, res) => {
+  const ipAddress = getClientIp(req);
+  const userAgent = req.headers['user-agent'] || 'unknown';
+  const platform  = req.headers['x-platform'] || 'web';
+
+  try {
+    const accountId = req.user?._id || req.account?._id;
+    if (!accountId) {
+      return res.status(401).json({ success: false, message: 'غير مصرّح' });
+    }
+
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'كلمة المرور الحالية والجديدة مطلوبتان',
+      });
+    }
+
+    // Enforce a minimum strength for the new password.
+    const strongEnough = newPassword.length >= 8
+      && /[a-z]/.test(newPassword)
+      && /[A-Z]/.test(newPassword)
+      && /\d/.test(newPassword);
+    if (!strongEnough) {
+      return res.status(400).json({
+        success: false,
+        message: 'كلمة المرور الجديدة يجب أن تكون 8 أحرف على الأقل وتحتوي على حرف كبير وصغير ورقم',
+      });
+    }
+
+    if (currentPassword === newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'كلمة المرور الجديدة يجب أن تختلف عن الحالية',
+      });
+    }
+
+    const account = await Account.findById(accountId).select('+password');
+    if (!account) {
+      return res.status(404).json({ success: false, message: 'الحساب غير موجود' });
+    }
+
+    // Verify the current password.
+    const isMatch = await account.comparePassword(currentPassword);
+    if (!isMatch) {
+      await AuditLog.record({
+        userId: account._id,
+        userEmail: account.email,
+        userRole: account.roles?.[0],
+        action: 'PASSWORD_CHANGED',
+        description: 'Change-password failed: current password incorrect',
+        ipAddress, userAgent, platform,
+        success: false,
+      });
+      return res.status(401).json({
+        success: false,
+        message: 'كلمة المرور الحالية غير صحيحة',
+      });
+    }
+
+    // Assign plaintext; Account.js pre-validate hook hashes it.
+    account.password          = newPassword;
+    account.passwordChangedAt = new Date();
+    await account.save();
+
+    await AuditLog.record({
+      userId: account._id,
+      userEmail: account.email,
+      userRole: account.roles?.[0],
+      action: 'PASSWORD_CHANGED',
+      description: 'Password changed by the account owner',
+      ipAddress, userAgent, platform,
+      success: true,
+      metadata: { changedAt: account.passwordChangedAt },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'تم تغيير كلمة المرور بنجاح',
+    });
+  } catch (error) {
+    console.error('❌ Change password error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في الخادم',
+      error: error.message,
+    });
+  }
+};
+
+// ============================================================================
 // 7. VERIFY TOKEN
 // ============================================================================
 
@@ -1179,6 +1413,10 @@ exports.registerDoctor = async (req, res) => {
   const ipAddress = getClientIp(req);
 
   try {
+    // multipart/form-data sends nested values as JSON strings — convert them
+    // back to real objects/arrays so Mongoose can validate them properly.
+    parseJsonFields(req.body, ['scheduleTemplate', 'availableDays']);
+
     const requiredFields = [
       'firstName', 'fatherName', 'lastName', 'motherName',
       'nationalId', 'email', 'phoneNumber', 'dateOfBirth', 'gender',
@@ -1228,14 +1466,19 @@ exports.registerDoctor = async (req, res) => {
       });
     }
 
+    // SECURITY: hash the password before persisting; keep plaintext separately
+    // (select:false) only for the one-time admin approval echo.
+    const docCreds = await prepareRequestCredentials(req.body.password);
     const request = await DoctorRequest.create({
       ...req.body,
       email: req.body.email.toLowerCase(),
+      password: docCreds.password,
+      plainPassword: docCreds.plainPassword,
       requestType: 'doctor',
       status: 'pending',
-      ...(req.files?.licenseDocument && { licenseDocumentUrl: req.files.licenseDocument[0].path }),
-      ...(req.files?.degreeDocument && { degreeDocumentUrl: req.files.degreeDocument[0].path }),
-      ...(req.files?.nationalIdDocument && { nationalIdDocumentUrl: req.files.nationalIdDocument[0].path }),
+      ...(req.files?.licenseDocument && { licenseDocumentUrl: toPublicUrl(req.files.licenseDocument[0].path) }),
+      ...(req.files?.degreeDocument && { degreeDocumentUrl: toPublicUrl(req.files.degreeDocument[0].path) }),
+      ...(req.files?.nationalIdDocument && { nationalIdDocumentUrl: toPublicUrl(req.files.nationalIdDocument[0].path) }),
     });
 
     await AuditLog.record({
@@ -1273,14 +1516,22 @@ exports.registerPharmacist = async (req, res) => {
   const ipAddress = getClientIp(req);
 
   try {
+    // multipart/form-data sends nested values as JSON strings — convert them
+    // back to real objects so Mongoose can validate them properly.
+    parseJsonFields(req.body, ['newPharmacyData']);
+
+    // SECURITY: hash password before persisting (see prepareRequestCredentials).
+    const pharmCreds = await prepareRequestCredentials(req.body.password);
     const request = await DoctorRequest.create({
       ...req.body,
       email: req.body.email.toLowerCase(),
+      password: pharmCreds.password,
+      plainPassword: pharmCreds.plainPassword,
       requestType: 'pharmacist',
       status: 'pending',
-      ...(req.files?.licenseDocument && { licenseDocumentUrl: req.files.licenseDocument[0].path }),
-      ...(req.files?.degreeDocument && { degreeDocumentUrl: req.files.degreeDocument[0].path }),
-      ...(req.files?.nationalIdDocument && { nationalIdDocumentUrl: req.files.nationalIdDocument[0].path }),
+      ...(req.files?.licenseDocument && { licenseDocumentUrl: toPublicUrl(req.files.licenseDocument[0].path) }),
+      ...(req.files?.degreeDocument && { degreeDocumentUrl: toPublicUrl(req.files.degreeDocument[0].path) }),
+      ...(req.files?.nationalIdDocument && { nationalIdDocumentUrl: toPublicUrl(req.files.nationalIdDocument[0].path) }),
     });
 
     await AuditLog.record({
@@ -1314,14 +1565,22 @@ exports.registerLabTechnician = async (req, res) => {
   const ipAddress = getClientIp(req);
 
   try {
+    // multipart/form-data sends nested values as JSON strings — convert them
+    // back to real objects so Mongoose can validate them properly.
+    parseJsonFields(req.body, ['newLaboratoryData']);
+
+    // SECURITY: hash password before persisting (see prepareRequestCredentials).
+    const labCreds = await prepareRequestCredentials(req.body.password);
     const request = await DoctorRequest.create({
       ...req.body,
       email: req.body.email.toLowerCase(),
+      password: labCreds.password,
+      plainPassword: labCreds.plainPassword,
       requestType: 'lab_technician',
       status: 'pending',
-      ...(req.files?.licenseDocument && { licenseDocumentUrl: req.files.licenseDocument[0].path }),
-      ...(req.files?.degreeDocument && { degreeDocumentUrl: req.files.degreeDocument[0].path }),
-      ...(req.files?.nationalIdDocument && { nationalIdDocumentUrl: req.files.nationalIdDocument[0].path }),
+      ...(req.files?.licenseDocument && { licenseDocumentUrl: toPublicUrl(req.files.licenseDocument[0].path) }),
+      ...(req.files?.degreeDocument && { degreeDocumentUrl: toPublicUrl(req.files.degreeDocument[0].path) }),
+      ...(req.files?.nationalIdDocument && { nationalIdDocumentUrl: toPublicUrl(req.files.nationalIdDocument[0].path) }),
     });
 
     await AuditLog.record({
@@ -1370,6 +1629,10 @@ exports.registerDentist = async (req, res) => {
   const ipAddress = getClientIp(req);
 
   try {
+    // multipart/form-data sends nested values as JSON strings — convert them
+    // back to real objects/arrays so Mongoose can validate them properly.
+    parseJsonFields(req.body, ['scheduleTemplate', 'availableDays']);
+
     const requiredFields = [
       'firstName', 'fatherName', 'lastName', 'motherName',
       'nationalId', 'email', 'phoneNumber', 'dateOfBirth', 'gender',
@@ -1440,6 +1703,9 @@ exports.registerDentist = async (req, res) => {
     }
 
     // ── Build the request payload (whitelisted to avoid storing junk) ────
+    // SECURITY: hash password before persisting (see prepareRequestCredentials).
+    const dentistCreds = await prepareRequestCredentials(req.body.password);
+
     const payload = {
       // Personal
       firstName:   req.body.firstName,
@@ -1454,7 +1720,8 @@ exports.registerDentist = async (req, res) => {
       governorate: req.body.governorate,
       city:        req.body.city,
       address:     req.body.address,
-      password:    req.body.password,
+      password:    dentistCreds.password,
+      plainPassword: dentistCreds.plainPassword,
 
       // Professional (dental-specific)
       dentalLicenseNumber: req.body.dentalLicenseNumber,
@@ -1473,9 +1740,9 @@ exports.registerDentist = async (req, res) => {
       status:      'pending',
 
       // Files (multer stores them under req.files keyed by fieldname)
-      ...(req.files?.licenseDocument    && { licenseDocumentUrl:    req.files.licenseDocument[0].path }),
-      ...(req.files?.medicalCertificate && { degreeDocumentUrl:     req.files.medicalCertificate[0].path }),
-      ...(req.files?.profilePhoto       && { profilePhotoUrl:       req.files.profilePhoto[0].path }),
+      ...(req.files?.licenseDocument    && { licenseDocumentUrl: toPublicUrl(req.files.licenseDocument[0].path) }),
+      ...(req.files?.medicalCertificate && { degreeDocumentUrl: toPublicUrl(req.files.medicalCertificate[0].path) }),
+      ...(req.files?.profilePhoto       && { profilePhotoUrl: toPublicUrl(req.files.profilePhoto[0].path) }),
     };
 
     const request = await DoctorRequest.create(payload);
@@ -1518,7 +1785,8 @@ exports.registerDentist = async (req, res) => {
 
 exports.checkDoctorStatus = async (req, res) => {
   try {
-    const { email } = req.query;
+    // POST body (not query) — keeps email out of access logs.
+    const email = (req.body?.email || '').trim().toLowerCase();
     if (!email) {
       return res.status(400).json({
         success: false,
@@ -1527,7 +1795,7 @@ exports.checkDoctorStatus = async (req, res) => {
     }
 
     const request = await DoctorRequest.findOne({
-      email: email.toLowerCase(),
+      email,
       requestType: 'doctor',
     }).sort({ createdAt: -1 }).lean();
 
@@ -1541,6 +1809,9 @@ exports.checkDoctorStatus = async (req, res) => {
     return res.status(200).json({
       success: true,
       status: request.status,
+      requestType: request.requestType || 'doctor',
+      name: [request.firstName, request.lastName].filter(Boolean).join(' '),
+      email: request.email,
       rejectionReason: request.rejectionReason,
       rejectionDetails: request.rejectionDetails,
       submittedAt: request.createdAt,
@@ -1558,18 +1829,33 @@ exports.checkDoctorStatus = async (req, res) => {
 
 exports.checkProfessionalStatus = async (req, res) => {
   try {
-    const { email, type } = req.query;
-    if (!email || !type) {
+    // POST body (not query). `type` is OPTIONAL: if the caller doesn't know
+    // the request type, we look up the most recent professional request of
+    // ANY professional type for that email.
+    const email = (req.body?.email || '').trim().toLowerCase();
+    const type = (req.body?.type || '').trim();
+
+    if (!email) {
       return res.status(400).json({
         success: false,
-        message: 'البريد الإلكتروني ونوع الطلب مطلوبان',
+        message: 'البريد الإلكتروني مطلوب',
       });
     }
 
-    const request = await DoctorRequest.findOne({
-      email: email.toLowerCase(),
-      requestType: type,
-    }).sort({ createdAt: -1 }).lean();
+    const PROFESSIONAL_TYPES = ['doctor', 'pharmacist', 'lab_technician', 'dentist'];
+
+    // If a valid type was supplied, filter by it; otherwise search across all
+    // professional request types.
+    const query = { email };
+    if (type && PROFESSIONAL_TYPES.includes(type)) {
+      query.requestType = type;
+    } else {
+      query.requestType = { $in: PROFESSIONAL_TYPES };
+    }
+
+    const request = await DoctorRequest.findOne(query)
+      .sort({ createdAt: -1 })
+      .lean();
 
     if (!request) {
       return res.status(404).json({
@@ -1581,6 +1867,9 @@ exports.checkProfessionalStatus = async (req, res) => {
     return res.status(200).json({
       success: true,
       status: request.status,
+      requestType: request.requestType,
+      name: [request.firstName, request.lastName].filter(Boolean).join(' '),
+      email: request.email,
       rejectionReason: request.rejectionReason,
       rejectionDetails: request.rejectionDetails,
       submittedAt: request.createdAt,

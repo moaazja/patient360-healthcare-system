@@ -3,77 +3,57 @@
  *  Laboratory Admin Controller — Patient 360°
  *  ─────────────────────────────────────────────────────────────────────────
  *  📁 Path: backend/controllers/laboratoryAdminController.js
- *  🆕 NEW FILE in v2.0 — fixes Problem #4 (Laboratories tab shows "no data")
+ *  🔧 Version: 2.1 — GPS removed + field name bugs fixed (2026-05-27)
  *
- *  Full CRUD for laboratories registry with GeoJSON + test catalog:
+ *  Full CRUD for laboratories registry + test catalog:
  *    ✓ List with pagination + search + filters
- *    ✓ Find nearby (geospatial $near query)
  *    ✓ Get laboratory details with technician count + test catalog
- *    ✓ Create with required GeoJSON coordinates (Syria bounds)
- *    ✓ Update including location + test catalog updates
+ *    ✓ Create laboratory
+ *    ✓ Update laboratory + test catalog
  *    ✓ Activate / deactivate
  *
+ *  ┌──── v2.1 CHANGES (2026-05-27) ─────────────────────────────────────┐
+ *  │                                                                    │
+ *  │ ✗ GPS REMOVAL:                                                     │
+ *  │     ✗ Removed normalizeLocation() helper                           │
+ *  │     ✗ Removed SYRIA_LNG/LAT_MIN/MAX constants                      │
+ *  │     ✗ Removed findNearbyLaboratories handler                       │
+ *  │     ✗ Removed location field accepted in create/update             │
+ *  │     ✗ Removed coordinates field exposed in responses               │
+ *  │                                                                    │
+ *  │ 🐛 BUG FIXES — field-name mismatch with Mongoose model:            │
+ *  │     ✓ laboratoryLicense → labLicense  (matches Laboratory.js)      │
+ *  │     ✓ laboratoryType    → labType     (matches Laboratory.js)      │
+ *  │     ✓ Added isAcceptingTests flag (was missing)                    │
+ *  │     ✗ Removed ghost fields not in the model: website,              │
+ *  │       hasHomeService, homeServiceFee, hasEmergencyService,         │
+ *  │       emergencyContactPhone, specializations, accreditations,      │
+ *  │       equipmentList. (Mongoose strict mode was silently dropping   │
+ *  │       these — the create call appeared to succeed but the fields   │
+ *  │       were never stored. If the team plans to add these later,     │
+ *  │       they must be added to Laboratory.js model first.)            │
+ *  └────────────────────────────────────────────────────────────────────┘
+ *
  *  📚 Schema reference (Laboratory.js, collection 12):
- *    location:    GeoJSON Point [lng, lat] — REQUIRED
- *    testCatalog: Array of available tests with pricing and turnaround time
- *    Syria bounds: lng 35.5-42.5, lat 32.0-37.5
+ *    Required: name, registrationNumber, phoneNumber, address,
+ *              governorate, city
+ *    Optional: arabicName, labLicense, labType, email, district,
+ *              testCatalog, operatingHours
+ *    Enums:    labType ∈ {independent | hospital_based | clinic_based | specialized}
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
 const mongoose = require('mongoose');
 const { Laboratory, LabTechnician, AuditLog } = require('../models');
 
-// ── Syrian geographic bounds ────────────────────────────────────────────────
-const SYRIA_LNG_MIN = 35.5;
-const SYRIA_LNG_MAX = 42.5;
-const SYRIA_LAT_MIN = 32.0;
-const SYRIA_LAT_MAX = 37.5;
-
 // ============================================================================
-// HELPERS
+// HELPER — Extract IP address
 // ============================================================================
 
 function getClientIp(req) {
   const forwarded = req.headers['x-forwarded-for'];
   if (forwarded) return forwarded.split(',')[0].trim();
   return req.ip || req.connection?.remoteAddress || 'unknown';
-}
-
-/**
- * Normalize location input to GeoJSON Point format.
- * Accepts: {latitude,longitude} | {lat,lng} | {type:'Point',coordinates:[lng,lat]} | [lng,lat]
- */
-function normalizeLocation(input) {
-  if (!input) return null;
-
-  let lng;
-  let lat;
-
-  if (Array.isArray(input) && input.length === 2) {
-    [lng, lat] = input;
-  } else if (input.type === 'Point' && Array.isArray(input.coordinates)) {
-    [lng, lat] = input.coordinates;
-  } else if (typeof input.longitude === 'number' && typeof input.latitude === 'number') {
-    lng = input.longitude;
-    lat = input.latitude;
-  } else if (typeof input.lng === 'number' && typeof input.lat === 'number') {
-    lng = input.lng;
-    lat = input.lat;
-  } else {
-    return null;
-  }
-
-  if (typeof lng !== 'number' || typeof lat !== 'number') return null;
-  if (Number.isNaN(lng) || Number.isNaN(lat)) return null;
-
-  // Syria bounds
-  if (lng < SYRIA_LNG_MIN || lng > SYRIA_LNG_MAX) return null;
-  if (lat < SYRIA_LAT_MIN || lat > SYRIA_LAT_MAX) return null;
-
-  return {
-    type: 'Point',
-    coordinates: [Number(lng), Number(lat)],
-  };
 }
 
 // ============================================================================
@@ -85,12 +65,13 @@ function normalizeLocation(input) {
  *
  * Query params:
  *   - page, limit
- *   - search          (across name, arabicName, registrationNumber, license)
- *   - laboratoryType  (clinical | radiology | pathology | molecular | comprehensive)
+ *   - search          (across name, arabicName, registrationNumber, labLicense)
+ *   - labType         (independent | hospital_based | clinic_based | specialized)
  *   - governorate
- *   - isActive
- *   - hasHomeService, hasEmergencyService  (boolean)
+ *   - isActive, isAcceptingTests
  *   - sortBy, sortOrder
+ *
+ * Backward compatibility: accepts `laboratoryType` query param as alias for `labType`.
  */
 exports.getAllLaboratories = async (req, res) => {
   try {
@@ -98,11 +79,11 @@ exports.getAllLaboratories = async (req, res) => {
       page = 1,
       limit = 50,
       search,
-      laboratoryType,
+      labType,
+      laboratoryType, // legacy alias — accepted but mapped to labType
       governorate,
       isActive,
-      hasHomeService,
-      hasEmergencyService,
+      isAcceptingTests,
       sortBy = 'createdAt',
       sortOrder = 'desc',
     } = req.query;
@@ -110,11 +91,13 @@ exports.getAllLaboratories = async (req, res) => {
     // ── Build query ─────────────────────────────────────────────────────
     const query = {};
 
-    if (isActive !== undefined)            query.isActive            = isActive            === 'true';
-    if (laboratoryType)                    query.laboratoryType      = laboratoryType;
-    if (governorate)                       query.governorate         = governorate;
-    if (hasHomeService !== undefined)      query.hasHomeService      = hasHomeService      === 'true';
-    if (hasEmergencyService !== undefined) query.hasEmergencyService = hasEmergencyService === 'true';
+    if (isActive !== undefined)         query.isActive         = isActive         === 'true';
+    if (isAcceptingTests !== undefined) query.isAcceptingTests = isAcceptingTests === 'true';
+
+    const effectiveLabType = labType || laboratoryType;
+    if (effectiveLabType) query.labType = effectiveLabType;
+
+    if (governorate) query.governorate = governorate;
 
     if (search) {
       const searchRegex = { $regex: search, $options: 'i' };
@@ -122,7 +105,7 @@ exports.getAllLaboratories = async (req, res) => {
         { name:               searchRegex },
         { arabicName:         searchRegex },
         { registrationNumber: searchRegex },
-        { laboratoryLicense:  searchRegex },
+        { labLicense:         searchRegex },
         { city:               searchRegex },
         { district:           searchRegex },
         { phoneNumber:        searchRegex },
@@ -151,12 +134,6 @@ exports.getAllLaboratories = async (req, res) => {
           ...lab,
           technicianCount,
           testCatalogSize: (lab.testCatalog || []).length,
-          coordinates: lab.location?.coordinates
-            ? {
-                longitude: lab.location.coordinates[0],
-                latitude:  lab.location.coordinates[1],
-              }
-            : null,
         };
       }),
     );
@@ -184,51 +161,7 @@ exports.getAllLaboratories = async (req, res) => {
 };
 
 // ============================================================================
-// 2. FIND NEARBY LABORATORIES
-// ============================================================================
-
-exports.findNearbyLaboratories = async (req, res) => {
-  try {
-    const { lng, lat, radius = 5000 } = req.query;
-
-    const longitude = parseFloat(lng);
-    const latitude  = parseFloat(lat);
-    const maxDist   = parseInt(radius, 10);
-
-    if (Number.isNaN(longitude) || Number.isNaN(latitude)) {
-      return res.status(400).json({
-        success: false,
-        message: 'الإحداثيات (lng, lat) مطلوبة وصحيحة',
-      });
-    }
-
-    const labs = await Laboratory.find({
-      isActive: true,
-      location: {
-        $near: {
-          $geometry: { type: 'Point', coordinates: [longitude, latitude] },
-          $maxDistance: maxDist,
-        },
-      },
-    }).lean();
-
-    return res.status(200).json({
-      success: true,
-      count: labs.length,
-      laboratories: labs,
-    });
-  } catch (error) {
-    console.error('❌ findNearbyLaboratories error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'حدث خطأ أثناء البحث عن المختبرات القريبة',
-      error: error.message,
-    });
-  }
-};
-
-// ============================================================================
-// 3. GET LABORATORY BY ID
+// 2. GET LABORATORY BY ID
 // ============================================================================
 
 exports.getLaboratoryById = async (req, res) => {
@@ -251,7 +184,7 @@ exports.getLaboratoryById = async (req, res) => {
 
     const technicians = await LabTechnician.find({ laboratoryId: lab._id })
       .populate('personId', 'firstName lastName phoneNumber')
-      .select('personId labTechLicenseNumber specialization yearsOfExperience isAvailable')
+      .select('personId licenseNumber specialization yearsOfExperience isAvailable')
       .lean();
 
     return res.status(200).json({
@@ -261,12 +194,6 @@ exports.getLaboratoryById = async (req, res) => {
         technicianCount: technicians.length,
         technicians,
         testCatalogSize: (lab.testCatalog || []).length,
-        coordinates: lab.location?.coordinates
-          ? {
-              longitude: lab.location.coordinates[0],
-              latitude:  lab.location.coordinates[1],
-            }
-          : null,
       },
     });
   } catch (error) {
@@ -280,39 +207,32 @@ exports.getLaboratoryById = async (req, res) => {
 };
 
 // ============================================================================
-// 4. CREATE LABORATORY
+// 3. CREATE LABORATORY
 // ============================================================================
 
 exports.createLaboratory = async (req, res) => {
   try {
     const {
-      name, arabicName, registrationNumber, laboratoryLicense, laboratoryType,
-      phoneNumber, email, website,
+      name, arabicName, registrationNumber,
+      labLicense, labType,
+      // Legacy aliases — accepted for backward compatibility:
+      laboratoryLicense, laboratoryType,
+      phoneNumber, email,
       governorate, city, district, address,
-      location, latitude, longitude,
       operatingHours,
-      hasHomeService, homeServiceFee,
-      hasEmergencyService, emergencyContactPhone,
-      testCatalog, specializations, accreditations, equipmentList,
+      testCatalog,
     } = req.body;
 
+    // ── Resolve aliases ─────────────────────────────────────────────────
+    const effectiveLabLicense = labLicense || laboratoryLicense;
+    const effectiveLabType    = labType    || laboratoryType;
+
     // ── Validation ──────────────────────────────────────────────────────
-    if (!name || !registrationNumber || !laboratoryLicense || !phoneNumber
+    if (!name || !registrationNumber || !phoneNumber
         || !governorate || !city || !address) {
       return res.status(400).json({
         success: false,
-        message: 'الحقول المطلوبة: name, registrationNumber, laboratoryLicense, phoneNumber, governorate, city, address',
-      });
-    }
-
-    // ── Normalize location ──────────────────────────────────────────────
-    const locationInput = location || { latitude, longitude };
-    const normalizedLocation = normalizeLocation(locationInput);
-
-    if (!normalizedLocation) {
-      return res.status(400).json({
-        success: false,
-        message: 'الإحداثيات الجغرافية مطلوبة ويجب أن تكون داخل سوريا (lng 35.5-42.5, lat 32.0-37.5)',
+        message: 'الحقول المطلوبة: name, registrationNumber, phoneNumber, governorate, city, address',
       });
     }
 
@@ -325,31 +245,23 @@ exports.createLaboratory = async (req, res) => {
       });
     }
 
-    const existingByLicense = await Laboratory.findOne({ laboratoryLicense });
-    if (existingByLicense) {
-      return res.status(400).json({
-        success: false,
-        message: 'يوجد مختبر مسجّل بنفس رقم الترخيص',
-      });
-    }
-
     // ── Create laboratory ───────────────────────────────────────────────
     const laboratory = await Laboratory.create({
-      name, arabicName, registrationNumber, laboratoryLicense,
-      laboratoryType: laboratoryType || 'clinical',
-      phoneNumber, email, website,
-      governorate, city, district, address,
-      location: normalizedLocation,
-      operatingHours:      operatingHours || [],
-      hasHomeService:      hasHomeService      || false,
-      homeServiceFee:      homeServiceFee      || 0,
-      hasEmergencyService: hasEmergencyService || false,
-      emergencyContactPhone,
-      testCatalog:     testCatalog     || [],
-      specializations: specializations || [],
-      accreditations:  accreditations  || [],
-      equipmentList:   equipmentList   || [],
+      name,
+      arabicName,
+      registrationNumber,
+      labLicense: effectiveLabLicense,
+      labType: effectiveLabType || 'independent',
+      phoneNumber,
+      email,
+      governorate,
+      city,
+      district,
+      address,
+      operatingHours: operatingHours || [],
+      testCatalog:    testCatalog    || [],
       isActive: true,
+      isAcceptingTests: true,
       averageRating: 0,
       totalReviews:  0,
     });
@@ -367,8 +279,10 @@ exports.createLaboratory = async (req, res) => {
       platform: 'web',
       success: true,
       metadata: {
-        laboratoryType: laboratory.laboratoryType,
-        coordinates:    laboratory.location.coordinates,
+        labType: laboratory.labType,
+        governorate: laboratory.governorate,
+        city: laboratory.city,
+        testCatalogSize: (laboratory.testCatalog || []).length,
       },
     });
 
@@ -388,7 +302,7 @@ exports.createLaboratory = async (req, res) => {
 };
 
 // ============================================================================
-// 5. UPDATE LABORATORY
+// 4. UPDATE LABORATORY
 // ============================================================================
 
 exports.updateLaboratory = async (req, res) => {
@@ -401,29 +315,26 @@ exports.updateLaboratory = async (req, res) => {
       });
     }
 
-    const blocked = ['_id', 'registrationNumber', 'laboratoryLicense', 'createdAt', 'updatedAt'];
+    // Block fields that should never be updated via this endpoint.
+    // v2.1: `location`, `latitude`, `longitude` blocked since GPS was removed.
+    const blocked = [
+      '_id', 'registrationNumber',
+      'location', 'latitude', 'longitude',
+      'createdAt', 'updatedAt',
+    ];
     const updates = { ...req.body };
     blocked.forEach((field) => delete updates[field]);
 
-    // ── Handle location update ──────────────────────────────────────────
-    if (updates.location || (updates.latitude !== undefined && updates.longitude !== undefined)) {
-      const locationInput = updates.location || {
-        latitude:  updates.latitude,
-        longitude: updates.longitude,
-      };
-      const normalizedLocation = normalizeLocation(locationInput);
-
-      if (!normalizedLocation) {
-        return res.status(400).json({
-          success: false,
-          message: 'الإحداثيات الجغرافية غير صالحة',
-        });
-      }
-
-      updates.location = normalizedLocation;
-      delete updates.latitude;
-      delete updates.longitude;
+    // Translate legacy aliases to the model's actual field names.
+    if (updates.laboratoryLicense !== undefined && updates.labLicense === undefined) {
+      updates.labLicense = updates.laboratoryLicense;
     }
+    delete updates.laboratoryLicense;
+
+    if (updates.laboratoryType !== undefined && updates.labType === undefined) {
+      updates.labType = updates.laboratoryType;
+    }
+    delete updates.laboratoryType;
 
     const laboratory = await Laboratory.findByIdAndUpdate(
       id,
@@ -469,7 +380,7 @@ exports.updateLaboratory = async (req, res) => {
 };
 
 // ============================================================================
-// 6. ACTIVATE / DEACTIVATE LABORATORY
+// 5. ACTIVATE / DEACTIVATE LABORATORY
 // ============================================================================
 
 exports.activateLaboratory = async (req, res) => {
@@ -481,7 +392,7 @@ exports.activateLaboratory = async (req, res) => {
 
     const lab = await Laboratory.findByIdAndUpdate(
       id,
-      { $set: { isActive: true } },
+      { $set: { isActive: true, isAcceptingTests: true } },
       { new: true },
     );
 
@@ -529,7 +440,7 @@ exports.deactivateLaboratory = async (req, res) => {
 
     const lab = await Laboratory.findByIdAndUpdate(
       id,
-      { $set: { isActive: false } },
+      { $set: { isActive: false, isAcceptingTests: false } },
       { new: true },
     );
 
