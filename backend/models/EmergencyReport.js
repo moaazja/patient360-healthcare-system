@@ -27,6 +27,15 @@
  *  Privacy note: voice notes and images of injuries are sensitive PHI
  *  (Protected Health Information). Storage URLs should point to encrypted
  *  buckets with strict access controls and audit logging on every read.
+ *
+ *  Patient reference (v2 — XOR pattern, matches Visit.js / LabTest.js):
+ *    • patientPersonId   — adult patient (refs Person)        — sparse, optional
+ *    • patientChildId    — child patient  (refs Children)     — sparse, optional
+ *    A pre-validate hook enforces that at least one is present. This supports
+ *    three real-world scenarios that the production data exhibits:
+ *      (a) Adult patient self-reports          → patientPersonId only
+ *      (b) Minor with own Account self-reports → patientChildId  only
+ *      (c) Parent reports on behalf of child   → both IDs present
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -82,18 +91,22 @@ const GeoJSONPointSchema = new Schema(
 
 const EmergencyReportSchema = new Schema(
   {
-    // ── Patient (XOR — at least adult patientPersonId is typical) ─────────
+    // ── Patient (XOR — adult patientPersonId OR child patientChildId) ─────
+    // Note: either an adult (Person) reports for themselves, OR a parent
+    // reports on behalf of a child, OR a minor with a direct Account reports
+    // for themselves. The pre-validate hook below enforces that at least one
+    // of these IDs is present. Pattern matches Visit.js and LabTest.js.
     patientPersonId: {
       type: Schema.Types.ObjectId,
       ref: 'Person',
-      required: [true, 'معرّف المريض مطلوب'],
+      sparse: true,
       index: true,
     },
     patientChildId: {
       type: Schema.Types.ObjectId,
       ref: 'Children',
       sparse: true,
-      // Set when a parent reports an emergency on behalf of their child
+      index: true,
     },
 
     reportedAt: { type: Date, default: Date.now, required: true },
@@ -166,6 +179,29 @@ EmergencyReportSchema.index({ reportedAt: -1 }, { name: 'idx_date_desc' });
 
 // 2dsphere — REQUIRED for ambulance routing and hotspot mapping
 EmergencyReportSchema.index({ location: '2dsphere' }, { name: 'idx_location_geo' });
+
+// ── Pre-validate: at least one patient reference must be present ───────────
+// Matches the XOR pattern used in Visit.js and LabTest.js: an emergency
+// report must belong to either an adult (patientPersonId) or a child
+// (patientChildId). Both being absent is invalid; both being present is
+// allowed (parent reporting on behalf of their child).
+
+EmergencyReportSchema.pre('validate', function ensurePatientRef(next) {
+  const hasPerson = !!this.patientPersonId;
+  const hasChild  = !!this.patientChildId;
+  if (!hasPerson && !hasChild) {
+    const err = new mongoose.Error.ValidationError(this);
+    err.addError(
+      'patientPersonId',
+      new mongoose.Error.ValidatorError({
+        message: 'يجب تحديد المريض (شخص بالغ أو طفل)',
+        path: 'patientPersonId',
+      }),
+    );
+    return next(err);
+  }
+  return next();
+});
 
 // ── Pre-validate: input must contain at least one description method ───────
 

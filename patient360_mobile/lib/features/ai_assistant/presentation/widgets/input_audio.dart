@@ -124,10 +124,30 @@ class _InputAudioState extends State<InputAudio> {
       final String filePath = '${dir.path}/$fileName';
 
       // 16 kHz mono PCM WAV matches Redwan's FastAPI input shape exactly.
+      //
+      // ─── Audio filter flags (CRITICAL for Android emulator path) ────────
+      // The `record` package defaults all three to FALSE. On real hardware
+      // this is fine, but on the Android emulator the host PC microphone
+      // signal arrives via the QEMU audio HAL with low gain, ambient
+      // noise, and routing-induced echo — Whisper transcription then
+      // hallucinates ("اشتركوا في القناة" pattern, observed 2026-05-16
+      // AND 2026-05-29) and AraBERT classifies the bogus text as
+      // out_of_scope. Enabling these filters is the Flutter Sound cookbook
+      // recommendation for any speech-to-text pipeline.
+      //   autoGain      — normalises capture volume to a usable range
+      //   echoCancel    — removes echo introduced by the emulator audio
+      //                   routing layer
+      //   noiseSuppress — strips the steady background hiss from the
+      //                   host PC microphone
+      // All three are no-ops or near-no-ops on real Android devices, so
+      // shipping them does not hurt production builds.
       const RecordConfig config = RecordConfig(
         encoder: AudioEncoder.wav,
         sampleRate: 16000,
         numChannels: 1,
+        autoGain: true,
+        echoCancel: true,
+        noiseSuppress: true,
       );
 
       await _recorder.start(config, path: filePath);
