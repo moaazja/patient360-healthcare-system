@@ -11,6 +11,7 @@ import '../features/auth/presentation/providers/auth_provider.dart';
 import '../features/home/presentation/home_screen.dart';
 import '../features/prescriptions/domain/prescription.dart';
 import '../features/prescriptions/presentation/prescription_detail_screen.dart';
+import '../features/splash/presentation/splash_screen.dart';
 import '../features/visits/domain/visit.dart';
 import '../features/visits/presentation/visit_detail_screen.dart';
 import '../features/lab_results/domain/lab_test.dart';
@@ -37,7 +38,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
   ref.onDispose(refreshListenable.dispose);
 
   return GoRouter(
-    initialLocation: RouteNames.home,
+    // Boot order:
+    //   1) /splash  — branded splash for ~1.6s (no auth checks)
+    //   2) /splash signals onComplete → navigates to /home
+    //   3) redirect callback then sends user to /login if no session,
+    //      otherwise lets them land on /home
+    initialLocation: '/splash',
     refreshListenable: refreshListenable,
     redirect: (BuildContext context, GoRouterState state) {
       final AsyncValue<AuthSession?> authState = ref.read(
@@ -47,12 +53,24 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((Ref ref) {
 
       final bool loggedIn = authState.value != null;
       final bool goingToLogin = state.matchedLocation == RouteNames.login;
+      final bool goingToSplash = state.matchedLocation == '/splash';
+
+      // The splash is a standalone intro screen; never redirect away from
+      // it — it self-navigates to /home when its hold timer finishes, and
+      // the redirect logic below kicks in on that next route.
+      if (goingToSplash) return null;
 
       if (!loggedIn && !goingToLogin) return RouteNames.login;
       if (loggedIn && goingToLogin) return RouteNames.home;
       return null;
     },
     routes: <RouteBase>[
+      // ─── Splash (standalone, no shell, no auth) ──────────────────────
+      GoRoute(
+        path: '/splash',
+        builder: (BuildContext context, GoRouterState state) =>
+            SplashScreen(onComplete: () => context.go(RouteNames.home)),
+      ),
       GoRoute(
         path: RouteNames.login,
         builder: (BuildContext context, GoRouterState state) =>

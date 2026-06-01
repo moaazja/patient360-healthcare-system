@@ -36,6 +36,14 @@
  *      (a) Adult patient self-reports          → patientPersonId only
  *      (b) Minor with own Account self-reports → patientChildId  only
  *      (c) Parent reports on behalf of child   → both IDs present
+ *
+ *  Geo-fence (v2):
+ *    The country-bounds check on `location.coordinates` is gated by the
+ *    same ENFORCE_GEO_FENCE env var respected by emergencyController.
+ *    Default = enforce. Set ENFORCE_GEO_FENCE=false in .env to disable
+ *    for local development / academic review (browser GPS unreliable when
+ *    the ISP egresses through a foreign data center). Structural checks
+ *    (array shape, numeric type) are always enforced.
  * ═══════════════════════════════════════════════════════════════════════════
  */
 
@@ -72,9 +80,18 @@ const GeoJSONPointSchema = new Schema(
       required: true,
       validate: {
         validator(coords) {
+          // Always enforce structural integrity (shape + numeric type).
           if (!Array.isArray(coords) || coords.length !== 2) return false;
           const [lng, lat] = coords;
           if (typeof lng !== 'number' || typeof lat !== 'number') return false;
+          // The strict country-bounds check is gated by ENFORCE_GEO_FENCE.
+          // Defaults to enforcing the fence; explicit "false" disables
+          // ONLY this boundary check (the structural checks above are
+          // always enforced). See validateSyriaLocation in
+          // emergencyController for the equivalent controller-level gate.
+          const enforceGeoFence =
+            (process.env.ENFORCE_GEO_FENCE || 'true').toLowerCase() !== 'false';
+          if (!enforceGeoFence) return true;
           return (
             lng >= SYRIA_LNG_MIN && lng <= SYRIA_LNG_MAX
             && lat >= SYRIA_LAT_MIN && lat <= SYRIA_LAT_MAX

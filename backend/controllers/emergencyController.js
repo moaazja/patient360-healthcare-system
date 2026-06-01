@@ -407,6 +407,23 @@ function getPatientRefFromAccount(account) {
 /**
  * Validate GeoJSON location is Syria-bounded.
  * Syria roughly: lng 35.5–42.5, lat 32.0–37.5
+ *
+ * The strict country-boundary check is gated by ENFORCE_GEO_FENCE.
+ * Defaults to enforcing the fence; explicitly setting the env var to
+ * "false" disables ONLY the country check (structural validation of the
+ * GeoJSON shape is always enforced).
+ *
+ * Why this gate exists:
+ *   • Browser `navigator.geolocation` falls back to IP-based lookups when
+ *     real GPS isn't available, returning the ISP/CDN egress city —
+ *     not the user's actual position. Many Syrian ISPs egress through
+ *     European data centers (e.g. Rotterdam, Amsterdam), so developers
+ *     and reviewers inside Syria can still get false negatives.
+ *   • Mobile clients (Flutter) call a different transport with real GPS
+ *     coordinates, so the production geofence still protects the system.
+ *   • Academic reviewers may need to test from outside Syria.
+ *
+ * In production deployments, ENFORCE_GEO_FENCE must be "true" (default).
  */
 function validateSyriaLocation(location) {
   if (!location || location.type !== 'Point' || !Array.isArray(location.coordinates)) {
@@ -416,7 +433,12 @@ function validateSyriaLocation(location) {
   if (typeof lng !== 'number' || typeof lat !== 'number') {
     return 'إحداثيات الموقع غير صالحة';
   }
-  if (lng < 35.5 || lng > 42.5 || lat < 32.0 || lat > 37.5) {
+  const enforceGeoFence =
+    (process.env.ENFORCE_GEO_FENCE || 'true').toLowerCase() !== 'false';
+  if (
+    enforceGeoFence &&
+    (lng < 35.5 || lng > 42.5 || lat < 32.0 || lat > 37.5)
+  ) {
     return 'الموقع خارج حدود سوريا';
   }
   return null;

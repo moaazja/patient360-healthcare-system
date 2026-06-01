@@ -70,3 +70,30 @@ flutter:
     - .env
     - assets/images/
     - assets/translations/
+    - assets/branding/
+
+# ═══════════════════════════════════════════════════════════════════
+# flutter_launcher_icons configuration
+# -----------------------------------------------------------------
+# Generates Android launcher icons (and adaptive icons for API 26+)
+# from a single high-resolution source PNG.
+#
+# To regenerate the icons after changing app_icon.png, run:
+#   flutter pub get
+#   dart run flutter_launcher_icons
+#
+# The package writes the generated PNGs to:
+#   android/app/src/main/res/mipmap-*/ic_launcher.png
+#   android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+# ═══════════════════════════════════════════════════════════════════
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/branding/app_icon.png"
+
+  # Adaptive icon (Android 8.0+) — the system clips the foreground into
+  # whatever mask the launcher uses (circle, squircle, teardrop, etc.)
+  # so it looks native on every device.
+  adaptive_icon_background: "#0D3B3E"
+  adaptive_icon_foreground: "assets/branding/app_icon.png"
+  min_sdk_android: 21

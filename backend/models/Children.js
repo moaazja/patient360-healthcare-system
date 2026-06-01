@@ -6,7 +6,18 @@
  *  Source of truth: patient360_db_final.js (collection 02)
  *
  *  Children under 14 who do not yet have a Syrian national ID.
- *  Identified by `childRegistrationNumber` in the format CRN-YYYYMMDD-XXXXX.
+ *
+ *  Two valid `childRegistrationNumber` formats are accepted:
+ *    • v2.3 (Muath's spec, current):  {parentNationalId}-NN
+ *        e.g. 01222333444-02  ← second child of parent 01222333444
+ *        Generated inline by authController.signup() using a per-parent
+ *        sequence so each child's ID is human-readable and traceable to
+ *        their guardian.
+ *    • Legacy (pre-v2.3):             CRN-YYYYMMDD-XXXXX
+ *        e.g. CRN-20260525-00008
+ *        Generated atomically by the `generateRegistrationNumber` static
+ *        below (kept for backward-compat with existing rows and the
+ *        seedCounters.js seed file).
  *
  *  Migration lifecycle (3 states tracked by `migrationStatus`):
  *    1. pending   → child is under 14, has no nationalId yet
@@ -48,6 +59,16 @@ const MIGRATION_STATUSES = ['pending', 'ready', 'migrated'];
 
 const GENDERS = ['male', 'female'];
 
+// ── CRN format regex (single source of truth) ───────────────────────────────
+//
+// Accepts either format documented in the header:
+//   • v2.3:   ^\d{11}-\d{2}$        →  01222333444-02
+//   • legacy: ^CRN-\d{8}-\d{5}$     →  CRN-20260525-00008
+//
+// Exported as a constant so we can reuse it in tests and admin tooling
+// without rewriting the pattern.
+const CRN_FORMAT_REGEX = /^(\d{11}-\d{2}|CRN-\d{8}-\d{5})$/;
+
 // ── Sub-schemas ─────────────────────────────────────────────────────────────
 
 const ProfilePhotoSchema = new Schema(
@@ -68,10 +89,11 @@ const ChildrenSchema = new Schema(
       required: [true, 'رقم تسجيل الطفل مطلوب'],
       unique: true,
       trim: true,
-      // Format: CRN-YYYYMMDD-XXXXX (5-digit sequence)
+      // Accepts both v2.3 ({parentNationalId}-NN) and legacy (CRN-YYYYMMDD-XXXXX).
+      // See CRN_FORMAT_REGEX above for the canonical definition.
       match: [
-        /^CRN-\d{8}-\d{5}$/,
-        'تنسيق رقم تسجيل الطفل غير صحيح (CRN-YYYYMMDD-XXXXX)',
+        CRN_FORMAT_REGEX,
+        'تنسيق رقم تسجيل الطفل غير صحيح (يجب أن يكون: {الرقم الوطني للوالد}-XX أو CRN-YYYYMMDD-XXXXX)',
       ],
     },
     birthCertificateNumber: {
@@ -287,8 +309,16 @@ ChildrenSchema.pre('save', function autoSetMigrationStatus(next) {
 // ── Static helpers ──────────────────────────────────────────────────────────
 
 /**
- * Generate the next available childRegistrationNumber for today.
- * Format: CRN-YYYYMMDD-XXXXX (5-digit zero-padded daily counter)
+ * Generate a CRN in the LEGACY format: CRN-YYYYMMDD-XXXXX
+ * (5-digit zero-padded daily counter)
+ *
+ *  ⚠️  NOTE — v2.3+ child registrations DO NOT call this helper.
+ *  The canonical v2.3 format ({parentNationalId}-NN) is generated inline
+ *  by authController.signup() because the sequence is per-parent, not
+ *  per-day. This helper is preserved for:
+ *    • Backward compatibility with rows already in the DB
+ *    • The seedCounters.js migration script
+ *    • Admin tooling that may still mint legacy IDs (e.g. bulk imports)
  *
  * Concurrency-safe by design:
  *   Uses the `counters` collection with MongoDB's atomic `findOneAndUpdate`
@@ -318,6 +348,16 @@ ChildrenSchema.statics.generateRegistrationNumber = async function generateRegis
   const sequence = String(seq).padStart(5, '0');
   return `CRN-${datePart}-${sequence}`;
 };
+
+/**
+ * Export the CRN format regex as a static so callers (controllers,
+ * routes, validators) can validate strings against the same source
+ * of truth without re-declaring the pattern.
+ *
+ * @example
+ *   if (!Children.CRN_FORMAT_REGEX.test(input)) { ... }
+ */
+ChildrenSchema.statics.CRN_FORMAT_REGEX = CRN_FORMAT_REGEX;
 
 // ── Query helpers ───────────────────────────────────────────────────────────
 
